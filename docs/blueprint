@@ -1,0 +1,314 @@
+# Hybrid Marketplace Mobile Application
+## System Blueprint
+
+---
+
+# 1. Project Overview
+
+The Hybrid Marketplace Mobile Application is a peer-to-peer mobile platform that enables users to either sell second-hand items or exchange them with other users. The application aims to provide a flexible marketplace where users can choose between selling items for money or trading them with other items.
+
+The platform addresses the issue of unused household items by allowing users to easily redistribute them within the community. By supporting both selling and item exchange, the system improves transaction flexibility and encourages product reuse.
+
+The mobile application is developed using **Flutter**, while the backend server manages business logic and communicates with a **MySQL database**.
+
+---
+
+# 2. System Objectives
+
+- Provide a platform for users to sell or exchange second-hand items
+- Increase transaction flexibility through hybrid selling and trading
+- Encourage reuse of items and reduce waste
+- Provide structured transaction management between users
+- Enable communication between users through messaging and support services
+
+---
+
+# 3. Core System Modules
+
+## 3.1 User Profile Module
+
+The User Profile Module manages user accounts and personal information while also providing features that improve item discovery.
+
+### Features
+
+- User registration and login
+- Profile information management
+- View user posted items
+- View user transaction history
+- Item discovery through swipe-based browsing
+
+### Swiping Item Feature
+
+To improve item discovery, the system provides a swipe-based browsing interface where users can quickly explore items.
+
+Users can:
+- Swipe right to show interest in an item
+- Swipe left to skip the item
+- View the next item card instantly
+
+This interaction allows users to browse many items efficiently and provides a more engaging experience compared to traditional scrolling.
+
+### Main Functions
+
+- Create user account
+- Retrieve user profile data
+- Update profile information
+- Delete account
+- Record user item interactions
+
+---
+
+## 3.2 Item Listing Module
+
+The Item Listing Module allows users to create and manage item listings in the marketplace.
+
+### Features
+
+- Create new item listing
+- Upload item images
+- Add item description and category
+- Select listing type (Sell / Trade / Both)
+- Edit or delete listings
+- Browse and view item details
+
+### Main Functions
+
+- Create item listing
+- Retrieve item listings
+- Update listing details
+- Delete listing
+
+---
+
+## 3.3 Transaction Request Module
+
+The Transaction Request Module manages the process of sending and managing purchase or trade requests between users.
+
+Instead of separating purchase and trade systems, the application uses a unified transaction request model.
+
+### Features
+
+- Send purchase request
+- Send trade request
+- Accept or reject requests
+- View incoming transaction requests
+- View outgoing transaction requests
+- Track request status (Pending, Accepted, Rejected)
+
+### Main Functions
+
+- Create transaction request
+- Retrieve transaction requests
+- Update transaction request status
+- Cancel transaction request
+
+---
+
+## 3.4 Messaging Module
+
+The Messaging Module allows users to communicate directly with each other and also provides automated assistance through an AI chatbot.
+
+### Features
+
+- Private messaging between users
+- Chat history storage
+- Conversation list
+- Item-related discussions
+- AI-powered customer service chatbot
+
+### AI Chatbox Customer Service
+
+The system integrates an AI chatbot within the messaging module to assist users with common questions and provide platform guidance.
+
+The AI chatbot can help users with:
+
+- Posting items
+- Sending transaction requests
+- Understanding trading procedures
+- Navigating application features
+
+This provides immediate support to users without requiring manual customer service assistance.
+
+### Main Functions
+
+- Create chat session
+- Send and receive messages
+- Retrieve message history
+- Provide automated AI assistance
+
+---
+
+# 4. System Architecture
+
+The system adopts a **Client–Server Architecture** combined with the **MVVM design pattern** within the mobile application.
+
+---
+
+## 4.1 System-Level Architecture (3-Tier Architecture)
+
+The overall system structure consists of three layers:
+
+### Presentation Layer
+- Flutter mobile application
+- Handles user interface and interaction
+
+### Application Layer
+- Backend server
+- Handles business logic, API processing, and system operations
+
+### Data Layer
+- MySQL database
+- Stores system data such as users, items, transactions, and messages
+
+Architecture flow:
+
+Mobile Application (Flutter)  
+→ Backend API Server  
+→ MySQL Database
+
+---
+
+## 4.2 Mobile Application Architecture (MVVM Pattern)
+
+Inside the Flutter mobile application, the system follows the **Model–View–ViewModel (MVVM)** architecture.
+
+### Model
+
+Represents the application's data structures.
+
+Examples:
+- User
+- Item
+- TransactionRequest
+- Chat
+- Message
+
+---
+
+### View
+
+Represents the UI layer built using Flutter widgets.
+
+Examples:
+- Home page
+- Explore page
+- Sell item page
+- Chat interface
+- Profile page
+
+The View is responsible for displaying data and receiving user input.
+
+---
+
+### ViewModel
+
+The ViewModel manages application logic and UI state.
+
+Responsibilities include:
+
+- Handling user actions
+- Fetching data from the backend API
+- Updating application state
+- Managing interaction between View and Model
+
+State management is implemented using the **Provider library**, which allows the UI to listen to ViewModel changes and automatically update when data is modified.
+
+---
+
+# 5. Technology Stack
+
+## Mobile Application
+- Flutter
+- Dart
+- Provider (State Management)
+
+## Backend Server
+- Node.js + Express (recommended)
+
+## Database
+- MySQL
+
+## Communication
+- REST API for general operations
+- WebSocket / Socket.IO (for real-time messaging)
+
+---
+
+# 6. Core Data Entities
+
+The main database entities include:
+
+- Users
+- Items
+- TransactionRequests
+- Chats
+- Messages
+
+### Example Relationships
+
+User → creates → Item  
+User → sends → TransactionRequest  
+User → communicates via → Chat  
+
+---
+
+# 7. Expected Impact
+
+The application promotes responsible consumption by allowing users to redistribute unused items through selling or trading. By supporting flexible transactions and direct communication, the platform improves marketplace efficiency while encouraging reuse and reducing waste.
+
+---
+
+# 8. Project Folder Structure (MVVM)
+
+The Flutter mobile application follows the MVVM pattern with Provider for state management.
+
+```
+lib/
+├── main.dart                          # App entry point
+│
+├── core/                              # Shared app-wide resources
+│   ├── constants/                     # Colors, strings, route names, etc.
+│   ├── theme/                         # App theme (light/dark)
+│   └── utils/                         # Helper functions / extensions
+│
+├── models/                            # Data models (pure Dart classes)
+│   │   User, Item, TransactionRequest, Chat, Message
+│
+├── views/                             # UI layer
+│   ├── screens/                       # Full-page screens grouped by module
+│   │   ├── auth/                      # Login, Register screens
+│   │   ├── home/                      # Home / feed screen
+│   │   ├── explore/                   # Swipe-based item browsing
+│   │   ├── item/                      # Item detail, create & edit listing
+│   │   ├── profile/                   # User profile & history
+│   │   ├── transaction/               # Transaction requests (in/out)
+│   │   └── chat/                      # Messaging & AI chatbot
+│   └── widgets/
+│       └── common/                    # Reusable shared widgets
+│
+├── viewmodels/                        # Business logic & state (Provider)
+│   │   AuthViewModel, ItemViewModel,
+│   │   TransactionViewModel, ChatViewModel
+│
+├── repositories/                      # Data access layer
+│   │   Bridges ViewModels ↔ Services
+│   │   UserRepository, ItemRepository,
+│   │   TransactionRepository, ChatRepository
+│
+├── services/                          # External communication
+│   │   REST API calls, WebSocket/Socket.IO,
+│   │   ApiService, AuthService, SocketService
+│
+└── routes/                            # Named route definitions / app router
+```
+
+## Layer Responsibilities
+
+| Layer | Folder | Responsibility |
+|---|---|---|
+| Model | `models/` | Data structures only, no logic |
+| View | `views/` | Flutter widgets, UI rendering |
+| ViewModel | `viewmodels/` | State management via Provider |
+| Repository | `repositories/` | Fetches/caches data from services |
+| Service | `services/` | HTTP / WebSocket calls to backend |
+| Core | `core/` | Shared constants, theme, utilities |
