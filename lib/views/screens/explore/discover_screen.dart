@@ -1,8 +1,9 @@
 import 'dart:math';
 import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
+
+import 'item_detail_screen.dart';
 
 class DiscoverScreen extends StatelessWidget {
   const DiscoverScreen({super.key});
@@ -168,7 +169,7 @@ class _NestedTabBarState extends State<NestedTabBar>
                   childAspectRatio: 0.75,
                 ),
                 itemBuilder: (context, index) {
-                  return const ProductCard();
+                  return const ItemCard();
                 },
               )
             ],
@@ -179,146 +180,109 @@ class _NestedTabBarState extends State<NestedTabBar>
   }
 }
 
-class GlitchImage extends StatelessWidget {
-  final ui.Image image;
-
-  const GlitchImage({required this.image});
+class ItemCard extends StatelessWidget {
+  const ItemCard({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(image.width.toDouble(), image.height.toDouble()),
-      painter: GlitchPainter(image),
-    );
-  }
-}
-
-class GlitchPainter extends CustomPainter {
-  final ui.Image image;
-
-  GlitchPainter(this.image);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint();
-    final random = Random();
-
-    const sliceHeight = 10.0;
-
-    for (double y = 0; y < size.height; y += sliceHeight) {
-      final dx = random.nextInt(40) - 20; // shift left/right
-
-      final src = Rect.fromLTWH(0, y, size.width, sliceHeight);
-      final dst = Rect.fromLTWH(dx.toDouble(), y, size.width, sliceHeight);
-
-      canvas.drawImageRect(image, src, dst, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-
-class ProductCard extends StatelessWidget {
-  const ProductCard({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 🔥 Image + overlays
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                child: Image.asset(
-                  'assets/sample.jpg',
-                  height: 140,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              ),
-
-              Positioned(
-                top: 45,
-                left: 10,
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.shade200,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'TRADE',
-                    style: TextStyle(fontSize: 10, color: Colors.white),
+    return GestureDetector(
+      onTap: (){
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ItemDetailsScreen()),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  child: Image.asset(
+                    'assets/sample.jpeg',
+                    height: 140,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
                   ),
                 ),
-              ),
 
-              // 💜 Price badge
-              Positioned(
-                top: 10,
-                left: 10,
-                child: Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.deepPurple,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'RM 249.00',
-                    style: TextStyle(color: Colors.white, fontSize: 12),
+                Positioned(
+                  top: 45,
+                  left: 10,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.shade200,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'TRADE',
+                      style: TextStyle(fontSize: 10, color: Colors.white),
+                    ),
                   ),
                 ),
-              ),
 
-              // 🤍 Favorite button
-              Positioned(
-                top: 10,
-                right: 10,
-                child: CircleAvatar(
-                  backgroundColor: Colors.white,
-                  child: Icon(Icons.favorite_border,
-                      color: Colors.deepPurple),
-                ),
-              ),
-            ],
-          ),
-
-          // 📄 Info section
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'Premium Headphones',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'RM 249.00',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
                   ),
                 ),
-                SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(Icons.location_on, size: 14),
-                    SizedBox(width: 4),
-                    Text('0.8 miles away'),
-                  ],
+
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.favorite_border,
+                        color: Colors.deepPurple),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Premium Headphones',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on, size: 14),
+                      SizedBox(width: 4),
+                      Text('0.8 miles away'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
