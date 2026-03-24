@@ -58,5 +58,8 @@ macos/Flutter/ephemeral/
 .env.*
 !.env.example
 
+# Supabase local metadata/cache (safe to ignore)
+supabase/.temp/
+
 # VS Code workspace settings (optional: comment out if team shares settings)
 .vscode/

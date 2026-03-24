@@ -17,16 +17,15 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-
-  static const List<Widget> _screens = [
-    HomeScreen(),
-    DiscoverScreen(),
-    InboxScreen(),
-    ProfileScreen(),
-  ];
+  bool _hideChatNavigation = false;
 
   void _onNavTap(int index) {
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      if (index != 2) {
+        _hideChatNavigation = false;
+      }
+    });
   }
 
   void _onAddTap() {
@@ -38,21 +37,37 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      const HomeScreen(),
+      const DiscoverScreen(),
+      InboxScreen(
+        onConversationViewChanged: (isConversationOpen) {
+          if (_hideChatNavigation == isConversationOpen) {
+            return;
+          }
+
+          setState(() => _hideChatNavigation = isConversationOpen);
+        },
+      ),
+      const ProfileScreen(),
+    ];
+    final shouldShowShellNav = !(_currentIndex == 2 && _hideChatNavigation);
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
       child: Scaffold(
         backgroundColor: const Color(0xFFF8F7FF),
         extendBody: true,
-        body: _screens[_currentIndex],
+        body: screens[_currentIndex],
 
-        // Glowing floating "+" button
-        floatingActionButton: _GlowFab(onTap: _onAddTap),
+        floatingActionButton: shouldShowShellNav
+            ? _GlowFab(onTap: _onAddTap)
+            : null,
         floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
 
-        bottomNavigationBar: BottomNavBar(
-          currentIndex: _currentIndex,
-          onTap: _onNavTap,
-        ),
+        bottomNavigationBar: shouldShowShellNav
+            ? BottomNavBar(currentIndex: _currentIndex, onTap: _onNavTap)
+            : null,
       ),
     );
   }
