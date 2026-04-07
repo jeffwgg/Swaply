@@ -6,30 +6,16 @@ Hybrid marketplace Flutter app with Supabase backend.
 
 1. Create a Supabase project.
 2. Open Supabase SQL Editor and run [`docs/supabase_schema.sql`](docs/supabase_schema.sql).
-3. Get your Project URL and anon key from Supabase project settings.
-4. Create a local `.env` file (this file is already gitignored):
+3. Update Supabase credentials in [lib/core/constants/app_config.dart](lib/core/constants/app_config.dart) with your Project URL and anon key.
+4. Run the app:
 
 ```bash
-cp .env.example .env
+flutter run
 ```
-
-5. Put your credentials in `.env`:
-
-```bash
-SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-```
-
-6. Run the app using that env file:
-
-```bash
-flutter run --dart-define-from-file=.env
-```
-
-If you do not provide these values, the app still starts, but Supabase calls will be unavailable.
 
 Important:
-- Use only the anon key in the app.
+- The anon key is safe to commit (it's public by design).
+- Security is enforced through Row Level Security (RLS) policies in your database.
 - Never put `service_role` key in Flutter/mobile code.
 
 ## Schema via CLI
