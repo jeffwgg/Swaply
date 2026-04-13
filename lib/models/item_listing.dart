@@ -1,6 +1,6 @@
 class ItemListing {
   final String id;
-  final String title;
+  final String name;
   final String description;
   final double? price;
   final String listingType;
@@ -8,12 +8,12 @@ class ItemListing {
   final String status;
   final String category;
   final String? imageUrl;
-  final String condition;
+  final String preference;
   final DateTime createdAt;
 
   const ItemListing({
     required this.id,
-    required this.title,
+    required this.name,
     required this.description,
     required this.price,
     required this.listingType,
@@ -21,14 +21,14 @@ class ItemListing {
     required this.status,
     required this.category,
     this.imageUrl,
-    required this.condition,
+    required this.preference,
     required this.createdAt,
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {
     return ItemListing(
       id: map['id'] as String,
-      title: map['title'] as String,
+      name: map['title'] as String,
       description: map['description'] as String,
       price: (map['price'] as num?)?.toDouble(),
       listingType: map['listing_type'] as String,
@@ -36,7 +36,7 @@ class ItemListing {
       status: map['status'] as String,
       category: map['category'] as String,
       imageUrl: map['image_url'] as String?,
-      condition: map['condition'] as String,
+      preference: map['condition'] as String,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
@@ -44,7 +44,7 @@ class ItemListing {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'title': title,
+      'title': name,
       'description': description,
       'price': price,
       'listing_type': listingType,
@@ -52,7 +52,7 @@ class ItemListing {
       'status': status,
       'category': category,
       'image_url': imageUrl,
-      'condition': condition,
+      'condition': preference,
       'created_at': createdAt.toIso8601String(),
     };
   }

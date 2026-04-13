@@ -2,7 +2,9 @@ import '../models/item_listing.dart';
 import '../services/supabase_service.dart';
 
 class ItemsRepository {
-  ItemsRepository();
+  static final ItemsRepository _instance = ItemsRepository._internal();
+  factory ItemsRepository() => _instance;
+  ItemsRepository._internal();
 
   static const _table = 'items';
 
@@ -31,6 +33,20 @@ class ItemsRepository {
       return null;
     }
     return ItemListing.fromMap(response);
+  }
+
+  Future<String?> getLastId() async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select('id')
+        .order('id', ascending: false)
+        .limit(1)
+        .maybeSingle();
+
+    if (response == null) {
+      return null;
+    }
+    return response['id'] as String?;
   }
 
   Future<void> create(ItemListing item) async {
