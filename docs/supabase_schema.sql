@@ -1,5 +1,9 @@
 -- Swaply schema for Supabase (PostgreSQL)
 -- Generated from docs/database-schema.md
+--
+-- NOTE: This is the base schema. For chat module enhancements (read_at, edited_at,
+-- deleted_at fields, message pinning, etc.), see migration files in supabase/migrations/
+-- starting from 20260407143000_chat_realtime_upgrade.sql
 
 create extension if not exists pgcrypto;
 

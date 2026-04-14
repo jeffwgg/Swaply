@@ -126,13 +126,13 @@ Represents a conversation between two users.
 | id            | UUID (PK)  | Unique chat identifier |
 | user1_id      | UUID (FK)  | First participant |
 | user2_id      | UUID (FK)  | Second participant |
-| item_id       | UUID (FK)  | Related item (optional) |
+| item_id       | UUID (FK)  | Related item (required) |
 | last_message  | TEXT       | Last message preview |
 | updated_at    | TIMESTAMP  | Last activity time |
 
 ### Notes
-- One chat is created per user pair.
-- Can optionally link to a specific item.
+- One chat is created per user pair per item.
+- Item link is required.
 
 ---
 
@@ -149,11 +149,16 @@ Stores individual messages within a chat.
 | chat_id     | UUID (FK)  | References chats.id |
 | sender_id   | UUID (FK)  | Message sender |
 | content     | TEXT       | Message content |
-| is_read     | BOOLEAN    | Read status |
+| read_at     | TIMESTAMP  | Read timestamp (NULL = unread) |
+| edited_at   | TIMESTAMP  | Last edit timestamp |
+| deleted_at  | TIMESTAMP  | Soft-delete timestamp |
+| deleted_by  | UUID (FK)  | User who deleted the message |
 | created_at  | TIMESTAMP  | Message timestamp |
 
 ### Notes
 - Each chat can have multiple messages (1-to-many relationship).
+- Sender can edit their own message within 3 minutes.
+- Sender can delete only within 3 minutes; both users see "<username> deleted a msg".
 
 ---
 
