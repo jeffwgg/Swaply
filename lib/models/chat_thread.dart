@@ -121,6 +121,21 @@ class ChatThread {
     return currentUserId == user1Id ? user2ProfileImage : user1ProfileImage;
   }
 
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'id': id,
+      'user1_id': user1Id,
+      'user2_id': user2Id,
+      'item_id': itemId,
+      'last_message': lastMessage,
+      'pinned_message_id': pinnedMessageId,
+      'pinned_at': pinnedAt?.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> toUpsertMap() => toInsertMap();
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

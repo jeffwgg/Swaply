@@ -71,14 +71,7 @@ class ChatsRepository {
   }
 
   Future<void> upsert(ChatThread chat) async {
-    await SupabaseService.client.from(_table).upsert({
-      'id': chat.id,
-      'user1_id': chat.user1Id,
-      'user2_id': chat.user2Id,
-      'item_id': chat.itemId,
-      'last_message': chat.lastMessage,
-      'updated_at': chat.updatedAt.toIso8601String(),
-    });
+    await SupabaseService.client.from(_table).upsert(chat.toInsertMap());
   }
 
   Future<ChatThread> createOrGetItemChat({

@@ -37,6 +37,17 @@ class AppUser {
     );
   }
 
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'auth_user_id': authUserId,
+      'username': username,
+      'email': email,
+      'profile_image': profileImage,
+    };
+  }
+
+  Map<String, dynamic> toUpsertMap() => toInsertMap();
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

@@ -56,6 +56,18 @@ class ChatMessage {
     );
   }
 
+  static Map<String, dynamic> createInsertMap({
+    required int chatId,
+    required int senderId,
+    required String content,
+  }) {
+    return {'chat_id': chatId, 'sender_id': senderId, 'content': content};
+  }
+
+  Map<String, dynamic> toInsertMap() {
+    return {'chat_id': chatId, 'sender_id': senderId, 'content': content};
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

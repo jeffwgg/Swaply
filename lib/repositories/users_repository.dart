@@ -77,6 +77,6 @@ class UsersRepository {
   Future<void> upsert(AppUser user) async {
     await SupabaseService.client
         .from(_table)
-        .upsert(user.toMap(), onConflict: 'auth_user_id');
+        .upsert(user.toInsertMap(), onConflict: 'auth_user_id');
   }
 }

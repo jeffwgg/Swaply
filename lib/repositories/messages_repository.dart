@@ -68,11 +68,13 @@ class MessagesRepository {
   }) async {
     final response = await SupabaseService.client
         .from(_table)
-        .insert({
-          'chat_id': chatId,
-          'sender_id': senderId,
-          'content': content.trim(),
-        })
+        .insert(
+          ChatMessage.createInsertMap(
+            chatId: chatId,
+            senderId: senderId,
+            content: content.trim(),
+          ),
+        )
         .select()
         .single();
 
