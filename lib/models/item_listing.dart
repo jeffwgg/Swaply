@@ -1,7 +1,7 @@
 import '../core/utils/parsing.dart';
 
 class ItemListing {
-  final String id;
+  final int id;
   final String name;
   final String description;
   final double? price;
@@ -9,8 +9,9 @@ class ItemListing {
   final int ownerId;
   final String status;
   final String category;
-  final String? imageUrl;
+  final String imageUrl;
   final String preference;
+  final int? repliedTo;
   final DateTime createdAt;
 
   const ItemListing({
@@ -22,15 +23,16 @@ class ItemListing {
     required this.ownerId,
     required this.status,
     required this.category,
-    this.imageUrl,
+    required this.imageUrl,
     required this.preference,
+    this.repliedTo,
     required this.createdAt,
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {
     return ItemListing(
       id: parseInt(map['id'], fieldName: 'items.id'),
-      title: parseString(map['title'], fieldName: 'items.title'),
+      name: parseString(map['name'], fieldName: 'items.name'),
       description: parseString(
         map['description'],
         fieldName: 'items.description',
@@ -43,11 +45,12 @@ class ItemListing {
       ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
-      imageUrl: parseNullableString(
+      imageUrl: parseString(
         map['image_url'],
         fieldName: 'items.image_url',
       ),
-      condition: parseString(map['condition'], fieldName: 'items.condition'),
+      preference: parseString(map['preference'], fieldName: 'items.preference'),
+      repliedTo: parseNullableInt(map['replied_to'], fieldName: 'items.replied_to'),
       createdAt: parseDateTime(
         map['created_at'],
         fieldName: 'items.created_at',
@@ -57,7 +60,7 @@ class ItemListing {
 
   Map<String, dynamic> toInsertMap() {
     return {
-      'title': title,
+      'name': name,
       'description': description,
       'price': price,
       'listing_type': listingType,
@@ -65,14 +68,15 @@ class ItemListing {
       'status': status,
       'category': category,
       'image_url': imageUrl,
-      'condition': condition,
+      'preference': preference,
+      'replied_to': repliedTo
     };
   }
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'title': name,
+      'name': name,
       'description': description,
       'price': price,
       'listing_type': listingType,
@@ -80,7 +84,8 @@ class ItemListing {
       'status': status,
       'category': category,
       'image_url': imageUrl,
-      'condition': preference,
+      'preference': preference,
+      'replied_to': repliedTo,
       'created_at': createdAt.toIso8601String(),
     };
   }

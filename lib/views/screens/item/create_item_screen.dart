@@ -75,6 +75,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         ? _customCategoryCtrl.text.trim()
         : _selectedCategory;
 
+    if (_images.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please add at least one photo.')),
+      );
+      return;
+    }
+
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill in item name.')),
@@ -128,17 +135,16 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       if (lastIdStr != null) {
         nextIdNum = (int.tryParse(lastIdStr) ?? 0) + 1;
       }
-      final newId = nextIdNum.toString();
 
       final currentUser = SupabaseService.client.auth.currentUser;
-      final ownerId = currentUser?.id ?? '1'; // todo
+      final ownerId = currentUser != null ? int.parse(currentUser.id) : 1; //todo
 
       String listingType = 'both';
       if (_enableSelling && !_enableTrading) listingType = 'sell';
       if (!_enableSelling && _enableTrading) listingType = 'trade';
 
       final item = ItemListing(
-        id: newId,
+        id: nextIdNum,
         name: name,
         description: desc,
         price: _enableSelling ? price : null,
@@ -146,7 +152,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         ownerId: ownerId,
         status: 'available',
         category: category,
+        imageUrl: 'assets/sample.jpeg',
         preference: _enableTrading ? preference : 'None',
+        repliedTo: null,
         createdAt: DateTime.now(),
       );
 
