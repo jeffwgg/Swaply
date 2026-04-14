@@ -28,26 +28,45 @@ class ItemListing {
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {
-    DateTime parseDateTime(dynamic value) {
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
     return ItemListing(
       id: parseInt(map['id'], fieldName: 'items.id'),
-      title: map['title'] as String,
-      description: map['description'] as String,
-      price: (map['price'] as num?)?.toDouble(),
-      listingType: map['listing_type'] as String,
+      title: parseString(map['title'], fieldName: 'items.title'),
+      description: parseString(
+        map['description'],
+        fieldName: 'items.description',
+      ),
+      price: parseNullableDouble(map['price'], fieldName: 'items.price'),
+      listingType: parseString(
+        map['listing_type'],
+        fieldName: 'items.listing_type',
+      ),
       ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
-      status: map['status'] as String,
-      category: map['category'] as String,
-      imageUrl: map['image_url'] as String?,
-      condition: map['condition'] as String,
-      createdAt: parseDateTime(map['created_at']),
+      status: parseString(map['status'], fieldName: 'items.status'),
+      category: parseString(map['category'], fieldName: 'items.category'),
+      imageUrl: parseNullableString(
+        map['image_url'],
+        fieldName: 'items.image_url',
+      ),
+      condition: parseString(map['condition'], fieldName: 'items.condition'),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'items.created_at',
+      ),
     );
+  }
+
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'title': title,
+      'description': description,
+      'price': price,
+      'listing_type': listingType,
+      'owner_id': ownerId,
+      'status': status,
+      'category': category,
+      'image_url': imageUrl,
+      'condition': condition,
+    };
   }
 
   Map<String, dynamic> toMap() {

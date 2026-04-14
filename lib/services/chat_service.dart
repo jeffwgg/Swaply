@@ -56,6 +56,8 @@ class ChatService {
     required int itemId,
   }) async {
     final userId = await _requireUserId();
+    _requirePositiveId(otherUserId, fieldName: 'otherUserId');
+    _requirePositiveId(itemId, fieldName: 'itemId');
     return _chatsRepository.createOrGetItemChat(
       currentUserId: userId,
       otherUserId: otherUserId,
@@ -71,15 +73,18 @@ class ChatService {
     required int chatId,
     required String content,
   }) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
+    final normalizedContent = _requireNonEmptyContent(content);
     final senderId = await _requireUserId();
     return _messagesRepository.send(
       chatId: chatId,
       senderId: senderId,
-      content: content,
+      content: normalizedContent,
     );
   }
 
   Future<void> markChatAsRead(int chatId) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
     final viewerId = await _requireUserId();
     return _messagesRepository.markAsRead(chatId: chatId, viewerId: viewerId);
   }
@@ -88,15 +93,18 @@ class ChatService {
     required int messageId,
     required String content,
   }) async {
+    _requirePositiveId(messageId, fieldName: 'messageId');
+    final normalizedContent = _requireNonEmptyContent(content);
     final actorId = await _requireUserId();
     return _messagesRepository.editMessage(
       messageId: messageId,
       actorId: actorId,
-      content: content,
+      content: normalizedContent,
     );
   }
 
   Future<void> deleteMessage(int messageId) async {
+    _requirePositiveId(messageId, fieldName: 'messageId');
     final actorId = await _requireUserId();
     return _messagesRepository.deleteMessage(
       messageId: messageId,
@@ -105,6 +113,8 @@ class ChatService {
   }
 
   Future<void> pinMessage({required int chatId, required int messageId}) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
+    _requirePositiveId(messageId, fieldName: 'messageId');
     final actorId = await _requireUserId();
     return _chatsRepository.pinMessage(
       chatId: chatId,
@@ -117,6 +127,8 @@ class ChatService {
     required int chatId,
     required int messageId,
   }) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
+    _requirePositiveId(messageId, fieldName: 'messageId');
     final actorId = await _requireUserId();
     return _chatsRepository.clearPinnedMessage(
       chatId: chatId,
@@ -126,6 +138,7 @@ class ChatService {
   }
 
   Future<List<ChatPinnedMessage>> listPinnedMessages(int chatId) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
     final actorId = await _requireUserId();
     return _chatsRepository.listPinnedMessages(
       chatId: chatId,
@@ -159,5 +172,23 @@ class ChatService {
       );
     }
     return userId;
+  }
+
+  void _requirePositiveId(int value, {required String fieldName}) {
+    if (value <= 0) {
+      throw ArgumentError.value(
+        value,
+        fieldName,
+        'Must be a positive integer.',
+      );
+    }
+  }
+
+  String _requireNonEmptyContent(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(value, 'content', 'Message cannot be empty.');
+    }
+    return normalized;
   }
 }

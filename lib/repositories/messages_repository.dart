@@ -6,6 +6,38 @@ class MessagesRepository {
 
   static const _table = 'messages';
 
+  List<Map<String, dynamic>> _requireListOfMaps(
+    dynamic response, {
+    required String operation,
+  }) {
+    if (response is! List) {
+      throw StateError('Unexpected $operation response: expected List.');
+    }
+
+    return response.map<Map<String, dynamic>>((row) {
+      if (row is Map<String, dynamic>) {
+        return row;
+      }
+      if (row is Map) {
+        return row.map((key, value) => MapEntry(key.toString(), value));
+      }
+      throw StateError('Unexpected $operation row shape: expected Map.');
+    }).toList();
+  }
+
+  Map<String, dynamic> _requireMap(
+    dynamic response, {
+    required String operation,
+  }) {
+    if (response is Map<String, dynamic>) {
+      return response;
+    }
+    if (response is Map) {
+      return response.map((key, value) => MapEntry(key.toString(), value));
+    }
+    throw StateError('Unexpected $operation response: expected Map.');
+  }
+
   Future<List<ChatMessage>> listForChat(int chatId) async {
     final response = await SupabaseService.client
         .from(_table)
@@ -13,7 +45,8 @@ class MessagesRepository {
         .eq('chat_id', chatId)
         .order('created_at', ascending: true);
 
-    return response.map<ChatMessage>(ChatMessage.fromMap).toList();
+    final rows = _requireListOfMaps(response, operation: 'listForChat');
+    return rows.map<ChatMessage>(ChatMessage.fromMap).toList();
   }
 
   Stream<List<ChatMessage>> watchForChat(int chatId) {
@@ -22,7 +55,10 @@ class MessagesRepository {
         .stream(primaryKey: const ['id'])
         .eq('chat_id', chatId)
         .order('created_at', ascending: true)
-        .map((rows) => rows.map(ChatMessage.fromMap).toList());
+        .map((rows) {
+          final list = _requireListOfMaps(rows, operation: 'watchForChat');
+          return list.map(ChatMessage.fromMap).toList();
+        });
   }
 
   Future<ChatMessage> send({
@@ -40,7 +76,7 @@ class MessagesRepository {
         .select()
         .single();
 
-    return ChatMessage.fromMap(response);
+    return ChatMessage.fromMap(_requireMap(response, operation: 'send'));
   }
 
   Future<void> markAsRead({required int chatId, required int viewerId}) async {

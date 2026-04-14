@@ -22,13 +22,6 @@ class TransactionRequest {
   });
 
   factory TransactionRequest.fromMap(Map<String, dynamic> map) {
-    DateTime parseDateTime(dynamic value) {
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
     return TransactionRequest(
       id: parseInt(map['id'], fieldName: 'transaction_requests.id'),
       itemId: parseInt(
@@ -39,15 +32,35 @@ class TransactionRequest {
         map['requester_id'],
         fieldName: 'transaction_requests.requester_id',
       ),
-      type: map['type'] as String,
-      offeredPrice: (map['offered_price'] as num?)?.toDouble(),
+      type: parseString(map['type'], fieldName: 'transaction_requests.type'),
+      offeredPrice: parseNullableDouble(
+        map['offered_price'],
+        fieldName: 'transaction_requests.offered_price',
+      ),
       offeredItemId: parseNullableInt(
         map['offered_item_id'],
         fieldName: 'transaction_requests.offered_item_id',
       ),
-      status: map['status'] as String,
-      createdAt: parseDateTime(map['created_at']),
+      status: parseString(
+        map['status'],
+        fieldName: 'transaction_requests.status',
+      ),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'transaction_requests.created_at',
+      ),
     );
+  }
+
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'item_id': itemId,
+      'requester_id': requesterId,
+      'type': type,
+      'offered_price': offeredPrice,
+      'offered_item_id': offeredItemId,
+      'status': status,
+    };
   }
 
   Map<String, dynamic> toMap() {

@@ -49,13 +49,6 @@ class ChatThread {
       return null;
     }
 
-    DateTime parseDateTime(dynamic value) {
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
     final user1 = parseNestedMap(map['user1']);
     final user2 = parseNestedMap(map['user2']);
     final item = parseNestedMap(map['item']);
@@ -64,37 +57,48 @@ class ChatThread {
       id: parseInt(map['id'], fieldName: 'chats.id'),
       user1Id: parseInt(map['user1_id'], fieldName: 'chats.user1_id'),
       user2Id: parseInt(map['user2_id'], fieldName: 'chats.user2_id'),
-      user1Name: user1 == null ? null : user1['username'] as String?,
-      user2Name: user2 == null ? null : user2['username'] as String?,
+      user1Name: user1 == null
+          ? null
+          : parseNullableString(user1['username'], fieldName: 'users.username'),
+      user2Name: user2 == null
+          ? null
+          : parseNullableString(user2['username'], fieldName: 'users.username'),
       user1ProfileImage: user1 == null
           ? null
-          : user1['profile_image'] as String?,
+          : parseNullableString(
+              user1['profile_image'],
+              fieldName: 'users.profile_image',
+            ),
       user2ProfileImage: user2 == null
           ? null
-          : user2['profile_image'] as String?,
+          : parseNullableString(
+              user2['profile_image'],
+              fieldName: 'users.profile_image',
+            ),
       itemId: parseNullableInt(map['item_id'], fieldName: 'chats.item_id'),
-      itemTitle: item == null ? null : item['title'] as String?,
+      itemTitle: item == null
+          ? null
+          : parseNullableString(item['title'], fieldName: 'items.title'),
       itemOwnerId: item == null
           ? null
           : parseNullableInt(item['owner_id'], fieldName: 'items.owner_id'),
-      lastMessage: map['last_message'] as String?,
+      lastMessage: parseNullableString(
+        map['last_message'],
+        fieldName: 'chats.last_message',
+      ),
       pinnedMessageId: parseNullableInt(
         map['pinned_message_id'],
         fieldName: 'chats.pinned_message_id',
       ),
-      pinnedAt: parseNullableDateTime(map['pinned_at']),
-      updatedAt: parseDateTime(map['updated_at']),
+      pinnedAt: parseNullableDateTime(
+        map['pinned_at'],
+        fieldName: 'chats.pinned_at',
+      ),
+      updatedAt: parseDateTime(
+        map['updated_at'],
+        fieldName: 'chats.updated_at',
+      ),
     );
-  }
-
-  static DateTime? parseNullableDateTime(dynamic value) {
-    if (value == null) {
-      return null;
-    }
-    if (value is DateTime) {
-      return value;
-    }
-    return DateTime.parse(value as String);
   }
 
   int otherUserId(int currentUserId) {

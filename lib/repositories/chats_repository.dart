@@ -14,6 +14,38 @@ class ChatsRepository {
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
       'item:items(owner_id,title)';
 
+  List<Map<String, dynamic>> _requireListOfMaps(
+    dynamic response, {
+    required String operation,
+  }) {
+    if (response is! List) {
+      throw StateError('Unexpected $operation response: expected List.');
+    }
+
+    return response.map<Map<String, dynamic>>((row) {
+      if (row is Map<String, dynamic>) {
+        return row;
+      }
+      if (row is Map) {
+        return row.map((key, value) => MapEntry(key.toString(), value));
+      }
+      throw StateError('Unexpected $operation row shape: expected Map.');
+    }).toList();
+  }
+
+  Map<String, dynamic> _requireMap(
+    dynamic response, {
+    required String operation,
+  }) {
+    if (response is Map<String, dynamic>) {
+      return response;
+    }
+    if (response is Map) {
+      return response.map((key, value) => MapEntry(key.toString(), value));
+    }
+    throw StateError('Unexpected $operation response: expected Map.');
+  }
+
   Future<List<ChatThread>> listForUser(int userId) async {
     final response = await SupabaseService.client
         .from(_table)
@@ -21,7 +53,8 @@ class ChatsRepository {
         .or('user1_id.eq.$userId,user2_id.eq.$userId')
         .order('updated_at', ascending: false);
 
-    return response.map<ChatThread>(ChatThread.fromMap).toList();
+    final rows = _requireListOfMaps(response, operation: 'listForUser');
+    return rows.map<ChatThread>(ChatThread.fromMap).toList();
   }
 
   Future<ChatThread?> getById(int chatId) async {
@@ -34,7 +67,7 @@ class ChatsRepository {
     if (response == null) {
       return null;
     }
-    return ChatThread.fromMap(response);
+    return ChatThread.fromMap(_requireMap(response, operation: 'getById'));
   }
 
   Future<void> upsert(ChatThread chat) async {
@@ -62,24 +95,9 @@ class ChatsRepository {
       },
     );
 
-    if (response is Map<String, dynamic>) {
-      return ChatThread.fromMap(response);
-    }
-
-    if (response is Map) {
-      return ChatThread.fromMap(
-        response.map((key, value) => MapEntry(key.toString(), value)),
-      );
-    }
-
-    if (response is List && response.isNotEmpty && response.first is Map) {
-      final row = response.first as Map;
-      return ChatThread.fromMap(
-        row.map((key, value) => MapEntry(key.toString(), value)),
-      );
-    }
-
-    throw StateError('Unexpected create_or_get_item_chat response shape.');
+    return ChatThread.fromMap(
+      _requireMap(response, operation: 'create_or_get_item_chat'),
+    );
   }
 
   RealtimeChannel subscribeToChanges({
@@ -110,7 +128,11 @@ class ChatsRepository {
           return user1Id == userId || user2Id == userId;
         }
 
-        if (matchesParticipant(next) || matchesParticipant(previous)) {
+        final hasNext = next.isNotEmpty;
+        final hasPrevious = previous.isNotEmpty;
+
+        if ((hasNext && matchesParticipant(next)) ||
+            (hasPrevious && matchesParticipant(previous))) {
           onRelevantChange();
         }
       },
@@ -176,20 +198,10 @@ class ChatsRepository {
       params: {'p_chat_id': chatId, 'p_actor_id': actorId},
     );
 
-    if (response is! List) {
-      return const [];
-    }
-
-    return response.map<ChatPinnedMessage>((row) {
-      if (row is Map<String, dynamic>) {
-        return ChatPinnedMessage.fromMap(row);
-      }
-      if (row is Map) {
-        return ChatPinnedMessage.fromMap(
-          row.map((key, value) => MapEntry(key.toString(), value)),
-        );
-      }
-      throw StateError('Unexpected pinned message row shape.');
-    }).toList();
+    final rows = _requireListOfMaps(
+      response,
+      operation: 'list_pinned_messages_as_user',
+    );
+    return rows.map<ChatPinnedMessage>(ChatPinnedMessage.fromMap).toList();
   }
 }

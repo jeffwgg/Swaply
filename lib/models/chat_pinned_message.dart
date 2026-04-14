@@ -12,13 +12,6 @@ class ChatPinnedMessage {
   });
 
   factory ChatPinnedMessage.fromMap(Map<String, dynamic> map) {
-    DateTime parseDateTime(dynamic value) {
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
     return ChatPinnedMessage(
       chatId: parseInt(
         map['chat_id'],
@@ -28,7 +21,10 @@ class ChatPinnedMessage {
         map['message_id'],
         fieldName: 'chat_pinned_messages.message_id',
       ),
-      pinnedAt: parseDateTime(map['pinned_at']),
+      pinnedAt: parseDateTime(
+        map['pinned_at'],
+        fieldName: 'chat_pinned_messages.pinned_at',
+      ),
     );
   }
 }

@@ -28,37 +28,31 @@ class ChatMessage {
   bool get isEdited => editedAt != null;
 
   factory ChatMessage.fromMap(Map<String, dynamic> map) {
-    DateTime? parseNullableDateTime(dynamic value) {
-      if (value == null) {
-        return null;
-      }
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
-    DateTime parseRequiredDateTime(dynamic value) {
-      final parsed = parseNullableDateTime(value);
-      if (parsed == null) {
-        throw StateError('Expected non-null DateTime value.');
-      }
-      return parsed;
-    }
-
     return ChatMessage(
       id: parseInt(map['id'], fieldName: 'messages.id'),
       chatId: parseInt(map['chat_id'], fieldName: 'messages.chat_id'),
       senderId: parseInt(map['sender_id'], fieldName: 'messages.sender_id'),
-      content: map['content'] as String,
-      readAt: parseNullableDateTime(map['read_at']),
-      editedAt: parseNullableDateTime(map['edited_at']),
-      deletedAt: parseNullableDateTime(map['deleted_at']),
+      content: parseString(map['content'], fieldName: 'messages.content'),
+      readAt: parseNullableDateTime(
+        map['read_at'],
+        fieldName: 'messages.read_at',
+      ),
+      editedAt: parseNullableDateTime(
+        map['edited_at'],
+        fieldName: 'messages.edited_at',
+      ),
+      deletedAt: parseNullableDateTime(
+        map['deleted_at'],
+        fieldName: 'messages.deleted_at',
+      ),
       deletedBy: parseNullableInt(
         map['deleted_by'],
         fieldName: 'messages.deleted_by',
       ),
-      createdAt: parseRequiredDateTime(map['created_at']),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'messages.created_at',
+      ),
     );
   }
 

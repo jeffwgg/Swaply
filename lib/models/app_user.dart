@@ -18,20 +18,22 @@ class AppUser {
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
-    DateTime parseDateTime(dynamic value) {
-      if (value is DateTime) {
-        return value;
-      }
-      return DateTime.parse(value as String);
-    }
-
     return AppUser(
       id: parseInt(map['id'], fieldName: 'users.id'),
-      authUserId: map['auth_user_id'] as String,
-      username: map['username'] as String,
-      email: map['email'] as String,
-      profileImage: map['profile_image'] as String?,
-      createdAt: parseDateTime(map['created_at']),
+      authUserId: parseString(
+        map['auth_user_id'],
+        fieldName: 'users.auth_user_id',
+      ),
+      username: parseString(map['username'], fieldName: 'users.username'),
+      email: parseString(map['email'], fieldName: 'users.email'),
+      profileImage: parseNullableString(
+        map['profile_image'],
+        fieldName: 'users.profile_image',
+      ),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'users.created_at',
+      ),
     );
   }
 
