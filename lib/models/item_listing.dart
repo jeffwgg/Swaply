@@ -1,10 +1,12 @@
+import '../core/utils/parsing.dart';
+
 class ItemListing {
-  final String id;
+  final int id;
   final String title;
   final String description;
   final double? price;
   final String listingType;
-  final String ownerId;
+  final int ownerId;
   final String status;
   final String category;
   final String? imageUrl;
@@ -26,18 +28,25 @@ class ItemListing {
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {
+    DateTime parseDateTime(dynamic value) {
+      if (value is DateTime) {
+        return value;
+      }
+      return DateTime.parse(value as String);
+    }
+
     return ItemListing(
-      id: map['id'] as String,
+      id: parseInt(map['id'], fieldName: 'items.id'),
       title: map['title'] as String,
       description: map['description'] as String,
       price: (map['price'] as num?)?.toDouble(),
       listingType: map['listing_type'] as String,
-      ownerId: map['owner_id'] as String,
+      ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
       status: map['status'] as String,
       category: map['category'] as String,
       imageUrl: map['image_url'] as String?,
       condition: map['condition'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: parseDateTime(map['created_at']),
     );
   }
 

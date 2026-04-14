@@ -6,7 +6,7 @@ class TransactionRequestsRepository {
 
   static const _table = 'transaction_requests';
 
-  Future<List<TransactionRequest>> listForItem(String itemId) async {
+  Future<List<TransactionRequest>> listForItem(int itemId) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -18,7 +18,7 @@ class TransactionRequestsRepository {
         .toList();
   }
 
-  Future<List<TransactionRequest>> listForRequester(String requesterId) async {
+  Future<List<TransactionRequest>> listForRequester(int requesterId) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -35,7 +35,7 @@ class TransactionRequestsRepository {
   }
 
   Future<void> updateStatus({
-    required String requestId,
+    required int requestId,
     required String status,
   }) async {
     await SupabaseService.client

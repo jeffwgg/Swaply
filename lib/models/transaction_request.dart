@@ -1,10 +1,12 @@
+import '../core/utils/parsing.dart';
+
 class TransactionRequest {
-  final String id;
-  final String itemId;
-  final String requesterId;
+  final int id;
+  final int itemId;
+  final int requesterId;
   final String type;
   final double? offeredPrice;
-  final String? offeredItemId;
+  final int? offeredItemId;
   final String status;
   final DateTime createdAt;
 
@@ -20,15 +22,31 @@ class TransactionRequest {
   });
 
   factory TransactionRequest.fromMap(Map<String, dynamic> map) {
+    DateTime parseDateTime(dynamic value) {
+      if (value is DateTime) {
+        return value;
+      }
+      return DateTime.parse(value as String);
+    }
+
     return TransactionRequest(
-      id: map['id'] as String,
-      itemId: map['item_id'] as String,
-      requesterId: map['requester_id'] as String,
+      id: parseInt(map['id'], fieldName: 'transaction_requests.id'),
+      itemId: parseInt(
+        map['item_id'],
+        fieldName: 'transaction_requests.item_id',
+      ),
+      requesterId: parseInt(
+        map['requester_id'],
+        fieldName: 'transaction_requests.requester_id',
+      ),
       type: map['type'] as String,
       offeredPrice: (map['offered_price'] as num?)?.toDouble(),
-      offeredItemId: map['offered_item_id'] as String?,
+      offeredItemId: parseNullableInt(
+        map['offered_item_id'],
+        fieldName: 'transaction_requests.offered_item_id',
+      ),
       status: map['status'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: parseDateTime(map['created_at']),
     );
   }
 

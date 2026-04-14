@@ -6,13 +6,13 @@ class ItemsRepository {
 
   static const _table = 'items';
 
-  Future<List<ItemListing>> listAvailable({String? ownerId}) async {
+  Future<List<ItemListing>> listAvailable({int? ownerId}) async {
     var query = SupabaseService.client
         .from(_table)
         .select()
         .eq('status', 'available');
 
-    if (ownerId != null && ownerId.isNotEmpty) {
+    if (ownerId != null) {
       query = query.eq('owner_id', ownerId);
     }
 
@@ -20,7 +20,7 @@ class ItemsRepository {
     return response.map<ItemListing>(ItemListing.fromMap).toList();
   }
 
-  Future<ItemListing?> getById(String id) async {
+  Future<ItemListing?> getById(int id) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -38,7 +38,7 @@ class ItemsRepository {
   }
 
   Future<void> updateStatus({
-    required String itemId,
+    required int itemId,
     required String status,
   }) async {
     await SupabaseService.client

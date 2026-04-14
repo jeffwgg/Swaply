@@ -6,11 +6,24 @@ class UsersRepository {
 
   static const _table = 'users';
 
-  Future<AppUser?> getById(String id) async {
+  Future<AppUser?> getById(int id) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
         .eq('id', id)
+        .maybeSingle();
+
+    if (response == null) {
+      return null;
+    }
+    return AppUser.fromMap(response);
+  }
+
+  Future<AppUser?> getByAuthUserId(String authUserId) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('auth_user_id', authUserId)
         .maybeSingle();
 
     if (response == null) {
@@ -29,6 +42,8 @@ class UsersRepository {
   }
 
   Future<void> upsert(AppUser user) async {
-    await SupabaseService.client.from(_table).upsert(user.toMap());
+    await SupabaseService.client
+        .from(_table)
+        .upsert(user.toMap(), onConflict: 'auth_user_id');
   }
 }
