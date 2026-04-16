@@ -75,7 +75,9 @@ class DiscoverScreen extends StatelessWidget {
               const SizedBox(height: 20),
               Expanded(
                 child: TabBarView(
-                  children: _categories.map((cat) => NestedTabBar(cat)).toList(),
+                  children: _categories
+                      .map((cat) => NestedTabBar(cat))
+                      .toList(),
                 ),
               ),
             ],
@@ -94,7 +96,10 @@ class NestedTabBar extends StatefulWidget {
   State<NestedTabBar> createState() => _NestedTabBarState();
 }
 
-class _NestedTabBarState extends State<NestedTabBar> with TickerProviderStateMixin {
+class _NestedTabBarState extends State<NestedTabBar>
+    with TickerProviderStateMixin {
+  final int? loginId = null; //todo
+
   late final TabController _tabController;
   final List<String> _types = const ['All Items', 'For Sale', 'For Trade'];
 
@@ -130,7 +135,7 @@ class _NestedTabBarState extends State<NestedTabBar> with TickerProviderStateMix
               unselectedLabelColor: Colors.purple,
               indicatorSize: TabBarIndicatorSize.tab,
               indicator: const BubbleTabIndicator(
-                indicatorHeight: 30.0,
+                indicatorHeight: 40.0,
                 indicatorColor: Colors.white,
                 indicatorRadius: 10.0,
                 tabBarIndicatorSize: TabBarIndicatorSize.tab,
@@ -145,8 +150,9 @@ class _NestedTabBarState extends State<NestedTabBar> with TickerProviderStateMix
             children: _types.map((type) {
               return FutureBuilder<List<ItemListing>>(
                 future: ItemsRepository().getDiscoverList(
+                  userId: loginId,
                   category: widget.outerTab,
-                  listingType: type,
+                  listingType: type == 'For Sale' ? 'sell' : type == 'For Trade' ? 'trade' : 'both',
                 ),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
@@ -162,13 +168,15 @@ class _NestedTabBarState extends State<NestedTabBar> with TickerProviderStateMix
                   return GridView.builder(
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                     itemCount: items.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.75,
-                    ),
-                    itemBuilder: (context, index) => ItemCard(item: items[index]),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.75,
+                        ),
+                    itemBuilder: (context, index) =>
+                        ItemCard(item: items[index]),
                   );
                 },
               );
@@ -184,16 +192,38 @@ class ItemCard extends StatelessWidget {
   final ItemListing item;
   const ItemCard({super.key, required this.item});
 
+  Widget _buildImage(String url) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        height: 120,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.asset(
+      url,
+      height: 120,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 50),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ItemDetailsScreen(item: item)),
+          MaterialPageRoute(builder: (context) => ItemDetailsScreen(item)),
         );
       },
       child: Container(
+        height: 150,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -211,43 +241,63 @@ class ItemCard extends StatelessWidget {
             Stack(
               children: [
                 ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                  child: Image.asset(
-                    item.imageUrl,
-                    height: 120,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16),
+                  ),
+                  child: item.imageUrls.isNotEmpty
+                      ? _buildImage(item.imageUrls[0])
+                      : const SizedBox(
+                          height: 120,
+                          width: double.infinity,
+                          child: Icon(Icons.image, size: 50, color: Colors.grey),
+                        ),
+                ),
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item.price != null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.deepPurple,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'RM ${item.price!.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      if (item.listingType == 'trade' ||
+                          item.listingType == 'both')
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade200,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'FOR TRADE',
+                            style: TextStyle(fontSize: 10, color: Colors.white),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                if (item.listingType == 'trade' || item.listingType == 'both')
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.purple.shade200,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text('TRADE', style: TextStyle(fontSize: 10, color: Colors.white)),
-                    ),
-                  ),
-                if (item.price != null)
-                  Positioned(
-                    bottom: 10,
-                    left: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'RM ${item.price!.toStringAsFixed(2)}',
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
               ],
             ),
             Padding(
@@ -266,7 +316,10 @@ class ItemCard extends StatelessWidget {
                     children: [
                       Icon(Icons.location_on, size: 14, color: Colors.grey),
                       SizedBox(width: 4),
-                      Text('0.8 miles away', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(
+                        '0.8 miles away',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
                     ],
                   ),
                 ],

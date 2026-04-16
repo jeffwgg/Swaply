@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import '../models/item_listing.dart';
 import '../services/supabase_service.dart';
 
@@ -28,14 +30,20 @@ class ItemsRepository {
   }
 
   Future<List<ItemListing>> getDiscoverList({
+    int? userId,
     String? category,
     String? listingType,
   }) async {
+    log(listingType!);
     var query = SupabaseService.client
         .from(_table)
         .select()
         .eq('status', 'available')
         .filter('replied_to', 'is', null);
+
+    if (userId != null) {
+      query = query.neq('owner_id', userId);
+    }
 
     if (category != null && category != 'All') {
       query = query.eq('category', category);
@@ -55,7 +63,7 @@ class ItemsRepository {
     return rows.map<ItemListing>(ItemListing.fromMap).toList();
   }
 
-  Future<String?> getLastId() async {
+  Future<int?> getLastId() async {
     final response = await SupabaseService.client
         .from(_table)
         .select('id')
@@ -66,10 +74,21 @@ class ItemsRepository {
     if (response == null) {
       return null;
     }
-    return response['id'] as String?;
+    return response['id'] as int?;
   }
 
   Future<void> create(ItemListing item) async {
     await SupabaseService.client.from(_table).insert(item.toMap());
+  }
+
+  Future<List<ItemListing>> getReplyList(int id) async {
+    var query = SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('replied_to', id);
+
+    final response = await query.order('created_at', ascending: false);
+    final rows = _requireListOfMaps(response, operation: 'getReplyList');
+    return rows.map<ItemListing>(ItemListing.fromMap).toList();
   }
 }

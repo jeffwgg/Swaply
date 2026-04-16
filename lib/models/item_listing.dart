@@ -9,8 +9,8 @@ class ItemListing {
   final int ownerId;
   final String status;
   final String category;
-  final String imageUrl;
-  final String preference;
+  final List<String> imageUrls;
+  final String? preference;
   final int? repliedTo;
   final DateTime createdAt;
 
@@ -23,7 +23,7 @@ class ItemListing {
     required this.ownerId,
     required this.status,
     required this.category,
-    required this.imageUrl,
+    required this.imageUrls,
     required this.preference,
     this.repliedTo,
     required this.createdAt,
@@ -45,10 +45,7 @@ class ItemListing {
       ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
-      imageUrl: parseString(
-        map['image_url'],
-        fieldName: 'items.image_url',
-      ),
+      imageUrls: List<String>.from(map['image_urls'] ?? []),
       preference: parseString(map['preference'], fieldName: 'items.preference'),
       repliedTo: parseNullableInt(map['replied_to'], fieldName: 'items.replied_to'),
       createdAt: parseDateTime(
@@ -67,7 +64,7 @@ class ItemListing {
       'owner_id': ownerId,
       'status': status,
       'category': category,
-      'image_url': imageUrl,
+      'image_urls': imageUrls,
       'preference': preference,
       'replied_to': repliedTo
     };
@@ -83,7 +80,7 @@ class ItemListing {
       'owner_id': ownerId,
       'status': status,
       'category': category,
-      'image_url': imageUrl,
+      'image_urls': imageUrls,
       'preference': preference,
       'replied_to': repliedTo,
       'created_at': createdAt.toIso8601String(),

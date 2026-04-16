@@ -1,12 +1,16 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as path;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
+import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/services/supabase_service.dart';
 
 class CreateItemScreen extends StatefulWidget {
-  const CreateItemScreen({super.key});
+  final int? repliedTo;
+  const CreateItemScreen({super.key, this.repliedTo});
 
   @override
   State<CreateItemScreen> createState() => _CreateItemScreenState();
@@ -38,13 +42,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final List<XFile> _images = [];
   final _formKey = GlobalKey<FormState>();
 
+  @override
+  void initState() {
+    super.initState();
+    if (widget.repliedTo != null) {
+      _enableSelling = false;
+      _enableTrading = false;
+    }
+  }
+
   Future<void> _pickImage() async {
-    final XFile? selectedImage = await _picker.pickImage(
-      source: ImageSource.gallery,
-    );
-    if (selectedImage != null) {
+    final List<XFile> selectedImages = await _picker.pickMultiImage();
+    if (selectedImages.isNotEmpty) {
       setState(() {
-        _images.add(selectedImage);
+        _images.addAll(selectedImages);
       });
     }
   }
@@ -53,6 +64,26 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     setState(() {
       _images.removeAt(index);
     });
+  }
+
+  Future<String?> _uploadImage(XFile imageFile) async {
+    try {
+      final fileName =
+          '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFile.path)}';
+
+      final bytes = await imageFile.readAsBytes();
+
+      await SupabaseService.client.storage.from('items').uploadBinary(
+            fileName,
+            bytes,
+            fileOptions: const FileOptions(upsert: true),
+          );
+
+      return SupabaseService.client.storage.from('items').getPublicUrl(fileName);
+    } catch (e) {
+      debugPrint('Upload error: $e');
+      return null;
+    }
   }
 
   @override
@@ -82,44 +113,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       return;
     }
 
-    if (name.isEmpty) {
+    if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in item name.')),
-      );
-      return;
-    }
-
-    if (desc.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in item description.')),
-      );
-      return;
-    }
-
-    if (category == null || category.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please fill in category.')));
-      return;
-    }
-
-    if (!_enableSelling && !_enableTrading) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enable selling or trading.')),
-      );
-      return;
-    }
-
-    if (_enableSelling && price == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid price.')),
-      );
-      return;
-    }
-
-    if (_enableTrading && preference.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter trade preferences.')),
+        const SnackBar(content: Text('Please fill in name, description and category.')),
       );
       return;
     }
@@ -129,19 +125,35 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     });
 
     try {
-      // Logic to get the next ID
-      final lastIdStr = await ItemsRepository().getLastId();
-      int nextIdNum = 1;
-      if (lastIdStr != null) {
-        nextIdNum = (int.tryParse(lastIdStr) ?? 0) + 1;
+      // 1. Get current logged in user
+      // final authUser = SupabaseService.client.auth.currentUser;
+      // if (authUser == null) throw Exception('User not logged in');
+
+      // final appUser = await UsersRepository().getByAuthUserId(authUser.id);
+      // if (appUser == null) throw Exception('App user not found');
+
+      // 2. Upload images
+      List<String> imageUrls = [];
+      for (var img in _images) {
+        final url = await _uploadImage(img);
+        if (url != null) {
+          imageUrls.add(url);
+        }
       }
 
-      final currentUser = SupabaseService.client.auth.currentUser;
-      final ownerId = currentUser != null ? int.parse(currentUser.id) : 1; //todo
+      if (imageUrls.isEmpty) throw Exception('Image upload failed. Check RLS policies.');
+
+      // 3. Get ID
+      final lastId = await ItemsRepository().getLastId();
+      int nextIdNum = (lastId ?? 0) + 1;
 
       String listingType = 'both';
-      if (_enableSelling && !_enableTrading) listingType = 'sell';
-      if (!_enableSelling && _enableTrading) listingType = 'trade';
+      if (widget.repliedTo != null) {
+        listingType = 'trade';
+      } else {
+        if (_enableSelling && !_enableTrading) listingType = 'sell';
+        if (!_enableSelling && _enableTrading) listingType = 'trade';
+      }
 
       final item = ItemListing(
         id: nextIdNum,
@@ -149,12 +161,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         description: desc,
         price: _enableSelling ? price : null,
         listingType: listingType,
-        ownerId: ownerId,
-        status: 'available',
+        ownerId: 1, // todo
+        status: widget.repliedTo == null ? 'available' : 'pending',
         category: category,
-        imageUrl: 'assets/sample.jpeg',
+        imageUrls: imageUrls,
         preference: _enableTrading ? preference : 'None',
-        repliedTo: null,
+        repliedTo: widget.repliedTo,
         createdAt: DateTime.now(),
       );
 
@@ -164,13 +176,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Item created successfully!')),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error creating item: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
       }
     } finally {
       if (mounted) {
@@ -184,7 +196,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Item')),
+      appBar: AppBar(title: Text(widget.repliedTo == null ? 'Create Item' : 'Offer Trade')),
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -208,7 +220,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   itemCount: _images.length + 1,
                   itemBuilder: (context, index) {
                     if (index == 0) {
-                      // Picker Box
                       return GestureDetector(
                         onTap: _pickImage,
                         child: Container(
@@ -226,8 +237,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ),
                       );
                     }
-
-                    // Preview Boxes
                     final imageIndex = index - 1;
                     return Stack(
                       children: [
@@ -279,12 +288,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(10)),
                   ),
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter item name.';
-                  }
-                  return null;
-                },
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
@@ -324,14 +327,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                       borderRadius: BorderRadius.all(Radius.circular(10)),
                     ),
                   ),
-                  validator: (value) {
-                    if (_selectedCategory == 'Others') {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter item category.';
-                      }
-                    }
-                    return null;
-                  },
                 ),
               ],
               const SizedBox(height: 20),
@@ -349,150 +344,130 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(12)),
                   ),
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter item description';
-                  }
-                  return null;
-                },
               ),
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Enable Selling',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5B21B6),
+              if (widget.repliedTo == null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Selling',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Allow users to buy this item',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF7C3AED),
+                          Text(
+                            'Allow users to buy this item',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Transform.scale(
-                    scale: 0.8,
-                    child: Switch(
-                      activeTrackColor: const Color(0xFF5B21B6),
-                      value: _enableSelling,
-                      onChanged: (bool newValue) {
-                        setState(() {
-                          _enableSelling = newValue;
-                        });
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              if (_enableSelling) ...[
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _priceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Price',
-                    prefix: Text(
-                      'RM  ',
-                      style: TextStyle(
-                        color: Color(0xFF6D28D9),
-                        fontWeight: FontWeight.bold,
+                        ],
                       ),
                     ),
-                    filled: true,
-                    fillColor: Color(0xFFF3E8FF),
-                    border: OutlineInputBorder(
-                      borderSide: BorderSide.none,
-                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableSelling,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableSelling = newValue;
+                          });
+                        },
+                      ),
                     ),
-                  ),
-                  validator: (value) {
-                    if (_enableSelling) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter item price.';
-                      }
-                    }
-                    return null;
-                  },
+                  ],
                 ),
-              ],
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Enable Trading',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5B21B6),
-                          ),
+                if (_enableSelling) ...[
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _priceCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Price',
+                      prefix: Text(
+                        'RM  ',
+                        style: TextStyle(
+                          color: Color(0xFF6D28D9),
+                          fontWeight: FontWeight.bold,
                         ),
-                        Text(
-                          'Allow users to offer item trades',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF7C3AED),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Transform.scale(
-                    scale: 0.8,
-                    child: Switch(
-                      activeTrackColor: const Color(0xFF5B21B6),
-                      value: _enableTrading,
-                      onChanged: (bool newValue) {
-                        setState(() {
-                          _enableTrading = newValue;
-                        });
-                      },
+                      ),
+                      filled: true,
+                      fillColor: Color(0xFFF3E8FF),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.all(Radius.circular(10)),
+                      ),
                     ),
                   ),
                 ],
-              ),
-              if (_enableTrading) ...[
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _prefCtrl,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Trade Preferences',
-                    hintText:
-                        'What are you looking for in exchange? (e.g. vintage cameras, bike accessories)',
-                    alignLabelWithHint: true,
-                    filled: true,
-                    fillColor: Color(0xFFF3E8FF),
-                    border: OutlineInputBorder(
-                      borderSide: BorderSide.none,
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Trading',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                          Text(
+                            'Allow users to offer item trades',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableTrading,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableTrading = newValue;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (_enableTrading) ...[
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _prefCtrl,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Trade Preferences',
+                      hintText:
+                          'What are you looking for in exchange? (e.g. vintage cameras, bike accessories)',
+                      alignLabelWithHint: true,
+                      filled: true,
+                      fillColor: Color(0xFFF3E8FF),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
                     ),
                   ),
-                  validator: (value) {
-                    if (_enableTrading) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter trade preferences.';
-                      }
-                    }
-                    return null;
-                  },
-                ),
+                ],
               ],
               const SizedBox(height: 30),
               ElevatedButton(
@@ -506,10 +481,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ),
                 child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        'Create Item',
-                        style: TextStyle(
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2),
+                      )
+                    : Text(
+                        widget.repliedTo == null ? 'Create Item' : 'Offer Trade',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
