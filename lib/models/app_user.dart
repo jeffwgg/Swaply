@@ -1,5 +1,8 @@
+import '../core/utils/parsing.dart';
+
 class AppUser {
-  final String id;
+  final int id;
+  final String authUserId;
   final String username;
   final String email;
   final String? profileImage;
@@ -7,6 +10,7 @@ class AppUser {
 
   const AppUser({
     required this.id,
+    required this.authUserId,
     required this.username,
     required this.email,
     this.profileImage,
@@ -15,17 +19,39 @@ class AppUser {
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
     return AppUser(
-      id: map['id'] as String,
-      username: map['username'] as String,
-      email: map['email'] as String,
-      profileImage: map['profile_image'] as String?,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      id: parseInt(map['id'], fieldName: 'users.id'),
+      authUserId: parseString(
+        map['auth_user_id'],
+        fieldName: 'users.auth_user_id',
+      ),
+      username: parseString(map['username'], fieldName: 'users.username'),
+      email: parseString(map['email'], fieldName: 'users.email'),
+      profileImage: parseNullableString(
+        map['profile_image'],
+        fieldName: 'users.profile_image',
+      ),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'users.created_at',
+      ),
     );
   }
+
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'auth_user_id': authUserId,
+      'username': username,
+      'email': email,
+      'profile_image': profileImage,
+    };
+  }
+
+  Map<String, dynamic> toUpsertMap() => toInsertMap();
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'auth_user_id': authUserId,
       'username': username,
       'email': email,
       'profile_image': profileImage,

@@ -1,10 +1,12 @@
+import '../core/utils/parsing.dart';
+
 class TransactionRequest {
-  final String id;
-  final String itemId;
-  final String requesterId;
+  final int id;
+  final int itemId;
+  final int requesterId;
   final String type;
   final double? offeredPrice;
-  final String? offeredItemId;
+  final int? offeredItemId;
   final String status;
   final DateTime createdAt;
 
@@ -21,15 +23,44 @@ class TransactionRequest {
 
   factory TransactionRequest.fromMap(Map<String, dynamic> map) {
     return TransactionRequest(
-      id: map['id'] as String,
-      itemId: map['item_id'] as String,
-      requesterId: map['requester_id'] as String,
-      type: map['type'] as String,
-      offeredPrice: (map['offered_price'] as num?)?.toDouble(),
-      offeredItemId: map['offered_item_id'] as String?,
-      status: map['status'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      id: parseInt(map['id'], fieldName: 'transaction_requests.id'),
+      itemId: parseInt(
+        map['item_id'],
+        fieldName: 'transaction_requests.item_id',
+      ),
+      requesterId: parseInt(
+        map['requester_id'],
+        fieldName: 'transaction_requests.requester_id',
+      ),
+      type: parseString(map['type'], fieldName: 'transaction_requests.type'),
+      offeredPrice: parseNullableDouble(
+        map['offered_price'],
+        fieldName: 'transaction_requests.offered_price',
+      ),
+      offeredItemId: parseNullableInt(
+        map['offered_item_id'],
+        fieldName: 'transaction_requests.offered_item_id',
+      ),
+      status: parseString(
+        map['status'],
+        fieldName: 'transaction_requests.status',
+      ),
+      createdAt: parseDateTime(
+        map['created_at'],
+        fieldName: 'transaction_requests.created_at',
+      ),
     );
+  }
+
+  Map<String, dynamic> toInsertMap() {
+    return {
+      'item_id': itemId,
+      'requester_id': requesterId,
+      'type': type,
+      'offered_price': offeredPrice,
+      'offered_item_id': offeredItemId,
+      'status': status,
+    };
   }
 
   Map<String, dynamic> toMap() {
