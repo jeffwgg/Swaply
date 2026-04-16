@@ -1,11 +1,26 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
+import 'package:swaply/views/screens/auth/login_screen.dart';
+import '../../../models/app_user.dart';
+import '../../../repositories/favourite_repository.dart';
 import 'item_detail_screen.dart';
 
-class DiscoverScreen extends StatelessWidget {
-  const DiscoverScreen({super.key});
+class DiscoverScreen extends StatefulWidget {
+  final AppUser? user;
+
+  const DiscoverScreen({super.key, this.user});
+
+  @override
+  State<DiscoverScreen> createState() => _DiscoverScreenState();
+}
+
+class _DiscoverScreenState extends State<DiscoverScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   final List<String> _categories = const [
     'All',
@@ -18,6 +33,12 @@ class DiscoverScreen extends StatelessWidget {
   ];
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: _categories.length,
@@ -26,16 +47,31 @@ class DiscoverScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20.0, 50.0, 20.0, 8.0),
           child: Column(
             children: [
-              const TextField(
-                autofocus: false,
+              TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
                 decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  suffixIcon: Icon(Icons.tune),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                        )
+                      : const Icon(Icons.tune),
                   labelText: 'Search',
                   hintText: 'Search items, trades or sellers',
                   filled: true,
                   fillColor: Colors.white,
-                  border: OutlineInputBorder(
+                  border: const OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10.0)),
                   ),
@@ -76,7 +112,13 @@ class DiscoverScreen extends StatelessWidget {
               Expanded(
                 child: TabBarView(
                   children: _categories
-                      .map((cat) => NestedTabBar(cat))
+                      .map(
+                        (cat) => NestedTabBar(
+                          outerTab: cat,
+                          user: widget.user,
+                          searchQuery: _searchQuery,
+                        ),
+                      )
                       .toList(),
                 ),
               ),
@@ -89,8 +131,15 @@ class DiscoverScreen extends StatelessWidget {
 }
 
 class NestedTabBar extends StatefulWidget {
-  const NestedTabBar(this.outerTab, {super.key});
   final String outerTab;
+  final AppUser? user;
+  final String searchQuery;
+  const NestedTabBar({
+    required this.outerTab,
+    required this.searchQuery,
+    this.user,
+    super.key,
+  });
 
   @override
   State<NestedTabBar> createState() => _NestedTabBarState();
@@ -98,15 +147,50 @@ class NestedTabBar extends StatefulWidget {
 
 class _NestedTabBarState extends State<NestedTabBar>
     with TickerProviderStateMixin {
-  final int? loginId = null; //todo
-
   late final TabController _tabController;
+
   final List<String> _types = const ['All Items', 'For Sale', 'For Trade'];
+
+  late Future<List<ItemListing>> _futureItems;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _types.length, vsync: this);
+
+    _loadItems();
+
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      setState(() {
+        _loadItems();
+      });
+    });
+  }
+
+  void _loadItems() {
+    _futureItems = ItemsRepository().getDiscoverList(
+      userId: widget.user?.id,
+      category: widget.outerTab,
+      listingType: _types[_tabController.index] == 'For Sale'
+          ? 'sell'
+          : _types[_tabController.index] == 'For Trade'
+          ? 'trade'
+          : 'both',
+      searchQuery: widget.searchQuery,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant NestedTabBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.user != widget.user ||
+        oldWidget.searchQuery != widget.searchQuery ||
+        oldWidget.outerTab != widget.outerTab) {
+      _loadItems();
+      setState(() {});
+    }
   }
 
   @override
@@ -144,39 +228,50 @@ class _NestedTabBarState extends State<NestedTabBar>
             ),
           ),
         ),
+
+        const SizedBox(height: 10),
+
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: _types.map((type) {
               return FutureBuilder<List<ItemListing>>(
-                future: ItemsRepository().getDiscoverList(
-                  userId: loginId,
-                  category: widget.outerTab,
-                  listingType: type == 'For Sale' ? 'sell' : type == 'For Trade' ? 'trade' : 'both',
-                ),
+                future: _futureItems,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
+
                   if (snapshot.hasError) {
                     return Center(child: Text('Error: ${snapshot.error}'));
                   }
+
                   final items = snapshot.data ?? [];
+
                   if (items.isEmpty) {
                     return const Center(child: Text('No items found.'));
                   }
+
                   return GridView.builder(
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                     itemCount: items.length,
                     gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.75,
-                        ),
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.75,
+                    ),
                     itemBuilder: (context, index) =>
-                        ItemCard(item: items[index]),
+                        ItemCard(
+                          user: widget.user, 
+                          item: items[index],
+                          onRefresh: () {
+                            setState(() {
+                              _loadItems();
+                            });
+                          },
+                        ),
                   );
                 },
               );
@@ -188,9 +283,25 @@ class _NestedTabBarState extends State<NestedTabBar>
   }
 }
 
-class ItemCard extends StatelessWidget {
+class ItemCard extends StatefulWidget {
+  final AppUser? user;
   final ItemListing item;
-  const ItemCard({super.key, required this.item});
+  final VoidCallback? onRefresh;
+
+  const ItemCard({super.key, this.user, required this.item, this.onRefresh});
+
+  @override
+  State<ItemCard> createState() => _ItemCardState();
+}
+
+class _ItemCardState extends State<ItemCard> {
+  late bool isFav;
+
+  @override
+  void initState() {
+    super.initState();
+    isFav = widget.item.isFavorite ?? false;
+  }
 
   Widget _buildImage(String url) {
     if (url.startsWith('http')) {
@@ -199,8 +310,7 @@ class ItemCard extends StatelessWidget {
         height: 120,
         width: double.infinity,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
       );
     }
     return Image.asset(
@@ -208,32 +318,56 @@ class ItemCard extends StatelessWidget {
       height: 120,
       width: double.infinity,
       fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
     );
+  }
+
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    try {
+      final repo = FavouriteRepository();
+
+      final newState = await repo.toggleFavourite(
+        widget.user!.id,
+        widget.item.id,
+      );
+
+      setState(() {
+        isFav = newState;
+      });
+    } catch (e) {
+      debugPrint("Favourite error: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        final result = await Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ItemDetailsScreen(item)),
+          MaterialPageRoute(
+            builder: (_) =>
+                ItemDetailsScreen(user: widget.user, item: widget.item),
+          ),
         );
+        if (result == true) {
+          if (widget.onRefresh != null) {
+            widget.onRefresh!();
+          }
+        }
       },
       child: Container(
-        height: 150,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -244,25 +378,27 @@ class ItemCard extends StatelessWidget {
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(16),
                   ),
-                  child: item.imageUrls.isNotEmpty
-                      ? _buildImage(item.imageUrls[0])
+                  child: widget.item.imageUrls.isNotEmpty
+                      ? _buildImage(widget.item.imageUrls[0])
                       : const SizedBox(
                           height: 120,
                           width: double.infinity,
-                          child: Icon(Icons.image, size: 50, color: Colors.grey),
+                          child: Icon(Icons.image, size: 50),
                         ),
                 ),
+
+                /// PRICE & TRADE TAGS
                 Positioned(
                   top: 10,
                   left: 10,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (item.price != null)
+                      if (widget.item.price != null)
                         Container(
                           margin: const EdgeInsets.only(bottom: 4),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
+                            horizontal: 10,
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
@@ -270,7 +406,7 @@ class ItemCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            'RM ${item.price!.toStringAsFixed(2)}',
+                            'RM ${widget.item.price!.toStringAsFixed(2)}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -278,24 +414,38 @@ class ItemCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                      if (item.listingType == 'trade' ||
-                          item.listingType == 'both')
+                      if (widget.item.listingType == 'trade' ||
+                          widget.item.listingType == 'both')
                         Container(
-                          margin: const EdgeInsets.only(bottom: 4),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 4,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.purple.shade200,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Text(
-                            'FOR TRADE',
+                            'TRADE',
                             style: TextStyle(fontSize: 10, color: Colors.white),
                           ),
                         ),
                     ],
+                  ),
+                ),
+
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: IconButton(
+                      onPressed: _toggleFavourite,
+                      icon: Icon(
+                        isFav ? Icons.favorite : Icons.favorite_border,
+                        color: Colors.red,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -306,7 +456,7 @@ class ItemCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item.name,
+                    widget.item.name.toUpperCase(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -314,12 +464,9 @@ class ItemCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   const Row(
                     children: [
-                      Icon(Icons.location_on, size: 14, color: Colors.grey),
+                      Icon(Icons.location_on, size: 14),
                       SizedBox(width: 4),
-                      Text(
-                        '0.8 miles away',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
+                      Text('0.8 miles away'),
                     ],
                   ),
                 ],

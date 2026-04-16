@@ -13,8 +13,9 @@ class ItemListing {
   final String? preference;
   final int? repliedTo;
   final DateTime createdAt;
+  bool isFavorite; // not from db
 
-  const ItemListing({
+  ItemListing({
     required this.id,
     required this.name,
     required this.description,
@@ -27,6 +28,7 @@ class ItemListing {
     required this.preference,
     this.repliedTo,
     required this.createdAt,
+    this.isFavorite = false
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {

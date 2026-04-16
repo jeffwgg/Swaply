@@ -1,13 +1,16 @@
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/items_repository.dart';
 import '../item/create_item_screen.dart';
+import '../profile/profile_screen.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
+  final AppUser? user;
   final ItemListing item;
-  const ItemDetailsScreen(this.item, {super.key});
+  const ItemDetailsScreen({this.user, required this.item, super.key});
 
   @override
   State<ItemDetailsScreen> createState() => _ItemDetailsScreenState();
@@ -18,6 +21,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
+  bool _isFollowing = false;
 
   @override
   void initState() {
@@ -78,13 +82,60 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     );
   }
 
+  Future<void> _dropListing() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Drop Listing'),
+        content: const Text('Are you sure you want to drop this listing?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Drop'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await ItemsRepository().dropListing(widget.item.id);
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final int loginId = 3; //todo: get real logged-in user ID
+    final user = widget.user;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Item Details')),
+      appBar: AppBar(
+        title: const Text('Item Details'),
+        actions: [
+          if (user != null && user.id == item.ownerId)
+            IconButton(
+              icon: const Icon(Icons.edit, color: Color(0xFF5B21B6)),
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CreateItemScreen(user: user, item: item),
+                  ),
+                );
+                if (result == true && mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -164,22 +215,65 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ),
               ),
               Row(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(
-                    Icons.person,
-                    color: Color(0xFF7C3AED),
-                    size: 18.0,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _ownerName.isEmpty ? 'Unknown' : '@$_ownerName',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: Color(0xFF7C3AED),
-                      fontWeight: FontWeight.w600,
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ProfileScreen(
+                            isDarkMode: Theme.of(context).brightness == Brightness.dark,
+                            onThemeChanged: (_) {},
+                          ),
+                        ),
+                      );
+                    },
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.person,
+                          color: Color(0xFF7C3AED),
+                          size: 18.0,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _ownerName.isEmpty ? 'Unknown' : '@$_ownerName',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            color: Color(0xFF7C3AED),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  if (user != null && user.id != item.ownerId)
+                    SizedBox(
+                      height: 32,
+                      child: TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _isFollowing = !_isFollowing;
+                          });
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: _isFollowing ? const Color(0xFF5B21B6) : Colors.transparent,
+                          side: BorderSide(color: const Color(0xFF5B21B6), width: _isFollowing ? 0 : 1.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                        ),
+                        child: Text(
+                          _isFollowing ? 'Following' : 'Follow',
+                          style: TextStyle(
+                            color: _isFollowing ? Colors.white : const Color(0xFF5B21B6),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -199,7 +293,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           children: [
                             if (item.listingType != 'trade') ...[
                               const Text(
-                                'Asking Price',
+                                'Price',
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: Color(0xFFA78BFA),
@@ -247,8 +341,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               ),
                             ),
                             Text(
-                              item.status[0].toUpperCase() +
-                                  item.status.substring(1).toLowerCase(),
+                              item.status[0].toUpperCase() + item.status.substring(1).toLowerCase(),
                               style: const TextStyle(
                                 fontSize: 24,
                                 color: Color(0xFF5B21B6),
@@ -338,7 +431,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         ],
                       ),
                       Text(
-                        item.preference!,
+                        item.preference ?? 'None',
                         style: const TextStyle(
                           fontSize: 16,
                           color: Color(0xFF7C3AED),
@@ -437,7 +530,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                 ),
                                 const SizedBox(height: 10),
                                 if (item.status != 'dropped')
-                                  if (loginId == item.ownerId &&
+                                  if (user != null && user.id == item.ownerId &&
                                       reply.status == 'pending')
                                     Row(
                                       children: [
@@ -502,11 +595,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 );
               }).toList(),
               const SizedBox(height: 10),
-              if (loginId == item.ownerId)
+              if (user != null && user.id == item.ownerId)
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: () {},
+                    onPressed: _dropListing,
                     style: TextButton.styleFrom(
                       backgroundColor: const Color(0xFFE9E1FE),
                       shape: RoundedRectangleBorder(
@@ -523,7 +616,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                   ),
                 )
-              else ...[
+              else if (user != null) ...[
                 if (item.listingType == 'both')
                   Row(
                     children: [
@@ -552,7 +645,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               context,
                               MaterialPageRoute(
                                 builder: (context) =>
-                                    CreateItemScreen(repliedTo: item.id),
+                                    CreateItemScreen(user: user, repliedTo: item.id),
                               ),
                             );
                             if (result == true) {
@@ -608,7 +701,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (context) =>
-                                CreateItemScreen(repliedTo: item.id),
+                                CreateItemScreen(user: user, repliedTo: item.id),
                           ),
                         );
                         if (result == true) {
