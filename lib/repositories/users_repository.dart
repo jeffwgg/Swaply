@@ -1,8 +1,11 @@
 import '../models/app_user.dart';
 import '../services/supabase_service.dart';
+import 'dart:developer';
 
 class UsersRepository {
-  UsersRepository();
+  static final UsersRepository _instance = UsersRepository._internal();
+  factory UsersRepository() => _instance;
+  UsersRepository._internal();
 
   static const _table = 'users';
 
@@ -45,9 +48,11 @@ class UsersRepository {
         .eq('id', id)
         .maybeSingle();
 
+    log('log $response');
     if (response == null) {
       return null;
     }
+
     return AppUser.fromMap(_requireMap(response, operation: 'getById'));
   }
 
