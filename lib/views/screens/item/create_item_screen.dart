@@ -140,7 +140,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
             ),
             const SizedBox(height: 20),
             DropdownButtonFormField<String>(
-              value: _selectedCategory,
+              initialValue: _selectedCategory,
               hint: const Text('Select Category'),
               decoration: const InputDecoration(
                 filled: true,
@@ -204,10 +204,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   scale: 0.8,
                   child: Switch(
                     activeTrackColor: const Color(0xFF5B21B6),
-                    value: _enableTrading,
+                    value: _enableSelling,
                     onChanged: (bool newValue) {
                       setState(() {
-                        _enableTrading = newValue;
+                        _enableSelling = newValue;
                       });
                     },
                   ),

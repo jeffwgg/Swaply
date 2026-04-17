@@ -30,7 +30,7 @@ class ItemListing {
   factory ItemListing.fromMap(Map<String, dynamic> map) {
     return ItemListing(
       id: parseInt(map['id'], fieldName: 'items.id'),
-      title: parseString(map['title'], fieldName: 'items.title'),
+      title: parseString(map['name'], fieldName: 'items.name'),
       description: parseString(
         map['description'],
         fieldName: 'items.description',
@@ -47,7 +47,9 @@ class ItemListing {
         map['image_url'],
         fieldName: 'items.image_url',
       ),
-      condition: parseString(map['condition'], fieldName: 'items.condition'),
+      condition:
+          parseNullableString(map['condition'], fieldName: 'items.condition') ??
+          'used',
       createdAt: parseDateTime(
         map['created_at'],
         fieldName: 'items.created_at',
@@ -57,7 +59,7 @@ class ItemListing {
 
   Map<String, dynamic> toInsertMap() {
     return {
-      'title': title,
+      'name': title,
       'description': description,
       'price': price,
       'listing_type': listingType,
@@ -65,14 +67,13 @@ class ItemListing {
       'status': status,
       'category': category,
       'image_url': imageUrl,
-      'condition': condition,
     };
   }
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'title': title,
+      'name': title,
       'description': description,
       'price': price,
       'listing_type': listingType,
@@ -80,7 +81,6 @@ class ItemListing {
       'status': status,
       'category': category,
       'image_url': imageUrl,
-      'condition': condition,
       'created_at': createdAt.toIso8601String(),
     };
   }

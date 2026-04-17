@@ -78,7 +78,7 @@ class ChatThread {
       itemId: parseNullableInt(map['item_id'], fieldName: 'chats.item_id'),
       itemTitle: item == null
           ? null
-          : parseNullableString(item['title'], fieldName: 'items.title'),
+          : parseNullableString(item['name'], fieldName: 'items.name'),
       itemOwnerId: item == null
           ? null
           : parseNullableInt(item['owner_id'], fieldName: 'items.owner_id'),

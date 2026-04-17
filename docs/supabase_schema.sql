@@ -50,6 +50,8 @@ create table if not exists public.chats (
   user2_id uuid not null references public.users (id) on delete cascade,
   item_id uuid references public.items (id) on delete set null,
   last_message text,
+  pinned_message_id bigint references public.messages (id) on delete set null,
+  pinned_at timestamptz,
   updated_at timestamptz not null default now(),
   constraint chat_user_pair_not_same check (user1_id <> user2_id)
 );

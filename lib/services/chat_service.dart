@@ -7,43 +7,25 @@ import '../models/chat_pinned_message.dart';
 import '../models/chat_thread.dart';
 import '../repositories/chats_repository.dart';
 import '../repositories/messages_repository.dart';
-import '../repositories/users_repository.dart';
-import 'supabase_service.dart';
 
 class ChatService {
   ChatService({
     ChatsRepository? chatsRepository,
     MessagesRepository? messagesRepository,
-    UsersRepository? usersRepository,
   }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
-       _messagesRepository = messagesRepository ?? MessagesRepository(),
-       _usersRepository = usersRepository ?? UsersRepository();
+       _messagesRepository = messagesRepository ?? MessagesRepository();
 
   final ChatsRepository _chatsRepository;
   final MessagesRepository _messagesRepository;
-  final UsersRepository _usersRepository;
 
   int? _cachedCurrentUserId;
-  String? _cachedAuthUserId;
 
   int? get currentUserId => _cachedCurrentUserId;
 
   Future<int?> refreshCurrentUserId() async {
-    final authUserId = SupabaseService.client.auth.currentUser?.id;
-    if (authUserId == null) {
-      _cachedAuthUserId = null;
-      _cachedCurrentUserId = null;
-      return null;
-    }
-
-    if (_cachedAuthUserId == authUserId && _cachedCurrentUserId != null) {
-      return _cachedCurrentUserId;
-    }
-
-    final appUser = await _usersRepository.getByAuthUserId(authUserId);
-    _cachedAuthUserId = authUserId;
-    _cachedCurrentUserId = appUser?.id;
-    return _cachedCurrentUserId;
+    // TESTING ONLY: Hardcoding current user id to 1.
+    _cachedCurrentUserId = 1;
+    return 1;
   }
 
   Future<List<ChatThread>> loadInbox() async {
