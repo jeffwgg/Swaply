@@ -13,6 +13,9 @@ class SupabaseService {
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
+      authOptions: const FlutterAuthClientOptions(
+        authFlowType: AuthFlowType.pkce,
+      ),
     );
   }
 
@@ -25,5 +28,8 @@ class SupabaseService {
       );
     }
     return Supabase.instance.client;
+  }
+  static Future<void> logout() async {
+    await client.auth.signOut();
   }
 }
