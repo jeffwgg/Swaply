@@ -101,7 +101,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       await SupabaseService.client.storage.from('items').uploadBinary(
             fileName,
             bytes,
-            fileOptions: const FileOptions(upsert: true),
+            fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'),
           );
 
       return SupabaseService.client.storage.from('items').getPublicUrl(fileName);
@@ -156,7 +156,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       if (finalImageUrls.isEmpty) throw Exception('At least one image is required.');
 
-      // 2. Prepare data
       String listingType = 'both';
       if (widget.repliedTo != null) {
         listingType = 'trade';
@@ -166,7 +165,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
 
       if (widget.item != null) {
-        // UPDATE MODE
         final updatedItem = ItemListing(
           id: widget.item!.id,
           name: name,
@@ -184,7 +182,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
         await ItemsRepository().update(updatedItem);
       } else {
-        // CREATE MODE
         final lastId = await ItemsRepository().getLastId();
         int nextIdNum = (lastId ?? 0) + 1;
 
@@ -194,7 +191,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           description: desc,
           price: _enableSelling ? price : null,
           listingType: listingType,
-          ownerId: user!.id,
+          ownerId: widget.user.id,
           status: widget.repliedTo == null ? 'available' : 'pending',
           category: category,
           imageUrls: finalImageUrls,
@@ -301,7 +298,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
                     final adjustedIndex = index - 1;
                     if (adjustedIndex < _existingImageUrls.length) {
-                      // Existing Image Preview
                       return Stack(
                         children: [
                           Padding(
@@ -336,7 +332,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ],
                       );
                     } else {
-                      // New Image Preview
                       final newImageIndex = adjustedIndex - _existingImageUrls.length;
                       return Stack(
                         children: [
@@ -432,45 +427,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               ),
               const SizedBox(height: 20),
               if (widget.repliedTo == null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Selling',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to buy this item',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableSelling,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableSelling = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                _buildToggleRow('Enable Selling', 'Allow users to buy this item', _enableSelling, (val) => setState(() => _enableSelling = val)),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
                   TextFormField(
@@ -495,45 +452,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Trading',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to offer item trades',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableTrading,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableTrading = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                _buildToggleRow('Enable Trading', 'Allow users to offer item trades', _enableTrading, (val) => setState(() => _enableTrading = val)),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
                   TextFormField(
@@ -584,6 +503,24 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildToggleRow(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF5B21B6))),
+              Text(subtitle, style: const TextStyle(fontSize: 16, color: Color(0xFF7C3AED))),
+            ],
+          ),
+        ),
+        Transform.scale(scale: 0.8, child: Switch(activeTrackColor: const Color(0xFF5B21B6), value: value, onChanged: onChanged)),
+      ],
     );
   }
 }

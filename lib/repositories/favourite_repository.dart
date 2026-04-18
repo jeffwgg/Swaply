@@ -60,6 +60,21 @@ class FavouriteRepository {
         .toSet();
   }
 
+  Future<int> getFavouriteCount(int itemId) async {
+    try {
+      final response = await _supabase
+          .from('favourites')
+          .select('*')
+          .eq('item_id', itemId)
+          .count(CountOption.exact);
+      
+      return response.count;
+    } catch (e) {
+      debugPrint('Error getting favourite count: $e');
+      return 0;
+    }
+  }
+
   Future<bool> toggleFavourite(int userId, int itemId) async {
     final exists = await isFavourited(userId, itemId);
 
@@ -71,4 +86,9 @@ class FavouriteRepository {
       return true;
     }
   }
+}
+
+// Added debugPrint helper
+void debugPrint(String message) {
+  print(message);
 }

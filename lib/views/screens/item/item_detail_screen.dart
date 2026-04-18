@@ -1,10 +1,14 @@
+import 'dart:developer';
+
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
+import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
-import '../item/create_item_screen.dart';
+import '../auth/login_screen.dart';
+import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
@@ -17,17 +21,25 @@ class ItemDetailsScreen extends StatefulWidget {
 }
 
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
+  late final AppUser? user;
   String _ownerName = '';
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
   bool _isFollowing = false;
+  bool _isFavourite = false;
+  int _favCount = 0;
 
   @override
   void initState() {
     super.initState();
+    if (widget.user != null) {
+      user = widget.user;
+      _isFavourite = widget.item.isFavorite;
+    }
     _fetchOwner();
     _fetchReplies();
+    _fetchFavouriteCount();
   }
 
   Future<void> _fetchOwner() async {
@@ -52,7 +64,39 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Error fetching replies: $e');
+      log('Error fetching replies: $e');
+    }
+  }
+
+  Future<void> _fetchFavouriteCount() async {
+    final count = await FavouriteRepository().getFavouriteCount(widget.item.id);
+    if (mounted) {
+      setState(() {
+        _favCount = count;
+      });
+    }
+  }
+
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    try {
+      final newState = await FavouriteRepository().toggleFavourite(
+        widget.user!.id,
+        widget.item.id,
+      );
+      setState(() {
+        _isFavourite = newState;
+        _isFavourite ? _favCount++ : _favCount--;
+      });
+    } catch (e) {
+      log("Favourite error: $e");
     }
   }
 
@@ -117,23 +161,81 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Item Details'),
-        actions: [
-          if (user != null && user.id == item.ownerId)
-            IconButton(
-              icon: const Icon(Icons.edit, color: Color(0xFF5B21B6)),
-              onPressed: () async {
-                final result = await Navigator.push(
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => CreateItemScreen(user: user, item: item),
+                    builder: (context) => ProfileScreen(
+                      isDarkMode:
+                          Theme.of(context).brightness == Brightness.dark,
+                      onThemeChanged: (_) {},
+                    ),
                   ),
                 );
-                if (result == true && mounted) {
-                  Navigator.pop(context, true);
-                }
               },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircleAvatar(
+                    radius: 16,
+                    backgroundImage: AssetImage('assets/sample.jpeg'),
+                  ),
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 0, 16, 0),
+                    child: Text(_ownerName, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
             ),
+            if (user == null || user.id != item.ownerId)
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _isFollowing = !_isFollowing;
+                  });
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor: _isFollowing
+                      ? const Color(0xFF5B21B6)
+                      : Colors.transparent,
+                  side: BorderSide(
+                    color: const Color(0xFF5B21B6),
+                    width: _isFollowing ? 0 : 1.5,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  _isFollowing ? 'Following' : 'Follow',
+                  style: TextStyle(
+                    color: _isFollowing
+                        ? Colors.white
+                        : const Color(0xFF5B21B6),
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share, color: Color(0xFF5B21B6)),
+            onPressed: () {
+              // todo: share functionality
+            },
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -181,14 +283,16 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             ),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: (Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? Colors.white
-                                      : Colors.deepPurple)
-                                  .withOpacity(
-                                      _currentImageIndex == entry.key
-                                          ? 0.9
-                                          : 0.4),
+                              color:
+                                  (Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white
+                                          : Colors.deepPurple)
+                                      .withOpacity(
+                                        _currentImageIndex == entry.key
+                                            ? 0.9
+                                            : 0.4,
+                                      ),
                             ),
                           );
                         }).toList(),
@@ -205,76 +309,48 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                   child: const Icon(Icons.image, size: 100, color: Colors.grey),
                 ),
-              const SizedBox(height: 24),
-              Text(
-                item.name,
-                style: const TextStyle(
-                  fontSize: 24,
-                  color: Color(0xFF5B21B6),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ProfileScreen(
-                            isDarkMode: Theme.of(context).brightness == Brightness.dark,
-                            onThemeChanged: (_) {},
-                          ),
-                        ),
-                      );
-                    },
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.person,
-                          color: Color(0xFF7C3AED),
-                          size: 18.0,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _ownerName.isEmpty ? 'Unknown' : '@$_ownerName',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            color: Color(0xFF7C3AED),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (user != null && user.id != item.ownerId)
-                    SizedBox(
-                      height: 32,
-                      child: TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _isFollowing = !_isFollowing;
-                          });
-                        },
-                        style: TextButton.styleFrom(
-                          backgroundColor: _isFollowing ? const Color(0xFF5B21B6) : Colors.transparent,
-                          side: BorderSide(color: const Color(0xFF5B21B6), width: _isFollowing ? 0 : 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: Text(
-                          _isFollowing ? 'Following' : 'Follow',
-                          style: TextStyle(
-                            color: _isFollowing ? Colors.white : const Color(0xFF5B21B6),
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        color: Color(0xFF5B21B6),
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: _toggleFavourite,
+                        icon: Icon(
+                          _isFavourite ? Icons.favorite : Icons.favorite_border,
+                          color: _isFavourite ? Colors.red : Color(0xFF5B21B6),
+                          size: 28,
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$_favCount',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF5B21B6),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
+              ),
+              Text(
+                item.description,
+                style: const TextStyle(fontSize: 16, color: Color(0xFF7C3AED)),
               ),
               const SizedBox(height: 10),
               Row(
@@ -282,39 +358,29 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: const Color(0xFFF2ECFF),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFEDE9FE)),
+                        border: Border.all(color: const Color(0xFFD5BFFD)),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (item.listingType != 'trade') ...[
-                              const Text(
-                                'Price',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Color(0xFFA78BFA),
-                                ),
+                            const Text(
+                              'CATEGORY',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFFA78BFA),
                               ),
-                              Text(
-                                'RM ${item.price!.toStringAsFixed(0)}',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  color: Color(0xFF5B21B6),
-                                ),
+                            ),
+                            Text(
+                              item.category,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                color: Color(0xFF5B21B6),
                               ),
-                            ] else ...[
-                              const Text(
-                                'Only For Trade',
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  color: Color(0xFF5B21B6),
-                                ),
-                              ),
-                            ],
+                            ),
                           ],
                         ),
                       ),
@@ -324,27 +390,44 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE9E1FE),
+                        color: item.status == 'available'
+                            ? Color(0xFFE6FEE1)
+                            : item.status == 'dropped'
+                            ? Color(0xFFFFC0C4)
+                            : Color(0xFFF2ECFF),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFC9AFF9)),
+                        border: item.status == 'available'
+                            ? Border.all(color: const Color(0xFFAFF9B6))
+                            : item.status == 'dropped'
+                            ? Border.all(color: const Color(0xFFFFA0A2))
+                            : Border.all(color: const Color(0xFFD5BFFD)),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Status',
+                            Text(
+                              'STATUS',
                               style: TextStyle(
                                 fontSize: 16,
-                                color: Color(0xFF7C3AED),
+                                color: item.status == 'available'
+                                    ? Color(0xFF65BE4A)
+                                    : item.status == 'dropped'
+                                    ? Color(0xFFFF3E41)
+                                    : Color(0xFF7C3AED),
                               ),
                             ),
                             Text(
-                              item.status[0].toUpperCase() + item.status.substring(1).toLowerCase(),
-                              style: const TextStyle(
-                                fontSize: 24,
-                                color: Color(0xFF5B21B6),
+                              item.status[0].toUpperCase() +
+                                  item.status.substring(1).toLowerCase(),
+                              style: TextStyle(
+                                fontSize: 22,
+                                color: item.status == 'available'
+                                    ? const Color(0xFF2D7D26)
+                                    : item.status == 'dropped'
+                                    ? const Color(0xFFDE1518)
+                                    : const Color(0xFF5B21B6),
                               ),
                             ),
                           ],
@@ -355,125 +438,127 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ],
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: const Border(
-                    left: BorderSide(color: Color(0xFF5B21B6), width: 5),
+              if (item.listingType != 'trade')
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: const Border(
+                      left: BorderSide(color: Color(0xFF5B21B6), width: 5),
+                    ),
                   ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.description_outlined,
-                            color: Color(0xFF5B21B6),
-                            size: 20,
-                          ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Item Description',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.sell_outlined,
                               color: Color(0xFF5B21B6),
+                              size: 20,
                             ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        item.description,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF7C3AED),
+                            const SizedBox(width: 10),
+                            const Text(
+                              'Price',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF5B21B6),
+                              ),
+                            ),
+                            Expanded(child: SizedBox()),
+                            Text(
+                              'RM ${item.price!.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF7C3AED),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(height: 10),
               if (item.listingType != 'sell')
                 Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: const Border(
-                    left: BorderSide(color: Color(0xFF5B21B6), width: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: const Border(
+                      left: BorderSide(color: Color(0xFF5B21B6), width: 5),
+                    ),
                   ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.transfer_within_a_station,
-                            color: Color(0xFF5B21B6),
-                            size: 20,
-                          ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Trade Preferences',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.transfer_within_a_station,
                               color: Color(0xFF5B21B6),
+                              size: 20,
                             ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        item.preference ?? 'None',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF7C3AED),
+                            SizedBox(width: 10),
+                            Text(
+                              'Trade Preferences',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF5B21B6),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                        Text(
+                          item.preference ?? 'None',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Color(0xFF7C3AED),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(height: 10),
               if (item.listingType != 'sell')
                 Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Public Trade Offers',
-                      style: TextStyle(
-                        fontSize: 20,
-                        color: Color(0xFF5B21B6),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE9E1FE),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFC9AFF9)),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                  children: [
+                    const Expanded(
                       child: Text(
-                        '${_replies.length} ACTIVE',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF7C3AED),
+                        'Public Trade Offers',
+                        style: TextStyle(
+                          fontSize: 20,
+                          color: Color(0xFF5B21B6),
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE9E1FE),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFC9AFF9)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                        child: Text(
+                          '${_replies.length} ACTIVE',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFF7C3AED),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               const SizedBox(height: 10),
               ..._replies.map((reply) {
                 return Container(
@@ -530,7 +615,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                 ),
                                 const SizedBox(height: 10),
                                 if (item.status != 'dropped')
-                                  if (user != null && user.id == item.ownerId &&
+                                  if (user != null &&
+                                      user.id == item.ownerId &&
                                       reply.status == 'pending')
                                     Row(
                                       children: [
@@ -596,33 +682,75 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
               }).toList(),
               const SizedBox(height: 10),
               if (user != null && user.id == item.ownerId)
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                    onPressed: _dropListing,
-                    style: TextButton.styleFrom(
-                      backgroundColor: const Color(0xFFE9E1FE),
-                      shape: RoundedRectangleBorder(
-                        side: const BorderSide(
-                          color: Color(0xFF7C3AED),
-                          width: 2,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () async {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  CreateItemScreen(user: user, item: item),
+                            ),
+                          );
+                          if (result == true && mounted) {
+                            Navigator.pop(context, true);
+                          }
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: const Color(0xFF5B21B6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(10),
+                        child: const Text(
+                          'Edit Listing',
+                          style: TextStyle(fontSize: 16, color: Colors.white),
+                        ),
                       ),
                     ),
-                    child: const Text(
-                      'Drop Listing',
-                      style: TextStyle(fontSize: 16, color: Color(0xFF7C3AED)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: _dropListing,
+                        style: TextButton.styleFrom(
+                          backgroundColor: const Color(0xFFE9E1FE),
+                          shape: RoundedRectangleBorder(
+                            side: const BorderSide(
+                              color: Color(0xFF7C3AED),
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Drop Listing',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Color(0xFF7C3AED),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 )
-              else if (user != null) ...[
+              else ...[
                 if (item.listingType == 'both')
                   Row(
                     children: [
                       Expanded(
                         child: TextButton(
                           onPressed: () {
+                            if (user == null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const LoginScreen(),
+                                ),
+                              );
+                              return;
+                            }
                             //todo: link to transaction page
                           },
                           style: TextButton.styleFrom(
@@ -641,16 +769,25 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       Expanded(
                         child: TextButton(
                           onPressed: () async {
+                            if (user == null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const LoginScreen(),
+                                ),
+                              );
+                              return;
+                            }
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    CreateItemScreen(user: user, repliedTo: item.id),
+                                builder: (context) => CreateItemScreen(
+                                  user: user,
+                                  repliedTo: item.id,
+                                ),
                               ),
                             );
-                            if (result == true) {
-                              _fetchReplies();
-                            }
+                            if (result == true) _fetchReplies();
                           },
                           style: TextButton.styleFrom(
                             backgroundColor: const Color(0xFFE9E1FE),
@@ -678,6 +815,15 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     width: double.infinity,
                     child: TextButton(
                       onPressed: () {
+                        if (user == null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(),
+                            ),
+                          );
+                          return;
+                        }
                         //todo: link to transaction page
                       },
                       style: TextButton.styleFrom(
@@ -697,16 +843,25 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     width: double.infinity,
                     child: TextButton(
                       onPressed: () async {
+                        if (user == null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(),
+                            ),
+                          );
+                          return;
+                        }
                         final result = await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) =>
-                                CreateItemScreen(user: user, repliedTo: item.id),
+                            builder: (context) => CreateItemScreen(
+                              user: user,
+                              repliedTo: item.id,
+                            ),
                           ),
                         );
-                        if (result == true) {
-                          _fetchReplies();
-                        }
+                        if (result == true) _fetchReplies();
                       },
                       style: TextButton.styleFrom(
                         backgroundColor: const Color(0xFFE9E1FE),

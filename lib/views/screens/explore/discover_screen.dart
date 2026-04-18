@@ -7,7 +7,7 @@ import 'package:swaply/repositories/items_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
 import '../../../models/app_user.dart';
 import '../../../repositories/favourite_repository.dart';
-import 'item_detail_screen.dart';
+import '../item/item_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
   final AppUser? user;
@@ -307,7 +307,7 @@ class _ItemCardState extends State<ItemCard> {
     if (url.startsWith('http')) {
       return Image.network(
         url,
-        height: 120,
+        height: 150,
         width: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
@@ -343,7 +343,7 @@ class _ItemCardState extends State<ItemCard> {
         isFav = newState;
       });
     } catch (e) {
-      debugPrint("Favourite error: $e");
+      log("Favourite error: $e");
     }
   }
 
