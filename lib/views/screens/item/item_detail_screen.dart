@@ -77,29 +77,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
   }
 
-  Future<void> _toggleFavourite() async {
-    if (widget.user == null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-      return;
-    }
-
-    try {
-      final newState = await FavouriteRepository().toggleFavourite(
-        widget.user!.id,
-        widget.item.id,
-      );
-      setState(() {
-        _isFavourite = newState;
-        _isFavourite ? _favCount++ : _favCount--;
-      });
-    } catch (e) {
-      log("Favourite error: $e");
-    }
-  }
-
   Widget _buildImage(
     String url, {
     double? width,
@@ -124,6 +101,30 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       errorBuilder: (context, error, stackTrace) =>
           const Icon(Icons.broken_image, size: 50),
     );
+  }
+
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    try {
+      final newState = await FavouriteRepository().toggleFavourite(
+        widget.user!.id,
+        widget.item.id,
+      );
+      setState(() {
+        widget.item.isFavorite = newState;
+        _isFavourite = newState;
+        _isFavourite ? _favCount++ : _favCount--;
+      });
+    } catch (e) {
+      log("Favourite error: $e");
+    }
   }
 
   Future<void> _dropListing() async {
@@ -152,6 +153,61 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         Navigator.pop(context, true);
       }
     }
+  }
+
+  Future<void> _dropReply(int id) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Drop Trade Offer'),
+        content: const Text('Are you sure you want to drop this trade offer?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Drop'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await ItemsRepository().dropListing(id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Offer dropped successfully')),
+          );
+          _fetchReplies();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error dropping offer: $e')));
+        }
+        log("Error dropping offer: $e");
+      }
+    }
+  }
+
+  Future<void> _acceptReply(int replyId) async {
+    for (var r in _replies) {
+      if (r.id == replyId) {
+        await ItemsRepository().updateStatus('accepted', r.id);
+      } else if (r.status != 'dropped') {
+        await ItemsRepository().updateStatus('rejected', r.id);
+      }
+    }
+    await ItemsRepository().updateStatus('reserved', widget.item.id);
+  }
+
+  Future<void> _rejectReply(int replyId) async {
+    await ItemsRepository().updateStatus('rejected', replyId);
   }
 
   @override
@@ -314,7 +370,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      item.name,
+                      item.name.toUpperCase(),
                       style: const TextStyle(
                         fontSize: 24,
                         color: Color(0xFF5B21B6),
@@ -587,31 +643,76 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  reply.name,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    color: Color(0xFF5B21B6),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
                                 Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Icon(
-                                      Icons.person,
-                                      color: Color(0xFF7C3AED),
-                                      size: 18.0,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      '@${_replyOwnerNames[reply.id] ?? '...'}',
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        color: Color(0xFF7C3AED),
-                                        fontWeight: FontWeight.w600,
+                                    Expanded(
+                                      child: Text(
+                                        reply.name.toUpperCase(),
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          color: Color(0xFF5B21B6),
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
+                                    if (user != null &&
+                                        user.id == reply.ownerId)
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.red,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        onPressed: () => _dropReply(reply.id),
+                                      ),
                                   ],
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => ProfileScreen(
+                                          isDarkMode:
+                                              Theme.of(context).brightness ==
+                                              Brightness.dark,
+                                          onThemeChanged: (_) {},
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const CircleAvatar(
+                                        radius: 12,
+                                        backgroundImage: AssetImage(
+                                          'assets/sample.jpeg',
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          0,
+                                          0,
+                                          16,
+                                          0,
+                                        ),
+                                        child: Text(
+                                          _replyOwnerNames[reply.id]!,
+                                          style: const TextStyle(
+                                            fontSize: 18,
+                                            color: Color(0xFF7C3AED),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                                 const SizedBox(height: 10),
                                 if (item.status != 'dropped')
@@ -622,7 +723,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                       children: [
                                         Expanded(
                                           child: TextButton(
-                                            onPressed: () {},
+                                            onPressed: () {
+                                              _acceptReply(reply.id);
+                                            },
                                             style: TextButton.styleFrom(
                                               backgroundColor: const Color(
                                                 0xFF5B21B6,
@@ -644,7 +747,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: TextButton(
-                                            onPressed: () {},
+                                            onPressed: () {
+                                              _rejectReply(reply.id);
+                                            },
                                             style: TextButton.styleFrom(
                                               backgroundColor: const Color(
                                                 0xFFE9E1FE,

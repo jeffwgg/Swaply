@@ -45,7 +45,7 @@ class ItemsRepository {
 
     if (searchQuery != null && searchQuery.isNotEmpty) {
       query = query.ilike('name', '%$searchQuery%');
-    }else{
+    } else {
       // Exclude items owned by the current user by default
       if (userId != null) {
         query = query.neq('owner_id', userId);
@@ -113,6 +113,7 @@ class ItemsRepository {
     var query = SupabaseService.client
         .from(_table)
         .select()
+        .neq('status', 'dropped')
         .eq('replied_to', id);
 
     final response = await query.order('created_at', ascending: false);
@@ -124,6 +125,13 @@ class ItemsRepository {
     await SupabaseService.client
         .from(_table)
         .update({'status': 'dropped'})
+        .eq('id', id);
+  }
+
+  Future<void> updateStatus(String s, int id) async {
+    await SupabaseService.client
+        .from(_table)
+        .update({'status': s})
         .eq('id', id);
   }
 }

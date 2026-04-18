@@ -295,58 +295,6 @@ class ItemCard extends StatefulWidget {
 }
 
 class _ItemCardState extends State<ItemCard> {
-  late bool isFav;
-
-  @override
-  void initState() {
-    super.initState();
-    isFav = widget.item.isFavorite ?? false;
-  }
-
-  Widget _buildImage(String url) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        height: 150,
-        width: double.infinity,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.asset(
-      url,
-      height: 120,
-      width: double.infinity,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
-    );
-  }
-
-  Future<void> _toggleFavourite() async {
-    if (widget.user == null) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-      return;
-    }
-
-    try {
-      final repo = FavouriteRepository();
-
-      final newState = await repo.toggleFavourite(
-        widget.user!.id,
-        widget.item.id,
-      );
-
-      setState(() {
-        isFav = newState;
-      });
-    } catch (e) {
-      log("Favourite error: $e");
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -358,6 +306,11 @@ class _ItemCardState extends State<ItemCard> {
                 ItemDetailsScreen(user: widget.user, item: widget.item),
           ),
         );
+        
+        // Refresh the card UI when returning from details screen
+        // widget.item is updated inside ItemDetailsScreen
+        setState(() {});
+
         if (result == true) {
           if (widget.onRefresh != null) {
             widget.onRefresh!();
@@ -442,7 +395,7 @@ class _ItemCardState extends State<ItemCard> {
                     child: IconButton(
                       onPressed: _toggleFavourite,
                       icon: Icon(
-                        isFav ? Icons.favorite : Icons.favorite_border,
+                        widget.item.isFavorite ? Icons.favorite : Icons.favorite_border,
                         color: Colors.red,
                       ),
                     ),
@@ -476,5 +429,49 @@ class _ItemCardState extends State<ItemCard> {
         ),
       ),
     );
+  }
+
+  Widget _buildImage(String url) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        height: 150,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.asset(
+      url,
+      height: 120,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+    );
+  }
+
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    try {
+      final repo = FavouriteRepository();
+
+      final newState = await repo.toggleFavourite(
+        widget.user!.id,
+        widget.item.id,
+      );
+
+      setState(() {
+        widget.item.isFavorite = newState;
+      });
+    } catch (e) {
+      log("Favourite error: $e");
+    }
   }
 }
