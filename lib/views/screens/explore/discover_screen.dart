@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
+import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
 import '../../../models/app_user.dart';
 import '../../../repositories/favourite_repository.dart';
@@ -40,55 +41,73 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
+    const accentSoft = Color(0xFFF3E8FF);
     return DefaultTabController(
       length: _categories.length,
       child: Scaffold(
-        body: Padding(
-          padding: const EdgeInsets.fromLTRB(20.0, 50.0, 20.0, 8.0),
-          child: Column(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20.0, 16.0, 20.0, 8.0),
+            child: Column(
             children: [
-              TextField(
-                controller: _searchController,
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                  });
-                },
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchQuery = '';
-                            });
-                          },
-                        )
-                      : const Icon(Icons.tune),
-                  labelText: 'Search',
-                  hintText: 'Search items, trades or sellers',
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                    borderSide: BorderSide.none,
-                    borderRadius: BorderRadius.all(Radius.circular(10.0)),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.deepPurple.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search, color: accent),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, color: accent),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : const Icon(Icons.tune, color: accent),
+                    labelText: 'Search listings',
+                    labelStyle: const TextStyle(color: accent),
+                    hintText: 'Search items or sellers',
+                    filled: true,
+                    fillColor: Colors.transparent,
+                    border: const OutlineInputBorder(
+                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.all(Radius.circular(14.0)),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               TabBar(
                 dividerColor: Colors.transparent,
                 overlayColor: WidgetStateProperty.all(Colors.transparent),
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 labelColor: Colors.white,
-                unselectedLabelColor: Colors.black,
+                unselectedLabelColor: accent,
                 indicatorSize: TabBarIndicatorSize.tab,
                 indicator: const BubbleTabIndicator(
                   indicatorHeight: 30.0,
-                  indicatorColor: Colors.deepPurple,
+                  indicatorColor: accent,
                   indicatorRadius: 10.0,
                   tabBarIndicatorSize: TabBarIndicatorSize.tab,
                 ),
@@ -108,7 +127,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   return Tab(text: cat);
                 }).toList(),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Expanded(
                 child: TabBarView(
                   children: _categories
@@ -123,6 +142,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -201,31 +221,31 @@ class _NestedTabBarState extends State<NestedTabBar>
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
     return Column(
       children: <Widget>[
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.shade50,
-              borderRadius: BorderRadius.circular(10.0),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3E8FF),
+            borderRadius: BorderRadius.circular(10.0),
+            border: Border.all(color: const Color(0xFFE9D5FF)),
+          ),
+          child: TabBar.secondary(
+            controller: _tabController,
+            dividerColor: Colors.transparent,
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            isScrollable: false,
+            labelColor: accent,
+            unselectedLabelColor: const Color(0xFF7C3AED),
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicator: const BubbleTabIndicator(
+              indicatorHeight: 40.0,
+              indicatorColor: Colors.white,
+              indicatorRadius: 10.0,
+              tabBarIndicatorSize: TabBarIndicatorSize.tab,
             ),
-            child: TabBar.secondary(
-              controller: _tabController,
-              dividerColor: Colors.transparent,
-              overlayColor: WidgetStateProperty.all(Colors.transparent),
-              isScrollable: true,
-              labelColor: Colors.deepPurple,
-              unselectedLabelColor: Colors.purple,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: const BubbleTabIndicator(
-                indicatorHeight: 40.0,
-                indicatorColor: Colors.white,
-                indicatorRadius: 10.0,
-                tabBarIndicatorSize: TabBarIndicatorSize.tab,
-              ),
-              tabs: _types.map((type) => Tab(text: type)).toList(),
-            ),
+            tabs: _types.map((type) => Tab(text: type)).toList(),
           ),
         ),
 
@@ -239,7 +259,9 @@ class _NestedTabBarState extends State<NestedTabBar>
                 future: _futureItems,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(
+                      child: CircularProgressIndicator(color: accent),
+                    );
                   }
 
                   if (snapshot.hasError) {
@@ -249,7 +271,35 @@ class _NestedTabBarState extends State<NestedTabBar>
                   final items = snapshot.data ?? [];
 
                   if (items.isEmpty) {
-                    return const Center(child: Text('No items found.'));
+                    return Container(
+                      margin: const EdgeInsets.only(top: 18),
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE9D5FF)),
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off, size: 38, color: accent),
+                          SizedBox(height: 10),
+                          Text(
+                            'No items found',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: accent,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Try changing category or search words.',
+                            style: TextStyle(color: Color(0xFF7C3AED)),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    );
                   }
 
                   return GridView.builder(
@@ -260,7 +310,7 @@ class _NestedTabBarState extends State<NestedTabBar>
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: 0.75,
+                      childAspectRatio: 0.82,
                     ),
                     itemBuilder: (context, index) =>
                         ItemCard(
@@ -295,6 +345,14 @@ class ItemCard extends StatefulWidget {
 }
 
 class _ItemCardState extends State<ItemCard> {
+  late final Future<AppUser?> _ownerFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownerFuture = UsersRepository().getById(widget.item.ownerId);
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -321,6 +379,14 @@ class _ItemCardState extends State<ItemCard> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE9D5FF)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.deepPurple.withOpacity(0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,8 +458,11 @@ class _ItemCardState extends State<ItemCard> {
                   right: 10,
                   child: CircleAvatar(
                     backgroundColor: Colors.white,
+                    radius: 16,
                     child: IconButton(
                       onPressed: _toggleFavourite,
+                      iconSize: 18,
+                      padding: EdgeInsets.zero,
                       icon: Icon(
                         widget.item.isFavorite ? Icons.favorite : Icons.favorite_border,
                         color: Colors.red,
@@ -415,11 +484,39 @@ class _ItemCardState extends State<ItemCard> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.location_on, size: 14),
-                      SizedBox(width: 4),
-                      Text('0.8 miles away'),
+                      FutureBuilder<AppUser?>(
+                        future: _ownerFuture,
+                        builder: (context, snapshot) {
+                          final owner = snapshot.data;
+                          final image = owner?.profileImage;
+                          final avatar = image != null && image.isNotEmpty
+                              ? (image.startsWith('http')
+                                    ? NetworkImage(image)
+                                    : AssetImage(image) as ImageProvider)
+                              : const AssetImage('assets/sample.jpeg');
+                          return CircleAvatar(
+                            radius: 9,
+                            backgroundImage: avatar,
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: FutureBuilder<AppUser?>(
+                          future: _ownerFuture,
+                          builder: (context, snapshot) {
+                            final ownerName = snapshot.data?.username ?? 'Unknown';
+                            return Text(
+                              ownerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Color(0xFF7C3AED)),
+                            );
+                          },
+                        ),
+                      ),
                     ],
                   ),
                 ],

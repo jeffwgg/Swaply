@@ -214,6 +214,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final user = widget.user;
+    const accent = Color(0xFF5B21B6);
+    const accentSoft = Color(0xFFF3E8FF);
 
     return Scaffold(
       appBar: AppBar(
@@ -303,28 +305,34 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
               if (item.imageUrls.isNotEmpty)
                 Column(
                   children: [
-                    CarouselSlider(
-                      options: CarouselOptions(
-                        height: 250,
-                        viewportFraction: 1.0,
-                        enlargeCenterPage: false,
-                        enableInfiniteScroll: item.imageUrls.length > 1,
-                        onPageChanged: (index, reason) {
-                          setState(() {
-                            _currentImageIndex = index;
-                          });
-                        },
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE9D5FF)),
                       ),
-                      items: item.imageUrls.map((url) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: _buildImage(
-                            url,
-                            width: double.infinity,
-                            height: 250,
-                          ),
-                        );
-                      }).toList(),
+                      child: CarouselSlider(
+                        options: CarouselOptions(
+                          height: 250,
+                          viewportFraction: 1.0,
+                          enlargeCenterPage: false,
+                          enableInfiniteScroll: item.imageUrls.length > 1,
+                          onPageChanged: (index, reason) {
+                            setState(() {
+                              _currentImageIndex = index;
+                            });
+                          },
+                        ),
+                        items: item.imageUrls.map((url) {
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: _buildImage(
+                              url,
+                              width: double.infinity,
+                              height: 250,
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
                     if (item.imageUrls.length > 1)
                       Row(
@@ -365,6 +373,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                   child: const Icon(Icons.image, size: 100, color: Colors.grey),
                 ),
+              const SizedBox(height: 14),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -408,13 +417,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 item.description,
                 style: const TextStyle(fontSize: 16, color: Color(0xFF7C3AED)),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF2ECFF),
+                        color: accentSoft,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFD5BFFD)),
                       ),
@@ -493,7 +502,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               if (item.listingType != 'trade')
                 Container(
                   decoration: BoxDecoration(
@@ -502,6 +511,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     border: const Border(
                       left: BorderSide(color: Color(0xFF5B21B6), width: 5),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.deepPurple.withOpacity(0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
@@ -538,7 +554,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               if (item.listingType != 'sell')
                 Container(
                   decoration: BoxDecoration(
@@ -547,6 +563,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     border: const Border(
                       left: BorderSide(color: Color(0xFF5B21B6), width: 5),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.deepPurple.withOpacity(0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
@@ -582,7 +605,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 16),
               if (item.listingType != 'sell')
                 Row(
                   children: [
@@ -598,7 +621,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE9E1FE),
+                        color: accentSoft,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFC9AFF9)),
                       ),
@@ -622,6 +645,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE9D5FF)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.deepPurple.withOpacity(0.06),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8.0),
@@ -734,6 +765,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                                 borderRadius:
                                                     BorderRadius.circular(10),
                                               ),
+                                              padding: const EdgeInsets.symmetric(
+                                                vertical: 10,
+                                              ),
                                             ),
                                             child: const Text(
                                               'Accept',
@@ -754,9 +788,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                               backgroundColor: const Color(
                                                 0xFFE9E1FE,
                                               ),
+                                              foregroundColor: accent,
                                               shape: RoundedRectangleBorder(
                                                 borderRadius:
                                                     BorderRadius.circular(10),
+                                              ),
+                                              padding: const EdgeInsets.symmetric(
+                                                vertical: 10,
                                               ),
                                             ),
                                             child: const Text(
@@ -785,7 +823,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                 );
               }).toList(),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               if (user != null && user.id == item.ownerId)
                 Row(
                   children: [
@@ -804,10 +842,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           }
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: const Color(0xFF5B21B6),
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         child: const Text(
                           'Edit Listing',
@@ -820,7 +860,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       child: TextButton(
                         onPressed: _dropListing,
                         style: TextButton.styleFrom(
-                          backgroundColor: const Color(0xFFE9E1FE),
+                          backgroundColor: accentSoft,
                           shape: RoundedRectangleBorder(
                             side: const BorderSide(
                               color: Color(0xFF7C3AED),
@@ -828,6 +868,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             ),
                             borderRadius: BorderRadius.circular(10),
                           ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         child: const Text(
                           'Drop Listing',
@@ -859,10 +900,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             //todo: link to transaction page
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xFF5B21B6),
+                            backgroundColor: accent,
+                            foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
                             'Buy Now',
@@ -895,7 +938,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             if (result == true) _fetchReplies();
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xFFE9E1FE),
+                            backgroundColor: accentSoft,
                             shape: RoundedRectangleBorder(
                               side: const BorderSide(
                                 color: Color(0xFF7C3AED),
@@ -903,6 +946,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               ),
                               borderRadius: BorderRadius.circular(10),
                             ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
                             'Offer Trade',
@@ -932,10 +976,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         //todo: link to transaction page
                       },
                       style: TextButton.styleFrom(
-                        backgroundColor: const Color(0xFF5B21B6),
+                        backgroundColor: accent,
+                        foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       child: const Text(
                         'Buy Now',
@@ -969,7 +1015,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         if (result == true) _fetchReplies();
                       },
                       style: TextButton.styleFrom(
-                        backgroundColor: const Color(0xFFE9E1FE),
+                        backgroundColor: accentSoft,
                         shape: RoundedRectangleBorder(
                           side: const BorderSide(
                             color: Color(0xFF7C3AED),
@@ -977,6 +1023,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           ),
                           borderRadius: BorderRadius.circular(10),
                         ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       child: const Text(
                         'Offer Trade',

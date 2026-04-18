@@ -13,7 +13,12 @@ class CreateItemScreen extends StatefulWidget {
   final AppUser user;
   final ItemListing? item;
   final int? repliedTo;
-  const CreateItemScreen({super.key, required this.user, this.item, this.repliedTo});
+  const CreateItemScreen({
+    super.key,
+    required this.user,
+    this.item,
+    this.repliedTo,
+  });
 
   @override
   State<CreateItemScreen> createState() => _CreateItemScreenState();
@@ -61,7 +66,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _selectedCategory = item.category;
 
       _enableSelling = item.listingType == 'sell' || item.listingType == 'both';
-      _enableTrading = item.listingType == 'trade' || item.listingType == 'both';
+      _enableTrading =
+          item.listingType == 'trade' || item.listingType == 'both';
     }
 
     if (widget.repliedTo != null) {
@@ -98,13 +104,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       final bytes = await imageFile.readAsBytes();
 
-      await SupabaseService.client.storage.from('items').uploadBinary(
+      await SupabaseService.client.storage
+          .from('items')
+          .uploadBinary(
             fileName,
             bytes,
-            fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'),
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
           );
 
-      return SupabaseService.client.storage.from('items').getPublicUrl(fileName);
+      return SupabaseService.client.storage
+          .from('items')
+          .getPublicUrl(fileName);
     } catch (e) {
       debugPrint('Upload error: $e');
       return null;
@@ -136,7 +149,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in name, description and category.')),
+        const SnackBar(
+          content: Text('Please fill in name, description and category.'),
+        ),
       );
       return;
     }
@@ -154,7 +169,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         }
       }
 
-      if (finalImageUrls.isEmpty) throw Exception('At least one image is required.');
+      if (finalImageUrls.isEmpty)
+        throw Exception('At least one image is required.');
 
       String listingType = 'both';
       if (widget.repliedTo != null) {
@@ -205,15 +221,19 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.item != null ? 'Item updated!' : 'Item created!')),
+          SnackBar(
+            content: Text(
+              widget.item != null ? 'Item updated!' : 'Item created!',
+            ),
+          ),
         );
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -224,14 +244,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  Widget _buildPreviewImage(String url, {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+  Widget _buildPreviewImage(
+    String url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+  }) {
     if (url.startsWith('http')) {
       return Image.network(
         url,
         width: width,
         height: height,
         fit: fit,
-        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 50),
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
       );
     }
     return Image.asset(
@@ -239,12 +265,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       width: width,
       height: height,
       fit: fit,
-      errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 50),
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 50),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
+    const fieldFill = Color(0xFFF3E8FF);
     String title = 'Create Item';
     if (widget.item != null) title = 'Edit Item';
     if (widget.repliedTo != null) title = 'Offer Trade';
@@ -254,7 +283,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     if (widget.repliedTo != null) buttonText = 'Offer Trade';
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(title),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: accent,
+      ),
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -271,114 +305,132 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 100,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _images.length + _existingImageUrls.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      return GestureDetector(
-                        onTap: _pickImage,
-                        child: Container(
-                          width: 100,
-                          margin: const EdgeInsets.only(right: 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF6D28D9),
-                            borderRadius: BorderRadius.circular(16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.deepPurple.withOpacity(0.08),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: SizedBox(
+                  height: 100,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _images.length + _existingImageUrls.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return GestureDetector(
+                          onTap: _pickImage,
+                          child: Container(
+                            width: 100,
+                            margin: const EdgeInsets.only(right: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6D28D9),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(
+                              Icons.add_a_photo,
+                              color: Colors.white,
+                              size: 30,
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.add_a_photo,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-                      );
-                    }
+                        );
+                      }
 
-                    final adjustedIndex = index - 1;
-                    if (adjustedIndex < _existingImageUrls.length) {
-                      return Stack(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: _buildPreviewImage(
-                                _existingImageUrls[adjustedIndex],
-                                width: 100,
-                                height: 100,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 5,
-                            right: 15,
-                            child: GestureDetector(
-                              onTap: () => _removeExistingImage(adjustedIndex),
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 18,
+                      final adjustedIndex = index - 1;
+                      if (adjustedIndex < _existingImageUrls.length) {
+                        return Stack(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: _buildPreviewImage(
+                                  _existingImageUrls[adjustedIndex],
+                                  width: 100,
+                                  height: 100,
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      );
-                    } else {
-                      final newImageIndex = adjustedIndex - _existingImageUrls.length;
-                      return Stack(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: Image.file(
-                                File(_images[newImageIndex].path),
-                                width: 100,
-                                height: 100,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 5,
-                            right: 15,
-                            child: GestureDetector(
-                              onTap: () => _removeNewImage(newImageIndex),
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 18,
+                            Positioned(
+                              top: 5,
+                              right: 15,
+                              child: GestureDetector(
+                                onTap: () =>
+                                    _removeExistingImage(adjustedIndex),
+                                child: Container(
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      );
-                    }
-                  },
+                          ],
+                        );
+                      } else {
+                        final newImageIndex =
+                            adjustedIndex - _existingImageUrls.length;
+                        return Stack(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Image.file(
+                                  File(_images[newImageIndex].path),
+                                  width: 100,
+                                  height: 100,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 5,
+                              right: 15,
+                              child: GestureDetector(
+                                onTap: () => _removeNewImage(newImageIndex),
+                                child: Container(
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                    },
+                  ),
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 26),
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Item Name',
                   hintText: 'Eg. Premium Headphones',
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.inventory_2_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -391,7 +443,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 hint: const Text('Select Category'),
                 decoration: const InputDecoration(
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.category_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -418,7 +471,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   hintText: 'Tell anything about the item(s). ',
                   alignLabelWithHint: true,
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.notes_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -427,7 +481,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               ),
               const SizedBox(height: 20),
               if (widget.repliedTo == null) ...[
-                _buildToggleRow('Enable Selling', 'Allow users to buy this item', _enableSelling, (val) => setState(() => _enableSelling = val)),
+                _buildToggleRow(
+                  'Enable Selling',
+                  'Allow users to buy this item',
+                  _enableSelling,
+                  (val) => setState(() => _enableSelling = val),
+                ),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
                   TextFormField(
@@ -443,7 +502,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ),
                       ),
                       filled: true,
-                      fillColor: Color(0xFFF3E8FF),
+                      fillColor: fieldFill,
+                      suffixIcon: Icon(Icons.sell_outlined, color: accent),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -452,7 +512,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                _buildToggleRow('Enable Trading', 'Allow users to offer item trades', _enableTrading, (val) => setState(() => _enableTrading = val)),
+                _buildToggleRow(
+                  'Enable Trading',
+                  'Allow users to offer item trades',
+                  _enableTrading,
+                  (val) => setState(() => _enableTrading = val),
+                ),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
                   TextFormField(
@@ -464,7 +529,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                           'What are you looking for in exchange? (e.g. vintage cameras, bike accessories)',
                       alignLabelWithHint: true,
                       filled: true,
-                      fillColor: Color(0xFFF3E8FF),
+                      fillColor: fieldFill,
+                      prefixIcon: Icon(Icons.swap_horiz, color: accent),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -480,6 +546,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   backgroundColor: const Color(0xFF6D28D9),
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 56),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -489,7 +556,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
                     : Text(
                         buttonText,
@@ -506,21 +575,54 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     );
   }
 
-  Widget _buildToggleRow(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF5B21B6))),
-              Text(subtitle, style: const TextStyle(fontSize: 16, color: Color(0xFF7C3AED))),
-            ],
+  Widget _buildToggleRow(
+    String title,
+    String subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE9D5FF)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF5B21B6),
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        Transform.scale(scale: 0.8, child: Switch(activeTrackColor: const Color(0xFF5B21B6), value: value, onChanged: onChanged)),
-      ],
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              activeTrackColor: const Color(0xFF5B21B6),
+              value: value,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -37,51 +37,93 @@ class ItemsRepository {
     String? searchQuery,
   }) async {
     log(userId.toString());
-    var query = SupabaseService.client
-        .from(_table)
-        .select()
-        .eq('status', 'available')
-        .filter('replied_to', 'is', null);
 
-    if (searchQuery != null && searchQuery.isNotEmpty) {
-      query = query.ilike('name', '%$searchQuery%');
-    } else {
-      // Exclude items owned by the current user by default
+    try {
+      List<int> matchedUserIds = [];
+      
+      // find user id whose username matches
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        try {
+          final usersRes = await SupabaseService.client
+              .from('users')
+              .select('id')
+              .ilike('username', '%$searchQuery%');
+          
+          if (usersRes is List) {
+            matchedUserIds = usersRes.map((u) => u['id'] as int).toList();
+          }
+        } catch (e) {
+          log('User search error: $e');
+        }
+      }
+
+      var queryBuilder = SupabaseService.client
+          .from(_table)
+          .select('*, users(username)');
+
+      // search item name
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        String orClause = 'name.ilike.%$searchQuery%';
+
+        if (matchedUserIds.isNotEmpty) {
+          final idsString = matchedUserIds.join(',');
+          orClause += ',owner_id.in.($idsString)';
+        }
+        
+        queryBuilder = queryBuilder.or(orClause);
+      }
+
+      queryBuilder = queryBuilder
+          .eq('status', 'available')
+          .filter('replied_to', 'is', null);
+
+      if (searchQuery == null || searchQuery.isEmpty) {
+        // exclude items owned by the current user by default when not searching
+        if (userId != null) {
+          queryBuilder = queryBuilder.neq('owner_id', userId);
+        }
+      }
+
+      if (category != null && category != 'All') {
+        queryBuilder = queryBuilder.eq('category', category);
+      }
+
+      if (listingType != null && listingType != 'both') {
+        if (listingType == 'sell') {
+          queryBuilder = queryBuilder.or(
+            'listing_type.eq.sell,listing_type.eq.both',
+          );
+        } else if (listingType == 'trade') {
+          queryBuilder = queryBuilder.or(
+            'listing_type.eq.trade,listing_type.eq.both',
+          );
+        }
+      }
+
+      final response = await queryBuilder.order('created_at', ascending: false);
+
+      final rows = _requireListOfMaps(response, operation: 'getDiscoverList');
+      List<ItemListing> items = rows
+          .map<ItemListing>(ItemListing.fromMap)
+          .toList();
+
+      // Step 5: Handle favorites
       if (userId != null) {
-        query = query.neq('owner_id', userId);
+        final favIds = await FavouriteRepository().getUserFavouriteItemIds(
+          userId,
+        );
+
+        for (var item in items) {
+          item.isFavorite = favIds.contains(item.id);
+        }
       }
+
+      return items;
+    } catch (e) {
+      log('getDiscoverList error: $e');
     }
 
-    if (category != null && category != 'All') {
-      query = query.eq('category', category);
-    }
-
-    if (listingType != null && listingType != 'both') {
-      if (listingType == 'sell') {
-        query = query.or('listing_type.eq.sell,listing_type.eq.both');
-      } else if (listingType == 'trade') {
-        query = query.or('listing_type.eq.trade,listing_type.eq.both');
-      }
-    }
-
-    final response = await query.order('created_at', ascending: false);
-
-    final rows = _requireListOfMaps(response, operation: 'getDiscoverList');
-    List<ItemListing> items = rows
-        .map<ItemListing>(ItemListing.fromMap)
-        .toList();
-
-    if (userId != null) {
-      final favIds = await FavouriteRepository().getUserFavouriteItemIds(
-        userId,
-      );
-
-      for (var item in items) {
-        item.isFavorite = favIds.contains(item.id);
-      }
-    }
-
-    return items;
+    return [];
   }
 
   Future<int?> getLastId() async {
