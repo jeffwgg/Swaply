@@ -9,6 +9,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const OPENROUTER_TIMEOUT_MS = 20000
+const FALLBACK_AI_MESSAGE =
+  "I'm sorry, I'm having trouble connecting right now. Please try again in a moment."
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -110,27 +114,51 @@ GOAL
 Help users quickly understand and use Swaply while maintaining a natural and user-friendly interaction.`
 }
 
-    // Call OpenRouter API
-    const openrouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'nvidia/nemotron-3-super-120b-a12b:free',
-        messages: [systemMessage, ...historyMessages]
-      })
-    })
+    const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')
+    let aiMessageText = FALLBACK_AI_MESSAGE
+    let usedFallback = false
 
-    if (!openrouterResponse.ok) {
-        const errorText = await openrouterResponse.text()
-        console.error('OpenRouter error', errorText)
-        throw new Error('Failed to get response from AI: ' + errorText)
+    if (!openRouterApiKey) {
+      usedFallback = true
+      console.error('Missing OPENROUTER_API_KEY. Using fallback AI response.')
+    } else {
+      try {
+        const timeoutSignal = AbortSignal.timeout(OPENROUTER_TIMEOUT_MS)
+        const openrouterResponse = await fetch(
+          'https://openrouter.ai/api/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${openRouterApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'nvidia/nemotron-3-super-120b-a12b:free',
+              messages: [systemMessage, ...historyMessages]
+            }),
+            signal: timeoutSignal,
+          }
+        )
+
+        if (!openrouterResponse.ok) {
+          const errorText = await openrouterResponse.text()
+          console.error('OpenRouter error', errorText)
+          usedFallback = true
+        } else {
+          const aiData = await openrouterResponse.json()
+          const candidate = aiData?.choices?.[0]?.message?.content
+          if (typeof candidate == 'string' && candidate.trim().length > 0) {
+            aiMessageText = candidate.trim()
+          } else {
+            console.error('OpenRouter response missing assistant content:', aiData)
+            usedFallback = true
+          }
+        }
+      } catch (openRouterError) {
+        console.error('OpenRouter request failed:', openRouterError)
+        usedFallback = true
+      }
     }
-
-    const aiData = await openrouterResponse.json()
-    const aiMessageText = aiData.choices[0].message.content
 
     // Use service role for inserting the AI's response if necessary, or the current user's client
     // Depending on RLS, the user should be able to insert this as their own chat message since RLS just checks user_id
@@ -147,7 +175,7 @@ Help users quickly understand and use Swaply while maintaining a natural and use
       throw new Error('Failed to save AI response')
     }
 
-    return new Response(JSON.stringify({ success: true, ai_message: aiMessageText }), {
+    return new Response(JSON.stringify({ success: true, ai_message: aiMessageText, fallback: usedFallback }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
