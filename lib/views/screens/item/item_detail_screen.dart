@@ -48,6 +48,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   Future<void> _fetchOwner() async {
     final user = await UsersRepository().getById(widget.item.ownerId);
+    log('here $widget.item.ownerId');
+    log(user.toString());
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
@@ -662,13 +664,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             initialCenter: LatLng(item.latitude!, item.longitude!),
                             initialZoom: 15,
                             interactionOptions: const InteractionOptions(
-                              flags: InteractiveFlag.none, // ❗ disable touch (read-only)
+                              flags: InteractiveFlag.none,
                             ),
                           ),
                           children: [
                             TileLayer(
                               urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                              userAgentPackageName: "com.example.swaply", // REQUIRED
+                              userAgentPackageName: "com.example.swaply",
                             ),
                             MarkerLayer(
                               markers: [
@@ -789,25 +791,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               reply.name.toUpperCase(),
                                               style: const TextStyle(
-                                                fontSize: 20,
+                                                fontSize: 18,
                                                 color: Color(0xFF5B21B6),
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                           ),
                                         ),
-                                        if (user != null &&
-                                            user.id == reply.ownerId)
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.red,
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            onPressed: () =>
-                                                _dropReply(reply.id),
-                                          ),
                                       ],
                                     ),
                                     GestureDetector(
@@ -846,7 +836,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               _replyOwnerNames[reply.id]!,
                                               style: const TextStyle(
-                                                fontSize: 18,
+                                                fontSize: 16,
                                                 color: Color(0xFF7C3AED),
                                                 fontWeight: FontWeight.w600,
                                               ),
@@ -957,6 +947,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         right: 8,
                         child: _StatusBadge(status: reply.status),
                       ),
+                      if (user != null && user.id == reply.ownerId)
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _dropReply(reply.id),
+                          ),
+                        ),
                     ],
                   ),
                 );

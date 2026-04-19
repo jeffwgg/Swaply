@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -98,13 +98,27 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _enableSelling = false;
       _enableTrading = false;
     }
+
   }
 
+
   Future<void> _pickImage() async {
-    final List<XFile> selectedImages = await _picker.pickMultiImage();
-    if (selectedImages.isNotEmpty) {
+    try {
+      final List<XFile> selectedImages = await _picker.pickMultiImage();
+      if (selectedImages.isNotEmpty) {
+        setState(() {
+          _images.addAll(selectedImages);
+        });
+        return;
+      }
+    } catch (e) {
+      debugPrint('pickMultiImage not supported or failed: $e');
+    }
+
+    final XFile? single = await _picker.pickImage(source: ImageSource.gallery);
+    if (single != null) {
       setState(() {
-        _images.addAll(selectedImages);
+        _images.add(single);
       });
     }
   }
@@ -121,21 +135,39 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     });
   }
 
+  String _contentTypeForPath(String filePath) {
+    final ext = path.extension(filePath).toLowerCase();
+    switch (ext) {
+      case '.jpg':
+      case '.jpeg':
+        return 'image/jpeg';
+      case '.png':
+        return 'image/png';
+      case '.webp':
+        return 'image/webp';
+      case '.gif':
+        return 'image/gif';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
   Future<String?> _uploadImage(XFile imageFile) async {
     try {
-      final fileName =
-          '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFile.path)}';
+      final unique =
+          '${DateTime.now().microsecondsSinceEpoch}_${imageFile.path.hashCode}';
+      final fileName = '${unique}_${path.basename(imageFile.path)}';
 
       final bytes = await imageFile.readAsBytes();
 
-      await SupabaseService.client.storage
-          .from('items')
-          .uploadBinary(
+      final contentType = _contentTypeForPath(imageFile.path);
+
+      await SupabaseService.client.storage.from('items').uploadBinary(
             fileName,
             bytes,
-            fileOptions: const FileOptions(
-              upsert: true,
-              contentType: 'image/jpeg',
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: contentType,
             ),
           );
 
@@ -240,19 +272,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Future<void> _saveItem() async {
+    final isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid) {
+      return;
+    }
+
     final name = _nameCtrl.text.trim();
     final desc = _descCtrl.text.trim();
     final price = double.tryParse(_priceCtrl.text.trim());
     final preference = _prefCtrl.text.trim();
     final address = _addressCtrl.text.trim();
     final category = _selectedCategory;
-
-    if (_images.isEmpty && _existingImageUrls.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add at least one photo.')),
-      );
-      return;
-    }
 
     if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -273,18 +303,35 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         final url = await _uploadImage(img);
         if (url != null) {
           finalImageUrls.add(url);
+          debugPrint('Upload success: $url');
+        } else {
+          debugPrint('Upload failed for image at path: ${img.path}');
         }
       }
 
-      if (finalImageUrls.isEmpty)
+      if (finalImageUrls.isEmpty) {
         throw Exception('At least one image is required.');
+      }
 
       String listingType = 'both';
       if (widget.repliedTo != null) {
         listingType = 'trade';
       } else {
+        if (!_enableSelling && !_enableTrading) throw Exception('Please enable selling or trading.');
         if (_enableSelling && !_enableTrading) listingType = 'sell';
         if (!_enableSelling && _enableTrading) listingType = 'trade';
+      }
+
+      if(_enableSelling){
+        if(price == null){
+          throw Exception('Price is required.');
+        }
+      }
+
+      if(_enableTrading){
+        if(preference.isEmpty){
+          throw Exception('Preference is required.');
+        }
       }
 
       if (widget.item != null) {
@@ -507,6 +554,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(10)),
                   ),
                 ),
+                validator: (value){
+                  if(value == null || value.isEmpty){
+                    return 'Please enter item name';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
@@ -532,6 +585,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     _selectedCategory = newValue;
                   });
                 },
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please select category';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 20),
               TextFormField(
@@ -549,19 +608,14 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(12)),
                   ),
                 ),
+                validator: (value){
+                  if(value == null || value.isEmpty){
+                    return 'Please enter item description';
+                  }
+                  return null;
+                },
               ),
-              const SizedBox(height: 26),
-
-              const Text(
-                'Location',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF6D28D9),
-                ),
-              ),
-              const SizedBox(height: 10),
-
+              const SizedBox(height: 20),
               TextField(
                 controller: _locationSearchCtrl,
                 decoration: InputDecoration(
@@ -768,6 +822,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         borderRadius: BorderRadius.all(Radius.circular(10)),
                       ),
                     ),
+                    validator: (value) {
+                      if (!_enableSelling) return null;
+                      final text = (value ?? '').trim();
+                      if (text.isEmpty) return 'Please enter price';
+                      final parsed = double.tryParse(text);
+                      if (parsed == null) return 'Please enter a valid number';
+                      if (parsed <= 0) return 'Price must be greater than 0';
+                      return null;
+                    },
                   ),
                 ],
                 const SizedBox(height: 20),
@@ -828,6 +891,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         borderRadius: BorderRadius.all(Radius.circular(12)),
                       ),
                     ),
+                    validator: (value) {
+                      if (!_enableTrading) return null;
+                      final text = (value ?? '').trim();
+                      if (text.isEmpty) return 'Please enter trade preferences';
+                      return null;
+                    },
                   ),
                 ],
               ],

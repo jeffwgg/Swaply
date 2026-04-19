@@ -25,7 +25,9 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // Keep target SDK on a stable Android API level compatible with
+        // current geolocator_android permission checks.
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
