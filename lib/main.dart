@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'core/constants/app_config.dart';
+import 'services/stripe_payment_service.dart';
 import 'services/supabase_service.dart';
 import 'views/screens/main_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SupabaseService.initialize();
+  if (AppConfig.hasStripePublishableKey) {
+    await StripePaymentService.ensureStripeConfigured();
+  }
   runApp(const MyApp());
 }
 
