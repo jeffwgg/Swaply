@@ -34,6 +34,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   late final AppUser? user = widget.user;
 
   bool _isLoading = false;
+  bool _isSearching = false;
 
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
@@ -41,6 +42,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _prefCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _locationSearchCtrl = TextEditingController();
+  final MapController _mapController = MapController();
 
   double? _latitude;
   double? _longitude;
@@ -147,54 +149,82 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Future<List<dynamic>> _searchPlaces(String query) async {
-    final url = Uri.parse(
-      "https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5",
-    );
+    try {
+      final url = Uri.https("nominatim.openstreetmap.org", "/search", {
+        "q": query,
+        "format": "jsonv2",
+        "limit": "5",
+        "addressdetails": "1",
+      });
 
-    final response = await http.get(
-      url,
-      headers: {"User-Agent": "com.example.swaply (your_email@example.com)"},
-    );
+      final response = await http.get(
+        url,
+        headers: {
+          "User-Agent": "SwaplyApp/1.0 (jieer524@gmail.com)",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      );
 
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception("Failed to search location");
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        debugPrint(
+          "Nominatim search error: ${response.statusCode} ${response.body}",
+        );
+        return [];
+      }
+    } catch (e) {
+      debugPrint("Search error: $e");
+      return [];
     }
   }
 
   void _onSearchChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    _debounce = Timer(const Duration(milliseconds: 800), () async {
-      if (value.isEmpty) return;
+    _debounce = Timer(const Duration(milliseconds: 600), () async {
+      if (value.trim().isEmpty) {
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+        return;
+      }
 
+      setState(() => _isSearching = true);
       final results = await _searchPlaces(value);
+
+      if (!mounted) return;
 
       setState(() {
         _searchResults = results;
+        _isSearching = false;
       });
     });
   }
 
   Future<String> reverseGeocode(double lat, double lon) async {
-    final url = Uri.parse(
-      "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json",
-    );
+    try {
+      final url = Uri.parse(
+        "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=jsonv2",
+      );
 
-    final response = await http.get(
-      url,
-      headers: {
-        "User-Agent": "com.example.swaply (your_email@example.com)"
-      },
-    );
+      final response = await http.get(
+        url,
+        headers: {
+          "User-Agent": "SwaplyApp/1.0 (jieer524@gmail.com)",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      );
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return data["display_name"] ?? "Unknown location";
-    } else {
-      return "Unknown location";
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data["display_name"] ?? "Unknown location";
+      }
+    } catch (e) {
+      debugPrint("Reverse geocode error: $e");
     }
+    return "Unknown location";
   }
 
   @override
@@ -205,6 +235,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _prefCtrl.dispose();
     _addressCtrl.dispose();
     _locationSearchCtrl.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -535,7 +566,16 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 controller: _locationSearchCtrl,
                 decoration: InputDecoration(
                   hintText: "Search location (e.g. KLCC)",
-                  prefixIcon: const Icon(Icons.search),
+                  prefixIcon: _isSearching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : const Icon(Icons.search),
                   filled: true,
                   fillColor: const Color(0xFFF3E8FF),
                   border: OutlineInputBorder(
@@ -543,32 +583,43 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderSide: BorderSide.none,
                   ),
                 ),
-
                 onChanged: _onSearchChanged,
               ),
 
               if (_searchResults.isNotEmpty)
                 Container(
-                  height: 150,
+                  height: 200,
                   margin: const EdgeInsets.only(top: 5),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     border: Border.all(color: Colors.grey.shade300),
                     borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: ListView.builder(
+                    padding: EdgeInsets.zero,
                     itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
                       final place = _searchResults[index];
-
                       return ListTile(
-                        title: Text(place['display_name']),
+                        dense: true,
+                        title: Text(
+                          place['display_name'],
+                          style: const TextStyle(fontSize: 13),
+                        ),
                         onTap: () {
                           final lat = double.parse(place['lat']);
                           final lon = double.parse(place['lon']);
+                          final pos = LatLng(lat, lon);
 
                           setState(() {
-                            selectedLocation = LatLng(lat, lon);
+                            selectedLocation = pos;
                             selectedAddress = place['display_name'];
                             _latitude = lat;
                             _longitude = lon;
@@ -576,6 +627,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                             _searchResults = [];
                             _locationSearchCtrl.text = selectedAddress!;
                           });
+
+                          _mapController.move(pos, 15);
                         },
                       );
                     },
@@ -593,57 +646,105 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: FlutterMap(
+                    mapController: _mapController,
                     options: MapOptions(
                       initialCenter:
-                          selectedLocation ?? LatLng(3.1390, 101.6869),
+                          selectedLocation ?? const LatLng(3.1390, 101.6869),
                       initialZoom: 13,
                       onTap: (tapPos, point) async {
-                        final address = await reverseGeocode(point.latitude, point.longitude);
-
+                        final address = await reverseGeocode(
+                          point.latitude,
+                          point.longitude,
+                        );
                         setState(() {
                           selectedLocation = point;
                           selectedAddress = address;
                           _latitude = point.latitude;
                           _longitude = point.longitude;
                           _addressCtrl.text = address;
+                          _locationSearchCtrl.text = address;
                         });
-                      },                    ),
+                      },
+                    ),
                     children: [
                       TileLayer(
                         urlTemplate:
                             "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                        userAgentPackageName: "com.example.swaply", // REQUIRED
+                        userAgentPackageName: "com.example.swaply",
                       ),
                       if (selectedLocation != null)
                         MarkerLayer(
                           markers: [
                             Marker(
                               point: selectedLocation!,
-                              child: Icon(Icons.location_pin),
-                            )
+                              width: 40,
+                              height: 40,
+                              child: const Icon(
+                                Icons.location_pin,
+                                color: Colors.red,
+                                size: 40,
+                              ),
+                            ),
                           ],
-                        )                    ],
+                        ),
+                    ],
                   ),
                 ),
               ),
 
               if (selectedAddress != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.only(top: 8, left: 4),
                   child: Text(
                     selectedAddress!,
-                    style: const TextStyle(color: Colors.deepPurple),
+                    style: const TextStyle(
+                      color: Colors.deepPurple,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
 
               const SizedBox(height: 20),
 
               if (widget.repliedTo == null) ...[
-                _buildToggleRow(
-                  'Enable Selling',
-                  'Allow users to buy this item',
-                  _enableSelling,
-                  (val) => setState(() => _enableSelling = val),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Selling',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                          Text(
+                            'Allow users to buy this item',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableSelling,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableSelling = newValue;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
@@ -670,11 +771,44 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                _buildToggleRow(
-                  'Enable Trading',
-                  'Allow users to offer item trades',
-                  _enableTrading,
-                  (val) => setState(() => _enableTrading = val),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Trading',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                          Text(
+                            'Allow users to offer item trades',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableTrading,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableTrading = newValue;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
@@ -756,57 +890,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       fit: fit,
       errorBuilder: (context, error, stackTrace) =>
           const Icon(Icons.broken_image, size: 50),
-    );
-  }
-
-  Widget _buildToggleRow(
-    String title,
-    String subtitle,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE9D5FF)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF5B21B6),
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF7C3AED),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Transform.scale(
-            scale: 0.8,
-            child: Switch(
-              activeTrackColor: const Color(0xFF5B21B6),
-              value: value,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
