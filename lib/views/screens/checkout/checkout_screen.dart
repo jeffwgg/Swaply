@@ -4,6 +4,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
 import '../../../models/meetup_address_option.dart';
+import '../../../models/transaction_request.dart';
+import '../../../repositories/transaction_requests_repository.dart';
 import '../../../services/location_address_service.dart';
 import '../../../services/stripe_payment_service.dart';
 
@@ -17,6 +19,7 @@ class CheckoutScreen extends StatefulWidget {
     required this.flowKind,
     required this.primaryItem,
     required this.sellerDisplayName,
+    required this.buyerId,
     this.swapItem,
     required this.sellerMeetupOptions,
     this.shippingFeeMyr = 10,
@@ -26,6 +29,7 @@ class CheckoutScreen extends StatefulWidget {
   final ItemListing primaryItem;
   final ItemListing? swapItem;
   final String sellerDisplayName;
+  final int buyerId;
   final List<MeetupAddressOption> sellerMeetupOptions;
   final double shippingFeeMyr;
 
@@ -34,20 +38,26 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
-  _Fulfillment _fulfillment = _Fulfillment.meetup;
   String? _selectedMeetupId;
   final TextEditingController _shippingAddressController = TextEditingController();
   final LocationAddressService _locationService = LocationAddressService();
   final StripePaymentService _stripe = StripePaymentService();
+  final TransactionRequestsRepository _transactions =
+      TransactionRequestsRepository();
 
   _UiPaymentMethod _paymentMethod = _UiPaymentMethod.card;
   bool _agreedToTerms = false;
   bool _busy = false;
 
+  late _Fulfillment _fulfillment;
+
   @override
   void initState() {
     super.initState();
-    if (widget.sellerMeetupOptions.isNotEmpty) {
+    if (widget.sellerMeetupOptions.isEmpty) {
+      _fulfillment = _Fulfillment.shipping;
+    } else {
+      _fulfillment = _Fulfillment.meetup;
       _selectedMeetupId = widget.sellerMeetupOptions.first.id;
     }
   }
@@ -156,6 +166,36 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }
       }
 
+      if (widget.flowKind == CheckoutFlowKind.purchase) {
+        final listPrice = widget.primaryItem.price;
+        if (listPrice == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('This listing has no price; cannot record a purchase.'),
+              ),
+            );
+          }
+          return;
+        }
+        try {
+          await _transactions.create(
+            TransactionRequest.insertPurchase(
+              itemId: widget.primaryItem.id,
+              requesterId: widget.buyerId,
+              offeredPrice: listPrice,
+            ),
+          );
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Payment OK, but saving the order failed: $e')),
+            );
+          }
+          return;
+        }
+      }
+
       if (!mounted) {
         return;
       }
@@ -191,6 +231,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 children: [
                   _FulfillmentToggle(
                     value: _fulfillment,
+                    meetupEnabled: widget.sellerMeetupOptions.isNotEmpty,
                     onChanged: (v) => setState(() => _fulfillment = v),
                   ),
                   const SizedBox(height: 12),
@@ -301,23 +342,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 class _FulfillmentToggle extends StatelessWidget {
   const _FulfillmentToggle({
     required this.value,
+    required this.meetupEnabled,
     required this.onChanged,
   });
 
   final _Fulfillment value;
+  final bool meetupEnabled;
   final ValueChanged<_Fulfillment> onChanged;
 
   @override
   Widget build(BuildContext context) {
     Widget chip(String label, _Fulfillment mode) {
       final selected = value == mode;
+      final canSelectMeetup = meetupEnabled || mode == _Fulfillment.shipping;
       return Expanded(
         child: Material(
           color: selected ? const Color(0xFFE9E1FE) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
-            onTap: () => onChanged(mode),
+            onTap: canSelectMeetup ? () => onChanged(mode) : null,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 14),
               alignment: Alignment.center,
@@ -332,7 +376,11 @@ class _FulfillmentToggle extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: selected ? AppColors.primary : const Color(0xFF7A7890),
+                  color: !canSelectMeetup && mode == _Fulfillment.meetup
+                      ? const Color(0xFFBDBACE)
+                      : selected
+                          ? AppColors.primary
+                          : const Color(0xFF7A7890),
                 ),
               ),
             ),
@@ -341,11 +389,23 @@ class _FulfillmentToggle extends StatelessWidget {
       );
     }
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        chip('Shipping', _Fulfillment.shipping),
-        const SizedBox(width: 10),
-        chip('Meet-Up', _Fulfillment.meetup),
+        Row(
+          children: [
+            chip('Shipping', _Fulfillment.shipping),
+            const SizedBox(width: 10),
+            chip('Meet-Up', _Fulfillment.meetup),
+          ],
+        ),
+        if (!meetupEnabled) ...[
+          const SizedBox(height: 8),
+          Text(
+            'This seller has not added a meet-up address on the listing. Delivery is shipping only.',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+          ),
+        ],
       ],
     );
   }
@@ -532,6 +592,53 @@ class _ShippingSection extends StatelessWidget {
   }
 }
 
+class _ProductThumbnail extends StatelessWidget {
+  const _ProductThumbnail({required this.item});
+
+  final ItemListing item;
+
+  static const double _size = 86;
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.imageUrls.isEmpty) {
+      return Image.asset(
+        'assets/sample.jpeg',
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+      );
+    }
+    final url = item.imageUrls.first;
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, _) => Image.asset(
+          'assets/sample.jpeg',
+          width: _size,
+          height: _size,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    return Image.asset(
+      url,
+      width: _size,
+      height: _size,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, _) => Image.asset(
+        'assets/sample.jpeg',
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+}
+
 class _ProductBlock extends StatelessWidget {
   const _ProductBlock({
     required this.sellerName,
@@ -584,7 +691,7 @@ class _ProductBlock extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item.title,
+                      item.name,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
@@ -613,25 +720,7 @@ class _ProductBlock extends StatelessWidget {
               const SizedBox(width: 10),
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: item.imageUrl != null && item.imageUrl!.isNotEmpty
-                    ? Image.network(
-                        item.imageUrl!,
-                        width: 86,
-                        height: 86,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, _) => Image.asset(
-                          'assets/sample.jpeg',
-                          width: 86,
-                          height: 86,
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    : Image.asset(
-                        'assets/sample.jpeg',
-                        width: 86,
-                        height: 86,
-                        fit: BoxFit.cover,
-                      ),
+                child: _ProductThumbnail(item: item),
               ),
             ],
           ),

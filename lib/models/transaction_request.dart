@@ -21,6 +21,24 @@ class TransactionRequest {
     required this.createdAt,
   });
 
+  /// Row to insert via [TransactionRequestsRepository.create] (`id` / `createdAt` are ignored by Supabase defaults).
+  factory TransactionRequest.insertPurchase({
+    required int itemId,
+    required int requesterId,
+    required double offeredPrice,
+  }) {
+    return TransactionRequest(
+      id: 0,
+      itemId: itemId,
+      requesterId: requesterId,
+      type: 'purchase',
+      offeredPrice: offeredPrice,
+      offeredItemId: null,
+      status: 'pending',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    );
+  }
+
   factory TransactionRequest.fromMap(Map<String, dynamic> map) {
     return TransactionRequest(
       id: parseInt(map['id'], fieldName: 'transaction_requests.id'),
