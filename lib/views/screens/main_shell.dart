@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../models/app_user.dart';
+import '../../repositories/users_repository.dart';
 import '../widgets/common/bottom_nav_bar.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/explore/discover_screen.dart';
@@ -20,6 +22,24 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   bool _hideChatNavigation = false;
+  AppUser? _user;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final authUser = SupabaseService.client.auth.currentUser;
+    if (authUser == null) return;
+
+    final user = await UsersRepository().getById(authUser.id);
+
+    setState(() {
+      _user = user;
+    });
+  }
 
   void _onNavTap(int index) {
     setState(() {
@@ -66,7 +86,7 @@ class _MainShellState extends State<MainShell> {
     // User is verified, proceed to create item
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const CreateItemScreen()),
+      MaterialPageRoute(builder: (_) => CreateItemScreen(user: _user!)),
     );
   }
 
@@ -101,7 +121,9 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final screens = [
       const HomeScreen(),
-      const DiscoverScreen(),  
+      DiscoverScreen(
+        user: _user
+      ),
       InboxScreen(
         onConversationViewChanged: (isConversationOpen) {
           if (_hideChatNavigation == isConversationOpen) return;

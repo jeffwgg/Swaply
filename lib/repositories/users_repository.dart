@@ -41,7 +41,7 @@ class UsersRepository {
     throw StateError('Unexpected $operation response: expected Map.');
   }
 
-  Future<AppUser?> getById(int id) async {
+  Future<AppUser?> getById(String id) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -54,19 +54,6 @@ class UsersRepository {
     }
 
     return AppUser.fromMap(_requireMap(response, operation: 'getById'));
-  }
-
-  Future<AppUser?> getByAuthUserId(String authUserId) async {
-    final response = await SupabaseService.client
-        .from(_table)
-        .select()
-        .eq('auth_user_id', authUserId)
-        .maybeSingle();
-
-    if (response == null) {
-      return null;
-    }
-    return AppUser.fromMap(_requireMap(response, operation: 'getByAuthUserId'));
   }
 
   Future<List<AppUser>> list() async {
@@ -82,6 +69,6 @@ class UsersRepository {
   Future<void> upsert(AppUser user) async {
     await SupabaseService.client
         .from(_table)
-        .upsert(user.toInsertMap(), onConflict: 'auth_user_id');
+        .upsert(user.toInsertMap(), onConflict: 'id');
   }
 }

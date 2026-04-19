@@ -12,7 +12,7 @@ class ChatsRepository {
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
-      'item:items(owner_id,title)';
+      'item:items(owner_id,name)';
 
   List<Map<String, dynamic>> _requireListOfMaps(
     dynamic response, {
@@ -46,11 +46,11 @@ class ChatsRepository {
     throw StateError('Unexpected $operation response: expected Map.');
   }
 
-  Future<List<ChatThread>> listForUser(int userId) async {
+  Future<List<ChatThread>> listForUser(String userId) async {
     final response = await SupabaseService.client
         .from(_table)
         .select(_withParticipantsSelect)
-        .or('user1_id.eq.$userId,user2_id.eq.$userId')
+      .or('user1_id.eq."$userId",user2_id.eq."$userId"')
         .order('updated_at', ascending: false);
 
     final rows = _requireListOfMaps(response, operation: 'listForUser');
@@ -75,8 +75,8 @@ class ChatsRepository {
   }
 
   Future<ChatThread> createOrGetItemChat({
-    required int currentUserId,
-    required int otherUserId,
+    required String currentUserId,
+    required String otherUserId,
     required int itemId,
   }) async {
     final response = await SupabaseService.client.rpc(
@@ -94,7 +94,7 @@ class ChatsRepository {
   }
 
   RealtimeChannel subscribeToChanges({
-    required int userId,
+    required String userId,
     required void Function() onRelevantChange,
   }) {
     final channel = SupabaseService.client.channel(
@@ -110,11 +110,11 @@ class ChatsRepository {
         final previous = payload.oldRecord;
 
         bool matchesParticipant(Map<String, dynamic> record) {
-          final user1Id = parseInt(
+          final user1Id = parseString(
             record['user1_id'],
             fieldName: 'chats.user1_id',
           );
-          final user2Id = parseInt(
+          final user2Id = parseString(
             record['user2_id'],
             fieldName: 'chats.user2_id',
           );
@@ -155,7 +155,7 @@ class ChatsRepository {
   Future<void> pinMessage({
     required int chatId,
     required int messageId,
-    required int actorId,
+    required String actorId,
   }) async {
     await SupabaseService.client.rpc(
       'pin_message_as_user',
@@ -170,7 +170,7 @@ class ChatsRepository {
   Future<void> clearPinnedMessage({
     required int chatId,
     required int messageId,
-    required int actorId,
+    required String actorId,
   }) async {
     await SupabaseService.client.rpc(
       'unpin_message_as_user',
@@ -184,7 +184,7 @@ class ChatsRepository {
 
   Future<List<ChatPinnedMessage>> listPinnedMessages({
     required int chatId,
-    required int actorId,
+    required String actorId,
   }) async {
     final response = await SupabaseService.client.rpc(
       'list_pinned_messages_as_user',

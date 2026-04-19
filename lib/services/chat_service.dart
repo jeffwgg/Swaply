@@ -8,29 +8,35 @@ import '../models/chat_thread.dart';
 import '../repositories/chats_repository.dart';
 import '../repositories/messages_repository.dart';
 import '../repositories/users_repository.dart';
-import 'supabase_service.dart';
+import '../services/supabase_service.dart';
 
 class ChatService {
   ChatService({
     ChatsRepository? chatsRepository,
     MessagesRepository? messagesRepository,
     UsersRepository? usersRepository,
+    String? Function()? authUserIdProvider,
+    Future<String?> Function(String authUserId)? appUserIdResolver,
   }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
        _messagesRepository = messagesRepository ?? MessagesRepository(),
-       _usersRepository = usersRepository ?? UsersRepository();
+       _usersRepository = usersRepository ?? UsersRepository(),
+       _authUserIdProvider = authUserIdProvider ?? _defaultAuthUserIdProvider,
+       _appUserIdResolver = appUserIdResolver;
 
   final ChatsRepository _chatsRepository;
   final MessagesRepository _messagesRepository;
   final UsersRepository _usersRepository;
+  final String? Function() _authUserIdProvider;
+  final Future<String?> Function(String authUserId)? _appUserIdResolver;
 
-  int? _cachedCurrentUserId;
+  String? _cachedCurrentUserId;
   String? _cachedAuthUserId;
 
-  int? get currentUserId => _cachedCurrentUserId;
+  String? get currentUserId => _cachedCurrentUserId;
 
-  Future<int?> refreshCurrentUserId() async {
-    final authUserId = SupabaseService.client.auth.currentUser?.id;
-    if (authUserId == null) {
+  Future<String?> refreshCurrentUserId() async {
+    final authUserId = _authUserIdProvider();
+    if (authUserId == null || authUserId.isEmpty) {
       _cachedAuthUserId = null;
       _cachedCurrentUserId = null;
       return null;
@@ -40,9 +46,11 @@ class ChatService {
       return _cachedCurrentUserId;
     }
 
-    final appUser = await _usersRepository.getByAuthUserId(authUserId);
+    final resolvedUserId = _appUserIdResolver != null
+      ? await _appUserIdResolver(authUserId)
+      : (await _usersRepository.getById(authUserId))?.id;
     _cachedAuthUserId = authUserId;
-    _cachedCurrentUserId = appUser?.id;
+    _cachedCurrentUserId = resolvedUserId;
     return _cachedCurrentUserId;
   }
 
@@ -52,11 +60,11 @@ class ChatService {
   }
 
   Future<ChatThread> createOrGetItemChat({
-    required int otherUserId,
+    required String otherUserId,
     required int itemId,
   }) async {
     final userId = await _requireUserId();
-    _requirePositiveId(otherUserId, fieldName: 'otherUserId');
+    _requireNonEmptyId(otherUserId, fieldName: 'otherUserId');
     _requirePositiveId(itemId, fieldName: 'itemId');
     return _chatsRepository.createOrGetItemChat(
       currentUserId: userId,
@@ -164,7 +172,7 @@ class ChatService {
     return _chatsRepository.unsubscribe(channel);
   }
 
-  Future<int> _requireUserId() async {
+  Future<String> _requireUserId() async {
     final userId = await refreshCurrentUserId();
     if (userId == null) {
       throw StateError(
@@ -172,6 +180,12 @@ class ChatService {
       );
     }
     return userId;
+  }
+
+  void _requireNonEmptyId(String value, {required String fieldName}) {
+    if (value.trim().isEmpty) {
+      throw ArgumentError.value(value, fieldName, 'Must be a non-empty UUID.');
+    }
   }
 
   void _requirePositiveId(int value, {required String fieldName}) {
@@ -190,5 +204,17 @@ class ChatService {
       throw ArgumentError.value(value, 'content', 'Message cannot be empty.');
     }
     return normalized;
+  }
+
+  static String? _defaultAuthUserIdProvider() {
+    if (!SupabaseService.isConfigured) {
+      return null;
+    }
+
+    try {
+      return SupabaseService.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
   }
 }

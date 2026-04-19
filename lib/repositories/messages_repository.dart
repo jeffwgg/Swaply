@@ -63,7 +63,7 @@ class MessagesRepository {
 
   Future<ChatMessage> send({
     required int chatId,
-    required int senderId,
+    required String senderId,
     required String content,
   }) async {
     final response = await SupabaseService.client
@@ -81,7 +81,7 @@ class MessagesRepository {
     return ChatMessage.fromMap(_requireMap(response, operation: 'send'));
   }
 
-  Future<void> markAsRead({required int chatId, required int viewerId}) async {
+  Future<void> markAsRead({required int chatId, required String viewerId}) async {
     await SupabaseService.client.rpc(
       'mark_chat_as_read_as_user',
       params: {'p_chat_id': chatId, 'p_actor_id': viewerId},
@@ -90,7 +90,7 @@ class MessagesRepository {
 
   Future<void> editMessage({
     required int messageId,
-    required int actorId,
+    required String actorId,
     required String content,
   }) async {
     await SupabaseService.client.rpc(
@@ -105,7 +105,7 @@ class MessagesRepository {
 
   Future<void> deleteMessage({
     required int messageId,
-    required int actorId,
+    required String actorId,
   }) async {
     await SupabaseService.client.rpc(
       'delete_message_as_user',

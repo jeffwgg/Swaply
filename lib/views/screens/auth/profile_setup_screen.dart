@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
 import '../main_shell.dart';
@@ -74,7 +76,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       // 准备要插入的数据包
       final updates = {
-        'auth_user_id': user.id,
+        'id': user.id,
         'email': user.email,
         'username': usernameController.text.trim(),
         'full_name': fullNameController.text.trim(),
@@ -88,7 +90,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       print("📦 Inserting data: $updates");
 
       // 执行插入
-      final response = await SupabaseService.client.from('users').insert(updates);
+      await SupabaseService.client.from('users').insert(updates);
 
       print("✅ Profile saved successfully!");
 

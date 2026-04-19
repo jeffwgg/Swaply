@@ -2,15 +2,15 @@ import '../core/utils/parsing.dart';
 
 class ChatThread {
   final int id;
-  final int user1Id;
-  final int user2Id;
+  final String user1Id;
+  final String user2Id;
   final String? user1Name;
   final String? user2Name;
   final String? user1ProfileImage;
   final String? user2ProfileImage;
   final int? itemId;
   final String? itemTitle;
-  final int? itemOwnerId;
+  final String? itemOwnerId;
   final String? lastMessage;
   final int? pinnedMessageId;
   final DateTime? pinnedAt;
@@ -55,8 +55,8 @@ class ChatThread {
 
     return ChatThread(
       id: parseInt(map['id'], fieldName: 'chats.id'),
-      user1Id: parseInt(map['user1_id'], fieldName: 'chats.user1_id'),
-      user2Id: parseInt(map['user2_id'], fieldName: 'chats.user2_id'),
+      user1Id: parseString(map['user1_id'], fieldName: 'chats.user1_id'),
+      user2Id: parseString(map['user2_id'], fieldName: 'chats.user2_id'),
       user1Name: user1 == null
           ? null
           : parseNullableString(user1['username'], fieldName: 'users.username'),
@@ -78,10 +78,10 @@ class ChatThread {
       itemId: parseNullableInt(map['item_id'], fieldName: 'chats.item_id'),
       itemTitle: item == null
           ? null
-          : parseNullableString(item['title'], fieldName: 'items.title'),
+          : parseNullableString(item['name'], fieldName: 'items.name'),
       itemOwnerId: item == null
           ? null
-          : parseNullableInt(item['owner_id'], fieldName: 'items.owner_id'),
+          : parseNullableString(item['owner_id'], fieldName: 'items.owner_id'),
       lastMessage: parseNullableString(
         map['last_message'],
         fieldName: 'chats.last_message',
@@ -101,13 +101,13 @@ class ChatThread {
     );
   }
 
-  int otherUserId(int currentUserId) {
+  String otherUserId(String currentUserId) {
     return currentUserId == user1Id ? user2Id : user1Id;
   }
 
-  String otherUserName(int currentUserId) {
+  String otherUserName(String currentUserId) {
     final fallbackId = otherUserId(currentUserId);
-    final fallbackText = fallbackId.toString();
+    final fallbackText = fallbackId;
     final fallbackPreview = fallbackText.length <= 8
         ? fallbackText
         : fallbackText.substring(0, 8);
@@ -117,7 +117,7 @@ class ChatThread {
     return user1Name ?? fallbackPreview;
   }
 
-  String? otherUserProfileImage(int currentUserId) {
+  String? otherUserProfileImage(String currentUserId) {
     return currentUserId == user1Id ? user2ProfileImage : user1ProfileImage;
   }
 

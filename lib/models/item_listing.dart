@@ -6,15 +6,19 @@ class ItemListing {
   final String description;
   final double? price;
   final String listingType;
-  final int ownerId;
+  final String ownerId;
   final String status;
   final String category;
   final List<String> imageUrls;
   final String? preference;
   final int? repliedTo;
   final DateTime createdAt;
+  final String? address;
+  final double? latitude;
+  final double? longitude;
+  bool isFavorite; // not from db
 
-  const ItemListing({
+  ItemListing({
     required this.id,
     required this.name,
     required this.description,
@@ -27,6 +31,10 @@ class ItemListing {
     required this.preference,
     this.repliedTo,
     required this.createdAt,
+    this.address,
+    this.latitude,
+    this.longitude,
+    this.isFavorite = false
   });
 
   factory ItemListing.fromMap(Map<String, dynamic> map) {
@@ -42,7 +50,7 @@ class ItemListing {
         map['listing_type'],
         fieldName: 'items.listing_type',
       ),
-      ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
+      ownerId: parseString(map['owner_id'], fieldName: 'items.owner_id'),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
       imageUrls: List<String>.from(map['image_urls'] ?? []),
@@ -52,6 +60,9 @@ class ItemListing {
         map['created_at'],
         fieldName: 'items.created_at',
       ),
+      address: parseNullableString(map['address'], fieldName: 'items.address'),
+      latitude: parseNullableDouble(map['latitude'], fieldName: 'items.latitude'),
+      longitude: parseNullableDouble(map['longitude'], fieldName: 'items.longitude'),
     );
   }
 
@@ -66,7 +77,10 @@ class ItemListing {
       'category': category,
       'image_urls': imageUrls,
       'preference': preference,
-      'replied_to': repliedTo
+      'replied_to': repliedTo,
+      'address': address,
+      'latitude': latitude,
+      'longitude': longitude,
     };
   }
 
@@ -84,6 +98,9 @@ class ItemListing {
       'preference': preference,
       'replied_to': repliedTo,
       'created_at': createdAt.toIso8601String(),
+      'address': address,
+      'latitude': latitude,
+      'longitude': longitude,
     };
   }
 }

@@ -1,29 +1,49 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
-import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/services/supabase_service.dart';
 
+import '../../../models/app_user.dart';
+
 class CreateItemScreen extends StatefulWidget {
+  final AppUser user;
+  final ItemListing? item;
   final int? repliedTo;
-  const CreateItemScreen({super.key, this.repliedTo});
+  const CreateItemScreen({
+    super.key,
+    required this.user,
+    this.item,
+    this.repliedTo,
+  });
 
   @override
   State<CreateItemScreen> createState() => _CreateItemScreenState();
 }
 
 class _CreateItemScreenState extends State<CreateItemScreen> {
+  late final AppUser? user = widget.user;
+
   bool _isLoading = false;
 
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _prefCtrl = TextEditingController();
-  final _customCategoryCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _locationSearchCtrl = TextEditingController();
+
+  double? _latitude;
+  double? _longitude;
+  LatLng? selectedLocation;
+  String? selectedAddress;
 
   String? _selectedCategory;
   bool _enableSelling = true;
@@ -40,11 +60,34 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   final ImagePicker _picker = ImagePicker();
   final List<XFile> _images = [];
+  List<String> _existingImageUrls = [];
   final _formKey = GlobalKey<FormState>();
 
   @override
   void initState() {
     super.initState();
+
+    if (widget.item != null) {
+      final item = widget.item!;
+      _nameCtrl.text = item.name;
+      _descCtrl.text = item.description;
+      _priceCtrl.text = item.price?.toStringAsFixed(0) ?? '';
+      _prefCtrl.text = item.preference ?? '';
+      _addressCtrl.text = item.address ?? '';
+      _latitude = item.latitude;
+      _longitude = item.longitude;
+      if (_latitude != null && _longitude != null) {
+        selectedLocation = LatLng(_latitude!, _longitude!);
+        selectedAddress = item.address;
+      }
+      _existingImageUrls = List.from(item.imageUrls);
+      _selectedCategory = item.category;
+
+      _enableSelling = item.listingType == 'sell' || item.listingType == 'both';
+      _enableTrading =
+          item.listingType == 'trade' || item.listingType == 'both';
+    }
+
     if (widget.repliedTo != null) {
       _enableSelling = false;
       _enableTrading = false;
@@ -60,9 +103,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  void _removeImage(int index) {
+  void _removeNewImage(int index) {
     setState(() {
       _images.removeAt(index);
+    });
+  }
+
+  void _removeExistingImage(int index) {
+    setState(() {
+      _existingImageUrls.removeAt(index);
     });
   }
 
@@ -73,13 +122,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       final bytes = await imageFile.readAsBytes();
 
-      await SupabaseService.client.storage.from('items').uploadBinary(
+      await SupabaseService.client.storage
+          .from('items')
+          .uploadBinary(
             fileName,
             bytes,
-            fileOptions: const FileOptions(upsert: true),
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
           );
 
-      return SupabaseService.client.storage.from('items').getPublicUrl(fileName);
+      return SupabaseService.client.storage
+          .from('items')
+          .getPublicUrl(fileName);
     } catch (e) {
       debugPrint('Upload error: $e');
       return null;
@@ -92,21 +148,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _descCtrl.dispose();
     _priceCtrl.dispose();
     _prefCtrl.dispose();
-    _customCategoryCtrl.dispose();
+    _addressCtrl.dispose();
+    _locationSearchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _createItem() async {
+  Future<void> _saveItem() async {
     final name = _nameCtrl.text.trim();
     final desc = _descCtrl.text.trim();
     final price = double.tryParse(_priceCtrl.text.trim());
     final preference = _prefCtrl.text.trim();
+    final address = _addressCtrl.text.trim();
+    final category = _selectedCategory;
 
-    final category = _selectedCategory == 'Others'
-        ? _customCategoryCtrl.text.trim()
-        : _selectedCategory;
-
-    if (_images.isEmpty) {
+    if (_images.isEmpty && _existingImageUrls.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please add at least one photo.')),
       );
@@ -115,7 +170,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in name, description and category.')),
+        const SnackBar(
+          content: Text('Please fill in name, description and category.'),
+        ),
       );
       return;
     }
@@ -125,27 +182,16 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     });
 
     try {
-      // 1. Get current logged in user
-      // final authUser = SupabaseService.client.auth.currentUser;
-      // if (authUser == null) throw Exception('User not logged in');
-
-      // final appUser = await UsersRepository().getByAuthUserId(authUser.id);
-      // if (appUser == null) throw Exception('App user not found');
-
-      // 2. Upload images
-      List<String> imageUrls = [];
+      List<String> finalImageUrls = List.from(_existingImageUrls);
       for (var img in _images) {
         final url = await _uploadImage(img);
         if (url != null) {
-          imageUrls.add(url);
+          finalImageUrls.add(url);
         }
       }
 
-      if (imageUrls.isEmpty) throw Exception('Image upload failed. Check RLS policies.');
-
-      // 3. Get ID
-      final lastId = await ItemsRepository().getLastId();
-      int nextIdNum = (lastId ?? 0) + 1;
+      if (finalImageUrls.isEmpty)
+        throw Exception('At least one image is required.');
 
       String listingType = 'both';
       if (widget.repliedTo != null) {
@@ -155,34 +201,66 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         if (!_enableSelling && _enableTrading) listingType = 'trade';
       }
 
-      final item = ItemListing(
-        id: nextIdNum,
-        name: name,
-        description: desc,
-        price: _enableSelling ? price : null,
-        listingType: listingType,
-        ownerId: 1, // todo
-        status: widget.repliedTo == null ? 'available' : 'pending',
-        category: category,
-        imageUrls: imageUrls,
-        preference: _enableTrading ? preference : 'None',
-        repliedTo: widget.repliedTo,
-        createdAt: DateTime.now(),
-      );
+      if (widget.item != null) {
+        final updatedItem = ItemListing(
+          id: widget.item!.id,
+          name: name,
+          description: desc,
+          price: _enableSelling ? price : null,
+          listingType: listingType,
+          ownerId: widget.item!.ownerId,
+          status: widget.item!.status,
+          category: category,
+          imageUrls: finalImageUrls,
+          preference: _enableTrading ? preference : '',
+          repliedTo: widget.item!.repliedTo,
+          createdAt: widget.item!.createdAt,
+          address: address,
+          latitude: _latitude,
+          longitude: _longitude,
+        );
 
-      await ItemsRepository().create(item);
+        await ItemsRepository().update(updatedItem);
+      } else {
+        final lastId = await ItemsRepository().getLastId();
+        int nextIdNum = (lastId ?? 0) + 1;
+
+        final newItem = ItemListing(
+          id: nextIdNum,
+          name: name,
+          description: desc,
+          price: _enableSelling ? price : null,
+          listingType: listingType,
+          ownerId: widget.user.id,
+          status: widget.repliedTo == null ? 'available' : 'pending',
+          category: category,
+          imageUrls: finalImageUrls,
+          preference: _enableTrading ? preference : 'None',
+          repliedTo: widget.repliedTo,
+          createdAt: DateTime.now(),
+          address: address,
+          latitude: _latitude,
+          longitude: _longitude,
+        );
+
+        await ItemsRepository().create(newItem);
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Item created successfully!')),
+          SnackBar(
+            content: Text(
+              widget.item != null ? 'Item updated!' : 'Item created!',
+            ),
+          ),
         );
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -193,10 +271,51 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
+  Widget _buildPreviewImage(
+    String url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+  }) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.asset(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 50),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
+    const fieldFill = Color(0xFFF3E8FF);
+    String title = 'Create Item';
+    if (widget.item != null) title = 'Edit Item';
+    if (widget.repliedTo != null) title = 'Offer Trade';
+
+    String buttonText = 'Create Item';
+    if (widget.item != null) buttonText = 'Update Item';
+    if (widget.repliedTo != null) buttonText = 'Offer Trade';
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.repliedTo == null ? 'Create Item' : 'Offer Trade')),
+      appBar: AppBar(
+        title: Text(title),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: accent,
+      ),
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -217,7 +336,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 height: 100,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  itemCount: _images.length + 1,
+                  itemCount: _images.length + _existingImageUrls.length + 1,
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return GestureDetector(
@@ -237,52 +356,93 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ),
                       );
                     }
-                    final imageIndex = index - 1;
-                    return Stack(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: Image.file(
-                              File(_images[imageIndex].path),
-                              width: 100,
-                              height: 100,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          top: 5,
-                          right: 15,
-                          child: GestureDetector(
-                            onTap: () => _removeImage(imageIndex),
-                            child: Container(
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                color: Colors.white,
-                                size: 18,
+
+                    final adjustedIndex = index - 1;
+                    if (adjustedIndex < _existingImageUrls.length) {
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: _buildPreviewImage(
+                                _existingImageUrls[adjustedIndex],
+                                width: 100,
+                                height: 100,
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    );
+                          Positioned(
+                            top: 5,
+                            right: 15,
+                            child: GestureDetector(
+                              onTap: () =>
+                                  _removeExistingImage(adjustedIndex),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      final newImageIndex =
+                          adjustedIndex - _existingImageUrls.length;
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.file(
+                                File(_images[newImageIndex].path),
+                                width: 100,
+                                height: 100,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 5,
+                            right: 15,
+                            child: GestureDetector(
+                              onTap: () => _removeNewImage(newImageIndex),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
                   },
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 26),
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Item Name',
                   hintText: 'Eg. Premium Headphones',
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.inventory_2_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -295,7 +455,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 hint: const Text('Select Category'),
                 decoration: const InputDecoration(
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.category_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -313,22 +474,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   });
                 },
               ),
-              if (_selectedCategory == 'Others') ...[
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _customCategoryCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Custom Category',
-                    hintText: 'Enter your category',
-                    filled: true,
-                    fillColor: Color(0xFFF3E8FF),
-                    border: OutlineInputBorder(
-                      borderSide: BorderSide.none,
-                      borderRadius: BorderRadius.all(Radius.circular(10)),
-                    ),
-                  ),
-                ),
-              ],
               const SizedBox(height: 20),
               TextFormField(
                 controller: _descCtrl,
@@ -338,7 +483,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   hintText: 'Tell anything about the item(s). ',
                   alignLabelWithHint: true,
                   filled: true,
-                  fillColor: Color(0xFFF3E8FF),
+                  fillColor: fieldFill,
+                  prefixIcon: Icon(Icons.notes_outlined, color: accent),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -346,45 +492,106 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+              const Text(
+                'Location',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF6D28D9),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _locationSearchCtrl,
+                decoration: InputDecoration(
+                  hintText: "Search location",
+                  filled: true,
+                  fillColor: fieldFill,
+                  prefixIcon: const Icon(Icons.search, color: accent),
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                height: 250,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: GoogleMap(
+                    key: UniqueKey(), // Fix for "egl image with null texture object"
+                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                      Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                    },
+                    initialCameraPosition: CameraPosition(
+                      target: selectedLocation ?? const LatLng(3.1390, 101.6869),
+                      zoom: 14,
+                    ),
+                    onTap: (LatLng position) async {
+                      try {
+                        final placemarks = await placemarkFromCoordinates(
+                          position.latitude,
+                          position.longitude,
+                        );
+
+                        String address = "${position.latitude}, ${position.longitude}";
+                        if (placemarks.isNotEmpty) {
+                          final p = placemarks.first;
+                          address = "${p.street}, ${p.locality}, ${p.country}";
+                        }
+
+                        setState(() {
+                          selectedLocation = position;
+                          selectedAddress = address;
+                          _latitude = position.latitude;
+                          _longitude = position.longitude;
+                          _addressCtrl.text = address;
+                        });
+                      } catch (e) {
+                        debugPrint("Geocoding error: $e");
+                      }
+                    },
+                    markers: selectedLocation == null
+                        ? {}
+                        : {
+                            Marker(
+                              markerId: const MarkerId("selected"),
+                              position: selectedLocation!,
+                            ),
+                          },
+                    zoomControlsEnabled: false,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (selectedAddress != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.location_on, size: 16, color: accent),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          selectedAddress!,
+                          style: const TextStyle(color: accent, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
               if (widget.repliedTo == null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Selling',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to buy this item',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableSelling,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableSelling = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                _buildToggleRow(
+                  'Enable Selling',
+                  'Allow users to buy this item',
+                  _enableSelling,
+                  (val) => setState(() => _enableSelling = val),
                 ),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
@@ -401,7 +608,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ),
                       ),
                       filled: true,
-                      fillColor: Color(0xFFF3E8FF),
+                      fillColor: fieldFill,
+                      suffixIcon: Icon(Icons.sell_outlined, color: accent),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -410,44 +618,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Trading',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to offer item trades',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableTrading,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableTrading = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                _buildToggleRow(
+                  'Enable Trading',
+                  'Allow users to offer item trades',
+                  _enableTrading,
+                  (val) => setState(() => _enableTrading = val),
                 ),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
@@ -460,7 +635,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                           'What are you looking for in exchange? (e.g. vintage cameras, bike accessories)',
                       alignLabelWithHint: true,
                       filled: true,
-                      fillColor: Color(0xFFF3E8FF),
+                      fillColor: fieldFill,
+                      prefixIcon: Icon(Icons.swap_horiz, color: accent),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -471,11 +647,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               ],
               const SizedBox(height: 30),
               ElevatedButton(
-                onPressed: _isLoading ? null : _createItem,
+                onPressed: _isLoading ? null : _saveItem,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF6D28D9),
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 56),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -485,10 +662,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
                     : Text(
-                        widget.repliedTo == null ? 'Create Item' : 'Offer Trade',
+                        buttonText,
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -498,6 +677,57 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildToggleRow(
+    String title,
+    String subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE9D5FF)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF5B21B6),
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              activeTrackColor: const Color(0xFF5B21B6),
+              value: value,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
       ),
     );
   }

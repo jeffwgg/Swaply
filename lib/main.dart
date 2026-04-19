@@ -61,10 +61,11 @@
 
           print("✅ Email confirmed for ${user.email}. Checking profile...");
           return FutureBuilder(
+            // users.id maps directly to auth.users.id (UUID)
             future: SupabaseService.client
                 .from('users')
                 .select()
-                .eq('auth_user_id', user.id)
+              .eq('id', user.id)
                 .maybeSingle(),
             builder: (context, profileSnapshot) {
               if (profileSnapshot.connectionState == ConnectionState.waiting) {

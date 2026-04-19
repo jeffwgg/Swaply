@@ -36,7 +36,7 @@ class TransactionRequestsRepository {
     return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
   }
 
-  Future<List<TransactionRequest>> listForRequester(int requesterId) async {
+  Future<List<TransactionRequest>> listForRequester(String requesterId) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -44,6 +44,30 @@ class TransactionRequestsRepository {
         .order('created_at', ascending: false);
 
     final rows = _requireListOfMaps(response, operation: 'listForRequester');
+    return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
+  }
+
+  Future<List<TransactionRequest>> listForRecipient(String recipientId) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('recipient_id', recipientId)
+        .order('created_at', ascending: false);
+
+    final rows = _requireListOfMaps(response, operation: 'listForRecipient');
+    return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
+  }
+
+  Future<List<TransactionRequest>> listForItems(List<int> itemIds) async {
+    if (itemIds.isEmpty) return [];
+
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .inFilter('item_id', itemIds)
+        .order('created_at', ascending: false);
+
+    final rows = _requireListOfMaps(response, operation: 'listForItems');
     return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
   }
 
