@@ -33,6 +33,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _descCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _prefCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+
+  double? _latitude;
+  double? _longitude;
 
   String? _selectedCategory;
   bool _enableSelling = true;
@@ -62,6 +66,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _descCtrl.text = item.description;
       _priceCtrl.text = item.price?.toStringAsFixed(0) ?? '';
       _prefCtrl.text = item.preference ?? '';
+      _addressCtrl.text = item.address ?? '';
+      _latitude = item.latitude;
+      _longitude = item.longitude;
       _existingImageUrls = List.from(item.imageUrls);
       _selectedCategory = item.category;
 
@@ -130,6 +137,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _descCtrl.dispose();
     _priceCtrl.dispose();
     _prefCtrl.dispose();
+    _addressCtrl.dispose();
     super.dispose();
   }
 
@@ -138,6 +146,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     final desc = _descCtrl.text.trim();
     final price = double.tryParse(_priceCtrl.text.trim());
     final preference = _prefCtrl.text.trim();
+    final address = _addressCtrl.text.trim();
     final category = _selectedCategory;
 
     if (_images.isEmpty && _existingImageUrls.isEmpty) {
@@ -191,9 +200,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           status: widget.item!.status,
           category: category,
           imageUrls: finalImageUrls,
-          preference: _enableTrading ? preference : 'None',
+          preference: _enableTrading ? preference : '',
           repliedTo: widget.item!.repliedTo,
           createdAt: widget.item!.createdAt,
+          address: address,
+          latitude: _latitude,
+          longitude: _longitude,
         );
 
         await ItemsRepository().update(updatedItem);
@@ -214,6 +226,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           preference: _enableTrading ? preference : 'None',
           repliedTo: widget.repliedTo,
           createdAt: DateTime.now(),
+          address: address,
+          latitude: _latitude,
+          longitude: _longitude,
         );
 
         await ItemsRepository().create(newItem);
@@ -270,6 +285,26 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     );
   }
 
+  // NOTE: Placeholder for map selection. 
+  // You should add google_maps_flutter to pubspec.yaml and implement a MapPickerScreen.
+  Future<void> _selectLocationOnMap() async {
+    // This is where you would navigate to a MapPicker screen
+    // For now, I'll just show a dialog simulating location selection
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Location'),
+        content: const Text('Integrate google_maps_flutter to pick a location on the map.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const accent = Color(0xFF5B21B6);
@@ -305,121 +340,106 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE9D5FF)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.deepPurple.withOpacity(0.08),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: SizedBox(
-                  height: 100,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _images.length + _existingImageUrls.length + 1,
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return GestureDetector(
-                          onTap: _pickImage,
-                          child: Container(
-                            width: 100,
-                            margin: const EdgeInsets.only(right: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF6D28D9),
+              SizedBox(
+                height: 100,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _images.length + _existingImageUrls.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return GestureDetector(
+                        onTap: _pickImage,
+                        child: Container(
+                          width: 100,
+                          margin: const EdgeInsets.only(right: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6D28D9),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            Icons.add_a_photo,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                      );
+                    }
+
+                    final adjustedIndex = index - 1;
+                    if (adjustedIndex < _existingImageUrls.length) {
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: const Icon(
-                              Icons.add_a_photo,
-                              color: Colors.white,
-                              size: 30,
+                              child: _buildPreviewImage(
+                                _existingImageUrls[adjustedIndex],
+                                width: 100,
+                                height: 100,
+                              ),
                             ),
                           ),
-                        );
-                      }
-
-                      final adjustedIndex = index - 1;
-                      if (adjustedIndex < _existingImageUrls.length) {
-                        return Stack(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(right: 10),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: _buildPreviewImage(
-                                  _existingImageUrls[adjustedIndex],
-                                  width: 100,
-                                  height: 100,
+                          Positioned(
+                            top: 5,
+                            right: 15,
+                            child: GestureDetector(
+                              onTap: () =>
+                                  _removeExistingImage(adjustedIndex),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 18,
                                 ),
                               ),
                             ),
-                            Positioned(
-                              top: 5,
-                              right: 15,
-                              child: GestureDetector(
-                                onTap: () =>
-                                    _removeExistingImage(adjustedIndex),
-                                child: Container(
-                                  decoration: const BoxDecoration(
-                                    color: Colors.black54,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      final newImageIndex =
+                          adjustedIndex - _existingImageUrls.length;
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.file(
+                                File(_images[newImageIndex].path),
+                                width: 100,
+                                height: 100,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 5,
+                            right: 15,
+                            child: GestureDetector(
+                              onTap: () => _removeNewImage(newImageIndex),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 18,
                                 ),
                               ),
                             ),
-                          ],
-                        );
-                      } else {
-                        final newImageIndex =
-                            adjustedIndex - _existingImageUrls.length;
-                        return Stack(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(right: 10),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: Image.file(
-                                  File(_images[newImageIndex].path),
-                                  width: 100,
-                                  height: 100,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 5,
-                              right: 15,
-                              child: GestureDetector(
-                                onTap: () => _removeNewImage(newImageIndex),
-                                child: Container(
-                                  decoration: const BoxDecoration(
-                                    color: Colors.black54,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      }
-                    },
-                  ),
+                          ),
+                        ],
+                      );
+                    }
+                  },
                 ),
               ),
               const SizedBox(height: 26),
@@ -480,12 +500,65 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+              TextFormField(
+                controller: _addressCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Address',
+                  hintText: 'Enter item location',
+                  filled: true,
+                  fillColor: fieldFill,
+                  prefixIcon: const Icon(Icons.location_on_outlined, color: accent),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.map_outlined, color: accent),
+                    onPressed: _selectLocationOnMap,
+                  ),
+                  border: const OutlineInputBorder(
+                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
               if (widget.repliedTo == null) ...[
-                _buildToggleRow(
-                  'Enable Selling',
-                  'Allow users to buy this item',
-                  _enableSelling,
-                  (val) => setState(() => _enableSelling = val),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Selling',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                          Text(
+                            'Allow users to buy this item',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableSelling,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableSelling = newValue;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
@@ -512,11 +585,44 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                _buildToggleRow(
-                  'Enable Trading',
-                  'Allow users to offer item trades',
-                  _enableTrading,
-                  (val) => setState(() => _enableTrading = val),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Enable Trading',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                          Text(
+                            'Allow users to offer item trades',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        activeTrackColor: const Color(0xFF5B21B6),
+                        value: _enableTrading,
+                        onChanged: (bool newValue) {
+                          setState(() {
+                            _enableTrading = newValue;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
@@ -571,57 +677,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildToggleRow(
-    String title,
-    String subtitle,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE9D5FF)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF5B21B6),
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF7C3AED),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Transform.scale(
-            scale: 0.8,
-            child: Switch(
-              activeTrackColor: const Color(0xFF5B21B6),
-              value: value,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
       ),
     );
   }

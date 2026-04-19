@@ -141,13 +141,13 @@ class ItemsRepository {
   }
 
   Future<void> create(ItemListing item) async {
-    await SupabaseService.client.from(_table).insert(item.toMap());
+    await SupabaseService.client.from(_table).insert(item.toInsertMap());
   }
 
   Future<void> update(ItemListing item) async {
     await SupabaseService.client
         .from(_table)
-        .update(item.toMap())
+        .update(item.toInsertMap())
         .eq('id', item.id);
   }
 
@@ -175,5 +175,45 @@ class ItemsRepository {
         .from(_table)
         .update({'status': s})
         .eq('id', id);
+  }
+
+  Future<List<ItemListing>> getUserItems(int userId) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('owner_id', userId)
+        .order('created_at', ascending: false);
+    
+    final rows = _requireListOfMaps(response, operation: 'getUserItems');
+    return rows.map<ItemListing>(ItemListing.fromMap).toList();
+  }
+
+  Future<List<ItemListing>> getFavouriteItems(int userId) async {
+    final favIds = await FavouriteRepository().getUserFavouriteItemIds(userId);
+    if (favIds.isEmpty) return [];
+
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .inFilter('id', favIds.toList())
+        .order('created_at', ascending: false);
+    
+    final rows = _requireListOfMaps(response, operation: 'getFavouriteItems');
+    final items = rows.map<ItemListing>(ItemListing.fromMap).toList();
+    for (var item in items) {
+      item.isFavorite = true;
+    }
+    return items;
+  }
+
+  Future<ItemListing?> getById(int id) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('id', id)
+        .maybeSingle();
+    
+    if (response == null) return null;
+    return ItemListing.fromMap(response);
   }
 }

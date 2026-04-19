@@ -2,6 +2,7 @@ import 'dart:developer';
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
@@ -378,13 +379,29 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      item.name.toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 24,
-                        color: Color(0xFF5B21B6),
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.name.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 24,
+                            color: Color(0xFF5B21B6),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Posted on ${DateFormat('MMM d, yyyy').format(item.createdAt)}',
+                              style: const TextStyle(fontSize: 13, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                   Row(
@@ -654,172 +671,189 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ),
                     ],
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: reply.imageUrls.isNotEmpty
-                              ? _buildImage(
-                                  reply.imageUrls[0],
-                                  height: 100,
-                                  width: 100,
-                                )
-                              : const Icon(Icons.image, size: 100),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                  child: Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: reply.imageUrls.isNotEmpty
+                                  ? _buildImage(
+                                reply.imageUrls[0],
+                                height: 100,
+                                width: 100,
+                              )
+                                  : const Icon(Icons.image, size: 100),
+                            ),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(
-                                      child: Text(
-                                        reply.name.toUpperCase(),
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          color: Color(0xFF5B21B6),
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    if (user != null &&
-                                        user.id == reply.ownerId)
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          color: Colors.red,
-                                        ),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                        onPressed: () => _dropReply(reply.id),
-                                      ),
-                                  ],
-                                ),
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => ProfileScreen(
-                                          isDarkMode:
-                                              Theme.of(context).brightness ==
-                                              Brightness.dark,
-                                          onThemeChanged: (_) {},
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const CircleAvatar(
-                                        radius: 12,
-                                        backgroundImage: AssetImage(
-                                          'assets/sample.jpeg',
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          0,
-                                          0,
-                                          16,
-                                          0,
-                                        ),
-                                        child: Text(
-                                          _replyOwnerNames[reply.id]!,
-                                          style: const TextStyle(
-                                            fontSize: 18,
-                                            color: Color(0xFF7C3AED),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                if (item.status != 'dropped')
-                                  if (user != null &&
-                                      user.id == item.ownerId &&
-                                      reply.status == 'pending')
                                     Row(
+                                      mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                       children: [
                                         Expanded(
-                                          child: TextButton(
-                                            onPressed: () {
-                                              _acceptReply(reply.id);
-                                            },
-                                            style: TextButton.styleFrom(
-                                              backgroundColor: const Color(
-                                                0xFF5B21B6,
-                                              ),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              padding: const EdgeInsets.symmetric(
-                                                vertical: 10,
-                                              ),
-                                            ),
-                                            child: const Text(
-                                              'Accept',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                color: Colors.white,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(right: 60),
+                                            child: Text(
+                                              reply.name.toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 20,
+                                                color: Color(0xFF5B21B6),
+                                                fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: TextButton(
-                                            onPressed: () {
-                                              _rejectReply(reply.id);
-                                            },
-                                            style: TextButton.styleFrom(
-                                              backgroundColor: const Color(
-                                                0xFFE9E1FE,
-                                              ),
-                                              foregroundColor: accent,
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              padding: const EdgeInsets.symmetric(
-                                                vertical: 10,
-                                              ),
+                                        if (user != null &&
+                                            user.id == reply.ownerId)
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                              color: Colors.red,
                                             ),
-                                            child: const Text(
-                                              'Reject',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                color: Color(0xFF5B21B6),
-                                              ),
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () => _dropReply(reply.id),
+                                          ),
+                                      ],
+                                    ),
+                                    GestureDetector(
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => ProfileScreen(
+                                              isDarkMode:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark,
+                                              onThemeChanged: (_) {},
                                             ),
                                           ),
+                                        );
+                                      },
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const CircleAvatar(
+                                            radius: 12,
+                                            backgroundImage: AssetImage(
+                                              'assets/sample.jpeg',
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              0,
+                                              0,
+                                              16,
+                                              0,
+                                            ),
+                                            child: Text(
+                                              _replyOwnerNames[reply.id]!,
+                                              style: const TextStyle(
+                                                fontSize: 18,
+                                                color: Color(0xFF7C3AED),
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.access_time, size: 12, color: Colors.grey),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          DateFormat('MMM d, yyyy').format(reply.createdAt),
+                                          style: const TextStyle(fontSize: 11, color: Colors.grey),
                                         ),
                                       ],
-                                    )
-                                  else ...[
-                                    Text(
-                                      reply.status[0].toUpperCase() +
-                                          reply.status.substring(1),
                                     ),
+                                    const SizedBox(height: 10),
+                                    if (item.status != 'dropped')
+                                      if (user != null &&
+                                          user.id == item.ownerId &&
+                                          reply.status == 'pending')
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: TextButton(
+                                                onPressed: () {
+                                                  _acceptReply(reply.id);
+                                                },
+                                                style: TextButton.styleFrom(
+                                                  backgroundColor: const Color(
+                                                    0xFF5B21B6,
+                                                  ),
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                    BorderRadius.circular(10),
+                                                  ),
+                                                  padding: const EdgeInsets.symmetric(
+                                                    vertical: 10,
+                                                  ),
+                                                ),
+                                                child: const Text(
+                                                  'Accept',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: TextButton(
+                                                onPressed: () {
+                                                  _rejectReply(reply.id);
+                                                },
+                                                style: TextButton.styleFrom(
+                                                  backgroundColor: const Color(
+                                                    0xFFE9E1FE,
+                                                  ),
+                                                  foregroundColor: accent,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                    BorderRadius.circular(10),
+                                                  ),
+                                                  padding: const EdgeInsets.symmetric(
+                                                    vertical: 10,
+                                                  ),
+                                                ),
+                                                child: const Text(
+                                                  'Reject',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    color: Color(0xFF5B21B6),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        )
                                   ],
-                              ],
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: _StatusBadge(status: reply.status),
+                      ),
+                    ],
                   ),
                 );
               }).toList(),
@@ -1037,6 +1071,53 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  final bool mini;
+  const _StatusBadge({required this.status, this.mini = false});
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    switch (status.toLowerCase()) {
+      case 'available':
+      case 'accepted':
+        color = Colors.green;
+        break;
+      case 'dropped':
+      case 'rejected':
+        color = Colors.red;
+        break;
+      case 'reserved':
+      case 'pending':
+        color = Colors.orange;
+        break;
+      default:
+        color = Colors.blue;
+    }
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: mini ? 8 : 10,
+        vertical: mini ? 3 : 4,
+      ),
+      decoration: BoxDecoration(
+        color: mini ? color.withOpacity(0.9) : color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(mini ? 4 : 6),
+        border: mini ? null : Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        status.toUpperCase(),
+        style: TextStyle(
+          fontSize: mini ? 9 : 10,
+          fontWeight: FontWeight.bold,
+          color: mini ? Colors.white : color,
         ),
       ),
     );

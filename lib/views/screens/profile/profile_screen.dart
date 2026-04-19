@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:swaply/views/screens/profile/profile_tabs.dart';
 import '/services/supabase_service.dart';
 import '../auth/login_screen.dart';
 import 'settings_screen.dart';
@@ -175,7 +176,6 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  // --- 2. 完整版界面 (从 Supabase 动态获取用户数据) ---
   Widget _buildFullProfileView(BuildContext context) {
     final user = SupabaseService.client.auth.currentUser;
 
@@ -399,45 +399,8 @@ class ProfileScreen extends StatelessWidget {
 
                   const SizedBox(height: 20),
 
-                  // 📂 TABS
-                  DefaultTabController(
-                    length: 3,
-                    child: Column(
-                      children: [
-                        const TabBar(
-                          labelColor: Colors.purple,
-                          unselectedLabelColor: Colors.grey,
-                          indicatorColor: Colors.purple,
-                          tabs: [
-                            Tab(text: "Listings"),
-                            Tab(text: "Reviews"),
-                            Tab(text: "About"),
-                          ],
-                        ),
-                        SizedBox(
-                          height: 300,
-                          child: TabBarView(
-                            children: [
-                              const _Listings(),
-                              const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(16.0),
-                                  child: Text("No reviews yet"),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text(
-                                  bio.isNotEmpty ? bio : "No bio provided",
-                                  style: const TextStyle(color: Colors.grey),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
+                  //tabs
+                  SizedBox(height: 400, child: ProfileTabs(userId: 8)), //todo
 
                   const SizedBox(height: 20),
                 ],
@@ -505,62 +468,5 @@ class _Divider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(width: 1, height: 30, color: Colors.grey[300]);
-  }
-}
-
-class _Listings extends StatelessWidget {
-  const _Listings();
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: const [
-              Text("Active Listings", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("View All", style: TextStyle(color: Colors.purple)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 150,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: const [
-                _ItemCard(),
-                SizedBox(width: 10),
-                _ItemCard(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ItemCard extends StatelessWidget {
-  const _ItemCard();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 130,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: Colors.grey[200],
-      ),
-      child: Column(
-        children: const [
-          Expanded(child: Icon(Icons.image, size: 60)),
-          Padding(
-            padding: EdgeInsets.all(6),
-            child: Text("RM120.00", style: TextStyle(color: Colors.purple)),
-          )
-        ],
-      ),
-    );
   }
 }

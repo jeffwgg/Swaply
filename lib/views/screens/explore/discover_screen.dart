@@ -73,8 +73,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   },
                   decoration: InputDecoration(
                     prefixIcon: const Icon(Icons.search, color: accent),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
+                    suffixIcon: IconButton(
                             icon: const Icon(Icons.clear, color: accent),
                             onPressed: () {
                               _searchController.clear();
@@ -82,8 +81,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                                 _searchQuery = '';
                               });
                             },
-                          )
-                        : const Icon(Icons.tune, color: accent),
+                          ),
                     labelText: 'Search listings',
                     labelStyle: const TextStyle(color: accent),
                     hintText: 'Search items or sellers',
