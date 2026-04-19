@@ -2,6 +2,7 @@ import 'dart:developer';
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
@@ -393,11 +394,18 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                            const Icon(
+                              Icons.access_time,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               'Posted on ${DateFormat('MMM d, yyyy').format(item.createdAt)}',
-                              style: const TextStyle(fontSize: 13, color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
                             ),
                           ],
                         ),
@@ -622,6 +630,69 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                   ),
                 ),
+              if (item.latitude != null && item.longitude != null)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 14),
+
+                    const Text(
+                      "Location",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF5B21B6),
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE9D5FF)),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: GoogleMap(
+                          initialCameraPosition: CameraPosition(
+                            target: LatLng(item.latitude!, item.longitude!),
+                            zoom: 15,
+                          ),
+                          markers: {
+                            Marker(
+                              markerId: const MarkerId("item_location"),
+                              position: LatLng(item.latitude!, item.longitude!),
+                            ),
+                          },
+                          zoomControlsEnabled: false,
+                          myLocationButtonEnabled: false,
+                          liteModeEnabled: true, // ✅ smoother in scroll view
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    if (item.address != null)
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              item.address!,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               const SizedBox(height: 16),
               if (item.listingType != 'sell')
                 Row(
@@ -681,10 +752,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               borderRadius: BorderRadius.circular(10),
                               child: reply.imageUrls.isNotEmpty
                                   ? _buildImage(
-                                reply.imageUrls[0],
-                                height: 100,
-                                width: 100,
-                              )
+                                      reply.imageUrls[0],
+                                      height: 100,
+                                      width: 100,
+                                    )
                                   : const Icon(Icons.image, size: 100),
                             ),
                             Expanded(
@@ -695,11 +766,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   children: [
                                     Row(
                                       mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                          MainAxisAlignment.spaceBetween,
                                       children: [
                                         Expanded(
                                           child: Padding(
-                                            padding: const EdgeInsets.only(right: 60),
+                                            padding: const EdgeInsets.only(
+                                              right: 60,
+                                            ),
                                             child: Text(
                                               reply.name.toUpperCase(),
                                               style: const TextStyle(
@@ -719,7 +792,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             ),
                                             padding: EdgeInsets.zero,
                                             constraints: const BoxConstraints(),
-                                            onPressed: () => _dropReply(reply.id),
+                                            onPressed: () =>
+                                                _dropReply(reply.id),
                                           ),
                                       ],
                                     ),
@@ -730,7 +804,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                           MaterialPageRoute(
                                             builder: (context) => ProfileScreen(
                                               isDarkMode:
-                                              Theme.of(context).brightness ==
+                                                  Theme.of(
+                                                    context,
+                                                  ).brightness ==
                                                   Brightness.dark,
                                               onThemeChanged: (_) {},
                                             ),
@@ -770,11 +846,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                     const SizedBox(height: 4),
                                     Row(
                                       children: [
-                                        const Icon(Icons.access_time, size: 12, color: Colors.grey),
+                                        const Icon(
+                                          Icons.access_time,
+                                          size: 12,
+                                          color: Colors.grey,
+                                        ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          DateFormat('MMM d, yyyy').format(reply.createdAt),
-                                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                          DateFormat(
+                                            'MMM d, yyyy',
+                                          ).format(reply.createdAt),
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.grey,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -796,11 +881,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                                   ),
                                                   shape: RoundedRectangleBorder(
                                                     borderRadius:
-                                                    BorderRadius.circular(10),
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
                                                   ),
-                                                  padding: const EdgeInsets.symmetric(
-                                                    vertical: 10,
-                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 10,
+                                                      ),
                                                 ),
                                                 child: const Text(
                                                   'Accept',
@@ -824,11 +912,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                                   foregroundColor: accent,
                                                   shape: RoundedRectangleBorder(
                                                     borderRadius:
-                                                    BorderRadius.circular(10),
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
                                                   ),
-                                                  padding: const EdgeInsets.symmetric(
-                                                    vertical: 10,
-                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 10,
+                                                      ),
                                                 ),
                                                 child: const Text(
                                                   'Reject',
@@ -840,7 +931,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                               ),
                                             ),
                                           ],
-                                        )
+                                        ),
                                   ],
                                 ),
                               ),

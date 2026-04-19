@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,9 +36,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _priceCtrl = TextEditingController();
   final _prefCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _locationSearchCtrl = TextEditingController();
+
 
   double? _latitude;
   double? _longitude;
+  LatLng? selectedLocation;
+  String? selectedAddress;
 
   String? _selectedCategory;
   bool _enableSelling = true;
@@ -285,11 +291,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     );
   }
 
-  // NOTE: Placeholder for map selection. 
-  // You should add google_maps_flutter to pubspec.yaml and implement a MapPickerScreen.
   Future<void> _selectLocationOnMap() async {
-    // This is where you would navigate to a MapPicker screen
-    // For now, I'll just show a dialog simulating location selection
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -501,25 +503,83 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               ),
               const SizedBox(height: 20),
               TextFormField(
-                controller: _addressCtrl,
+                controller: _locationSearchCtrl,
                 decoration: InputDecoration(
-                  labelText: 'Address',
-                  hintText: 'Enter item location',
+                  hintText: "Search location",
                   filled: true,
                   fillColor: fieldFill,
-                  prefixIcon: const Icon(Icons.location_on_outlined, color: accent),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.map_outlined, color: accent),
-                    onPressed: _selectLocationOnMap,
-                  ),
+                  prefixIcon: const Icon(Icons.search, color: accent),
                   border: const OutlineInputBorder(
-                    borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
+              Container(
+                height: 250,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(
+                        _latitude ?? 3.1390,
+                        _longitude ?? 101.6869,
+                      ),
+                      zoom: 14,
+                    ),
+                    onTap: (LatLng position) async {
+                      final placemarks = await placemarkFromCoordinates(
+                        position.latitude,
+                        position.longitude,
+                      );
 
+                      final address =
+                          "${placemarks.first.street}, ${placemarks.first.locality}";
+
+                      setState(() {
+                        selectedLocation = position;
+                        selectedAddress = address;
+
+                        _latitude = position.latitude;
+                        _longitude = position.longitude;
+
+                        _addressCtrl.text = address;
+                      });
+                    },
+                    markers: selectedLocation == null
+                        ? {}
+                        : {
+                      Marker(
+                        markerId: const MarkerId("selected"),
+                        position: selectedLocation!,
+                      ),
+                    },
+                    zoomControlsEnabled: false,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (selectedAddress != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          selectedAddress!,
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (widget.repliedTo == null) ...[
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
