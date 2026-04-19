@@ -3,12 +3,12 @@ import '../core/utils/parsing.dart';
 class ChatMessage {
   final int id;
   final int chatId;
-  final int senderId;
+  final String senderId;
   final String content;
   final DateTime? readAt;
   final DateTime? editedAt;
   final DateTime? deletedAt;
-  final int? deletedBy;
+  final String? deletedBy;
   final DateTime createdAt;
 
   const ChatMessage({
@@ -31,7 +31,7 @@ class ChatMessage {
     return ChatMessage(
       id: parseInt(map['id'], fieldName: 'messages.id'),
       chatId: parseInt(map['chat_id'], fieldName: 'messages.chat_id'),
-      senderId: parseInt(map['sender_id'], fieldName: 'messages.sender_id'),
+      senderId: parseString(map['sender_id'], fieldName: 'messages.sender_id'),
       content: parseString(map['content'], fieldName: 'messages.content'),
       readAt: parseNullableDateTime(
         map['read_at'],
@@ -45,7 +45,7 @@ class ChatMessage {
         map['deleted_at'],
         fieldName: 'messages.deleted_at',
       ),
-      deletedBy: parseNullableInt(
+      deletedBy: parseNullableString(
         map['deleted_by'],
         fieldName: 'messages.deleted_by',
       ),
@@ -58,7 +58,7 @@ class ChatMessage {
 
   static Map<String, dynamic> createInsertMap({
     required int chatId,
-    required int senderId,
+    required String senderId,
     required String content,
   }) {
     return {'chat_id': chatId, 'sender_id': senderId, 'content': content};

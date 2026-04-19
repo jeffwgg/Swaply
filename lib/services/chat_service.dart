@@ -16,7 +16,7 @@ class ChatService {
     MessagesRepository? messagesRepository,
     UsersRepository? usersRepository,
     String? Function()? authUserIdProvider,
-    Future<int?> Function(String authUserId)? appUserIdResolver,
+    Future<String?> Function(String authUserId)? appUserIdResolver,
   }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
        _messagesRepository = messagesRepository ?? MessagesRepository(),
        _usersRepository = usersRepository ?? UsersRepository(),
@@ -27,14 +27,14 @@ class ChatService {
   final MessagesRepository _messagesRepository;
   final UsersRepository _usersRepository;
   final String? Function() _authUserIdProvider;
-  final Future<int?> Function(String authUserId)? _appUserIdResolver;
+  final Future<String?> Function(String authUserId)? _appUserIdResolver;
 
-  int? _cachedCurrentUserId;
+  String? _cachedCurrentUserId;
   String? _cachedAuthUserId;
 
-  int? get currentUserId => _cachedCurrentUserId;
+  String? get currentUserId => _cachedCurrentUserId;
 
-  Future<int?> refreshCurrentUserId() async {
+  Future<String?> refreshCurrentUserId() async {
     final authUserId = _authUserIdProvider();
     if (authUserId == null || authUserId.isEmpty) {
       _cachedAuthUserId = null;
@@ -48,7 +48,7 @@ class ChatService {
 
     final resolvedUserId = _appUserIdResolver != null
       ? await _appUserIdResolver(authUserId)
-      : (await _usersRepository.getByAuthUserId(authUserId))?.id;
+      : (await _usersRepository.getById(authUserId))?.id;
     _cachedAuthUserId = authUserId;
     _cachedCurrentUserId = resolvedUserId;
     return _cachedCurrentUserId;
@@ -60,11 +60,11 @@ class ChatService {
   }
 
   Future<ChatThread> createOrGetItemChat({
-    required int otherUserId,
+    required String otherUserId,
     required int itemId,
   }) async {
     final userId = await _requireUserId();
-    _requirePositiveId(otherUserId, fieldName: 'otherUserId');
+    _requireNonEmptyId(otherUserId, fieldName: 'otherUserId');
     _requirePositiveId(itemId, fieldName: 'itemId');
     return _chatsRepository.createOrGetItemChat(
       currentUserId: userId,
@@ -172,7 +172,7 @@ class ChatService {
     return _chatsRepository.unsubscribe(channel);
   }
 
-  Future<int> _requireUserId() async {
+  Future<String> _requireUserId() async {
     final userId = await refreshCurrentUserId();
     if (userId == null) {
       throw StateError(
@@ -180,6 +180,12 @@ class ChatService {
       );
     }
     return userId;
+  }
+
+  void _requireNonEmptyId(String value, {required String fieldName}) {
+    if (value.trim().isEmpty) {
+      throw ArgumentError.value(value, fieldName, 'Must be a non-empty UUID.');
+    }
   }
 
   void _requirePositiveId(int value, {required String fieldName}) {

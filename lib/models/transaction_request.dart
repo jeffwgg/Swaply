@@ -3,7 +3,8 @@ import '../core/utils/parsing.dart';
 class TransactionRequest {
   final int id;
   final int itemId;
-  final int requesterId;
+  final String requesterId;
+  final String recipientId;
   final String type;
   final double? offeredPrice;
   final int? offeredItemId;
@@ -14,6 +15,7 @@ class TransactionRequest {
     required this.id,
     required this.itemId,
     required this.requesterId,
+    required this.recipientId,
     required this.type,
     this.offeredPrice,
     this.offeredItemId,
@@ -28,9 +30,13 @@ class TransactionRequest {
         map['item_id'],
         fieldName: 'transaction_requests.item_id',
       ),
-      requesterId: parseInt(
+      requesterId: parseString(
         map['requester_id'],
         fieldName: 'transaction_requests.requester_id',
+      ),
+      recipientId: parseString(
+        map['recipient_id'],
+        fieldName: 'transaction_requests.recipient_id',
       ),
       type: parseString(map['type'], fieldName: 'transaction_requests.type'),
       offeredPrice: parseNullableDouble(
@@ -56,6 +62,7 @@ class TransactionRequest {
     return {
       'item_id': itemId,
       'requester_id': requesterId,
+      'recipient_id': recipientId,
       'type': type,
       'offered_price': offeredPrice,
       'offered_item_id': offeredItemId,
@@ -68,6 +75,7 @@ class TransactionRequest {
       'id': id,
       'item_id': itemId,
       'requester_id': requesterId,
+      'recipient_id': recipientId,
       'type': type,
       'offered_price': offeredPrice,
       'offered_item_id': offeredItemId,

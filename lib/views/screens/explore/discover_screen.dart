@@ -42,7 +42,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     const accent = Color(0xFF5B21B6);
-    const accentSoft = Color(0xFFF3E8FF);
     return DefaultTabController(
       length: _categories.length,
       child: Scaffold(

@@ -1,5 +1,4 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/favourite.dart';
 
 class FavouriteRepository {
   static final FavouriteRepository _instance = FavouriteRepository._internal();
@@ -9,7 +8,7 @@ class FavouriteRepository {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   /// Add to favourites
-  Future<void> addFavourite(int userId, int itemId) async {
+  Future<void> addFavourite(String userId, int itemId) async {
     try {
       await _supabase.from('favourites').insert({
         'user_id': userId,
@@ -21,7 +20,7 @@ class FavouriteRepository {
   }
 
   /// Remove from favourites
-  Future<void> removeFavourite(int userId, int itemId) async {
+  Future<void> removeFavourite(String userId, int itemId) async {
     try {
       await _supabase
           .from('favourites')
@@ -33,7 +32,7 @@ class FavouriteRepository {
     }
   }
 
-  Future<bool> isFavourited(int userId, int itemId) async {
+  Future<bool> isFavourited(String userId, int itemId) async {
     try {
       final response = await _supabase
           .from('favourites')
@@ -49,7 +48,7 @@ class FavouriteRepository {
   }
 
   /// Get all favourites for a user
-  Future<Set<int>> getUserFavouriteItemIds(int userId) async {
+  Future<Set<int>> getUserFavouriteItemIds(String userId) async {
     final response = await _supabase
         .from('favourites')
         .select('item_id')
@@ -75,7 +74,7 @@ class FavouriteRepository {
     }
   }
 
-  Future<bool> toggleFavourite(int userId, int itemId) async {
+  Future<bool> toggleFavourite(String userId, int itemId) async {
     final exists = await isFavourited(userId, itemId);
 
     if (exists) {
