@@ -18,9 +18,8 @@ import '../../../models/chat_pinned_message.dart';
 import '../../../models/chat_thread.dart';
 import '../../../models/ai_message.dart';
 import '../../../models/ai_pinned_message.dart';
-import '../../../services/chat_service.dart';
-import '../../../services/ai_chat_service.dart';
 import '../../../services/supabase_service.dart';
+import '../../../viewmodels/chat/inbox_viewmodel.dart';
 
 class InboxScreen extends StatefulWidget {
   final ValueChanged<bool>? onConversationViewChanged;
@@ -42,8 +41,7 @@ class _InboxScreenState extends State<InboxScreen> {
   String _searchQuery = '';
   Set<int> _pinnedChats = {};
 
-  final ChatService _chatService = ChatService();
-  final AiChatService _aiChatService = AiChatService();
+  final InboxViewModel _inboxViewModel = InboxViewModel();
   dynamic _inboxSubscription;
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
@@ -59,8 +57,9 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _isSending = false;
   bool _isRecordingVoice = false;
   DateTime? _voiceRecordingStartAt;
+  bool _hasAttemptedAiConversationInit = false;
 
-  int? get _currentUserId => _chatService.currentUserId;
+  int? get _currentUserId => _inboxViewModel.currentUserId;
 
   @override
   void initState() {
@@ -73,7 +72,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
     _loadInbox();
     try {
-      _inboxSubscription = _chatService.subscribeInboxChanges(
+      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
         onChange: _loadInbox,
       );
     } catch (_) {}
@@ -85,10 +84,11 @@ class _InboxScreenState extends State<InboxScreen> {
     _messagesSubscription?.cancel();
     _aiMessagesSubscription?.cancel();
     if (_inboxSubscription != null) {
-      _chatService.unsubscribeInboxChanges(_inboxSubscription);
+      _inboxViewModel.unsubscribeInboxChanges(_inboxSubscription);
     }
     _composerController.dispose();
     unawaited(_audioRecorder.dispose());
+    _inboxViewModel.dispose();
     super.dispose();
   }
 
@@ -106,6 +106,7 @@ class _InboxScreenState extends State<InboxScreen> {
       _showMobileChat = false;
       _isLoading = true;
       _replyingTo = null;
+      _hasAttemptedAiConversationInit = false;
       _rawMessagesByChat.clear();
       _messagesByChat.clear();
       _chatPins.clear();
@@ -116,7 +117,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _loadInbox() async {
     try {
-      final threads = await _chatService.loadInbox();
+      final threads = await _inboxViewModel.loadInbox();
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
         return _Conversation(
@@ -164,12 +165,38 @@ class _InboxScreenState extends State<InboxScreen> {
           _isLoading = false;
         });
       }
+      unawaited(_initializeAiConversationIfNeeded());
       _subscribeToSelectedConversationMessages();
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
       }
       debugPrint('Error loading inbox: $e');
+    }
+  }
+
+  Future<void> _initializeAiConversationIfNeeded() async {
+    if (_hasAttemptedAiConversationInit) {
+      return;
+    }
+
+    if (!SupabaseService.isConfigured ||
+        SupabaseService.client.auth.currentUser == null) {
+      return;
+    }
+
+    _hasAttemptedAiConversationInit = true;
+
+    try {
+      await _inboxViewModel.ensureAiConversationInitialized();
+      if (!mounted) {
+        return;
+      }
+
+      await _refreshAiMessagesNow();
+      await _loadPinnedMessagesForAiChat();
+    } catch (e) {
+      debugPrint('Error initializing AI conversation: $e');
     }
   }
 
@@ -314,7 +341,7 @@ class _InboxScreenState extends State<InboxScreen> {
     _activeChatId = selected.id;
 
     if (selected.id == -1) {
-      _aiMessagesSubscription = _aiChatService.watchAiMessages().listen(
+      _aiMessagesSubscription = _inboxViewModel.watchAiMessages().listen(
         (aiMessages) {
           if (!mounted) return;
           _applyAiMessages(aiMessages);
@@ -324,7 +351,7 @@ class _InboxScreenState extends State<InboxScreen> {
         },
       );
     } else {
-      _messagesSubscription = _chatService
+      _messagesSubscription = _inboxViewModel
           .watchMessages(selected.id)
           .listen(
             (messages) {
@@ -342,7 +369,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 (m) => m.senderId != _currentUserId && m.readAt == null,
               );
               if (hasUnreadIncoming) {
-                _chatService.markChatAsRead(selected.id).catchError((_) {});
+                _inboxViewModel.markChatAsRead(selected.id).catchError((_) {});
               }
 
               setState(() {
@@ -367,7 +394,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _loadPinnedMessagesForChat(int chatId) async {
     try {
-      final pins = await _chatService.listPinnedMessages(chatId);
+      final pins = await _inboxViewModel.listPinnedChatMessages(chatId);
       if (!mounted) {
         return;
       }
@@ -381,7 +408,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _loadPinnedMessagesForAiChat() async {
     try {
-      final pins = await _aiChatService.listPinnedMessages();
+      final pins = await _inboxViewModel.listPinnedAiMessages();
       if (!mounted) {
         return;
       }
@@ -498,7 +525,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _refreshAiMessagesNow() async {
     try {
-      final aiMessages = await _aiChatService.fetchAiMessages();
+      final aiMessages = await _inboxViewModel.fetchAiMessages();
       if (!mounted) {
         return;
       }
@@ -804,13 +831,13 @@ class _InboxScreenState extends State<InboxScreen> {
 
     try {
       if (conversation.id == -1) {
-        await _aiChatService.editMessage(
+        await _inboxViewModel.editAiMessage(
           messageId: message.id,
           content: updatedText,
         );
         await _refreshAiMessagesNow();
       } else {
-        await _chatService.editMessage(
+        await _inboxViewModel.editChatMessage(
           messageId: message.id,
           content: updatedText,
         );
@@ -830,11 +857,11 @@ class _InboxScreenState extends State<InboxScreen> {
 
     try {
       if (conversation.id == -1) {
-        await _aiChatService.deleteMessage(message.id);
+        await _inboxViewModel.deleteAiMessage(message.id);
         await _unpinAiMessage(message);
         await _refreshAiMessagesNow();
       } else {
-        await _chatService.deleteMessage(message.id);
+        await _inboxViewModel.deleteChatMessage(message.id);
       }
     } catch (e) {
       debugPrint('Error deleting message: $e');
@@ -847,7 +874,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
 
     try {
-      await _chatService.pinMessage(
+      await _inboxViewModel.pinChatMessage(
         chatId: conversation.id,
         messageId: message.id,
       );
@@ -867,7 +894,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
 
     try {
-      await _chatService.clearPinnedMessage(
+      await _inboxViewModel.clearPinnedChatMessage(
         chatId: conversation.id,
         messageId: message.id,
       );
@@ -884,7 +911,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
 
     try {
-      await _aiChatService.pinMessage(message.id);
+      await _inboxViewModel.pinAiMessage(message.id);
       await _loadPinnedMessagesForAiChat();
     } catch (e) {
       debugPrint('Error pinning AI message: $e');
@@ -897,7 +924,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
 
     try {
-      await _aiChatService.unpinMessage(message.id);
+      await _inboxViewModel.unpinAiMessage(message.id);
       await _loadPinnedMessagesForAiChat();
     } catch (e) {
       debugPrint('Error unpinning AI message: $e');
@@ -966,13 +993,13 @@ class _InboxScreenState extends State<InboxScreen> {
       });
 
       if (conversation.id == -1) {
-        await _aiChatService.sendMessage(
+        await _inboxViewModel.sendAiMessage(
           trimmed,
           promptForAi: promptForAi ?? parsedBody.previewText,
         );
         await _refreshAiMessagesNow();
       } else {
-        await _chatService.sendMessage(
+        await _inboxViewModel.sendChatMessage(
           chatId: conversation.id,
           content: trimmed,
         );
@@ -1361,10 +1388,10 @@ class _InboxScreenState extends State<InboxScreen> {
       });
 
       if (conversation.id == -1) {
-        await _aiChatService.sendMessage(payload, promptForAi: text);
+        await _inboxViewModel.sendAiMessage(payload, promptForAi: text);
         await _refreshAiMessagesNow();
       } else {
-        await _chatService.sendMessage(
+        await _inboxViewModel.sendChatMessage(
           chatId: conversation.id,
           content: payload,
         );

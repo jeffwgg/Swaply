@@ -22,9 +22,14 @@ Deno.serve(async (req: Request) => {
     )
 
     const { data: { user } } = await supabaseClient.auth.getUser()
+    if (!user?.id) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 401,
+      })
+    }
 
-    // TESTING ONLY: Bypass auth check and hardcode user ID
-    const userId = user?.id || '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    const userId = user.id
 
     const { message } = await req.json()
 

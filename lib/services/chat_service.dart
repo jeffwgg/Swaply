@@ -7,25 +7,51 @@ import '../models/chat_pinned_message.dart';
 import '../models/chat_thread.dart';
 import '../repositories/chats_repository.dart';
 import '../repositories/messages_repository.dart';
+import '../repositories/users_repository.dart';
+import '../services/supabase_service.dart';
 
 class ChatService {
   ChatService({
     ChatsRepository? chatsRepository,
     MessagesRepository? messagesRepository,
+    UsersRepository? usersRepository,
+    String? Function()? authUserIdProvider,
+    Future<int?> Function(String authUserId)? appUserIdResolver,
   }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
-       _messagesRepository = messagesRepository ?? MessagesRepository();
+       _messagesRepository = messagesRepository ?? MessagesRepository(),
+       _usersRepository = usersRepository ?? UsersRepository(),
+       _authUserIdProvider = authUserIdProvider ?? _defaultAuthUserIdProvider,
+       _appUserIdResolver = appUserIdResolver;
 
   final ChatsRepository _chatsRepository;
   final MessagesRepository _messagesRepository;
+  final UsersRepository _usersRepository;
+  final String? Function() _authUserIdProvider;
+  final Future<int?> Function(String authUserId)? _appUserIdResolver;
 
   int? _cachedCurrentUserId;
+  String? _cachedAuthUserId;
 
   int? get currentUserId => _cachedCurrentUserId;
 
   Future<int?> refreshCurrentUserId() async {
-    // TESTING ONLY: Hardcoding current user id to 1.
-    _cachedCurrentUserId = 1;
-    return 1;
+    final authUserId = _authUserIdProvider();
+    if (authUserId == null || authUserId.isEmpty) {
+      _cachedAuthUserId = null;
+      _cachedCurrentUserId = null;
+      return null;
+    }
+
+    if (_cachedAuthUserId == authUserId && _cachedCurrentUserId != null) {
+      return _cachedCurrentUserId;
+    }
+
+    final resolvedUserId = _appUserIdResolver != null
+      ? await _appUserIdResolver(authUserId)
+      : (await _usersRepository.getByAuthUserId(authUserId))?.id;
+    _cachedAuthUserId = authUserId;
+    _cachedCurrentUserId = resolvedUserId;
+    return _cachedCurrentUserId;
   }
 
   Future<List<ChatThread>> loadInbox() async {
@@ -172,5 +198,17 @@ class ChatService {
       throw ArgumentError.value(value, 'content', 'Message cannot be empty.');
     }
     return normalized;
+  }
+
+  static String? _defaultAuthUserIdProvider() {
+    if (!SupabaseService.isConfigured) {
+      return null;
+    }
+
+    try {
+      return SupabaseService.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
   }
 }

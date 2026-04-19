@@ -1,6 +1,7 @@
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/services/supabase_service.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/items_repository.dart';
 import '../item/create_item_screen.dart';
@@ -18,12 +19,34 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
+  int? _loginId;
 
   @override
   void initState() {
     super.initState();
+    _fetchLoginId();
     _fetchOwner();
     _fetchReplies();
+  }
+
+  Future<void> _fetchLoginId() async {
+    try {
+      final authUserId = SupabaseService.client.auth.currentUser?.id;
+      if (authUserId == null) {
+        return;
+      }
+
+      final user = await UsersRepository().getByAuthUserId(authUserId);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loginId = user?.id;
+      });
+    } catch (e) {
+      debugPrint('Error resolving current user id: $e');
+    }
   }
 
   Future<void> _fetchOwner() async {
@@ -81,7 +104,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final int loginId = 3; //todo: get real logged-in user ID
+    final int loginId = _loginId ?? -1;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Item Details')),

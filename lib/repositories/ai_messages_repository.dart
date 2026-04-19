@@ -3,14 +3,24 @@ import '../models/ai_message.dart';
 import '../models/ai_pinned_message.dart';
 
 class AiMessagesRepository {
+  static const String _defaultWelcomeMessage =
+      'Hi! I\'m Swaply Buddy. I can help you with listings, trades, requests, and chat tips anytime.';
+
   final SupabaseClient _supabase;
 
   AiMessagesRepository({SupabaseClient? supabase})
     : _supabase = supabase ?? Supabase.instance.client;
 
+  String _requireAuthUserId() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) {
+      throw StateError('No authenticated user found for AI chat operations.');
+    }
+    return userId;
+  }
+
   Stream<List<AiMessage>> watchMessages() {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     return _supabase
         .from('ai_messages')
@@ -21,8 +31,7 @@ class AiMessagesRepository {
   }
 
   Future<List<AiMessage>> fetchMessages() async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     final data = await _supabase
         .from('ai_messages')
@@ -36,8 +45,7 @@ class AiMessagesRepository {
   }
 
   Future<AiMessage> insertMessage(String content, {bool isAi = false}) async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     final data = await _supabase
         .from('ai_messages')
@@ -48,12 +56,43 @@ class AiMessagesRepository {
     return AiMessage.fromMap(data);
   }
 
+  Future<void> ensureConversationInitialized({String? welcomeMessage}) async {
+    final userId = _requireAuthUserId();
+
+    final existing = await _supabase
+        .from('ai_messages')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', ascending: true)
+        .limit(1);
+
+    if ((existing as List<dynamic>).isNotEmpty) {
+      return;
+    }
+
+    final inserted = await _supabase
+        .from('ai_messages')
+        .insert({
+          'user_id': userId,
+          'content': (welcomeMessage ?? _defaultWelcomeMessage).trim(),
+          'is_ai': true,
+        })
+        .select('id')
+        .single();
+
+    final messageId = inserted['id'] as int;
+
+    await _supabase.from('ai_message_pins').upsert({
+      'user_id': userId,
+      'message_id': messageId,
+    }, onConflict: 'user_id,message_id');
+  }
+
   Future<void> editMessage({
     required int messageId,
     required String content,
   }) async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     await _supabase
         .from('ai_messages')
@@ -64,8 +103,7 @@ class AiMessagesRepository {
   }
 
   Future<void> deleteMessage(int messageId) async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     await _supabase
         .from('ai_messages')
@@ -76,8 +114,7 @@ class AiMessagesRepository {
   }
 
   Future<void> pinMessage(int messageId) async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     await _supabase.from('ai_message_pins').upsert({
       'user_id': userId,
@@ -86,8 +123,7 @@ class AiMessagesRepository {
   }
 
   Future<void> unpinMessage(int messageId) async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     await _supabase
         .from('ai_message_pins')
@@ -97,8 +133,7 @@ class AiMessagesRepository {
   }
 
   Future<List<AiPinnedMessage>> listPinnedMessages() async {
-    // TESTING ONLY: Hardcoding user id to '86369cf5-f4a3-458e-bbe8-8c957854efec'
-    final userId = '86369cf5-f4a3-458e-bbe8-8c957854efec';
+    final userId = _requireAuthUserId();
 
     final data = await _supabase
         .from('ai_message_pins')
