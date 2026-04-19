@@ -6,7 +6,7 @@ class ItemListing {
   final String description;
   final double? price;
   final String listingType;
-  final int ownerId;
+  final String ownerId;
   final String status;
   final String category;
   final List<String> imageUrls;
@@ -50,7 +50,7 @@ class ItemListing {
         map['listing_type'],
         fieldName: 'items.listing_type',
       ),
-      ownerId: parseInt(map['owner_id'], fieldName: 'items.owner_id'),
+      ownerId: parseString(map['owner_id'], fieldName: 'items.owner_id'),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
       imageUrls: List<String>.from(map['image_urls'] ?? []),

@@ -7,7 +7,7 @@ import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 
 class ProfileTabs extends StatefulWidget {
-  final int userId;
+  final String userId;
   const ProfileTabs({super.key, required this.userId});
 
   @override

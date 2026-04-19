@@ -1,5 +1,9 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,9 +38,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _priceCtrl = TextEditingController();
   final _prefCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _locationSearchCtrl = TextEditingController();
 
   double? _latitude;
   double? _longitude;
+  LatLng? selectedLocation;
+  String? selectedAddress;
 
   String? _selectedCategory;
   bool _enableSelling = true;
@@ -69,6 +76,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _addressCtrl.text = item.address ?? '';
       _latitude = item.latitude;
       _longitude = item.longitude;
+      if (_latitude != null && _longitude != null) {
+        selectedLocation = LatLng(_latitude!, _longitude!);
+        selectedAddress = item.address;
+      }
       _existingImageUrls = List.from(item.imageUrls);
       _selectedCategory = item.category;
 
@@ -138,6 +149,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _priceCtrl.dispose();
     _prefCtrl.dispose();
     _addressCtrl.dispose();
+    _locationSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -282,26 +294,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       fit: fit,
       errorBuilder: (context, error, stackTrace) =>
           const Icon(Icons.broken_image, size: 50),
-    );
-  }
-
-  // NOTE: Placeholder for map selection. 
-  // You should add google_maps_flutter to pubspec.yaml and implement a MapPickerScreen.
-  Future<void> _selectLocationOnMap() async {
-    // This is where you would navigate to a MapPicker screen
-    // For now, I'll just show a dialog simulating location selection
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Location'),
-        content: const Text('Integrate google_maps_flutter to pick a location on the map.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -500,65 +492,106 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+              const Text(
+                'Location',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF6D28D9),
+                ),
+              ),
+              const SizedBox(height: 10),
               TextFormField(
-                controller: _addressCtrl,
+                controller: _locationSearchCtrl,
                 decoration: InputDecoration(
-                  labelText: 'Address',
-                  hintText: 'Enter item location',
+                  hintText: "Search location",
                   filled: true,
                   fillColor: fieldFill,
-                  prefixIcon: const Icon(Icons.location_on_outlined, color: accent),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.map_outlined, color: accent),
-                    onPressed: _selectLocationOnMap,
-                  ),
+                  prefixIcon: const Icon(Icons.search, color: accent),
                   border: const OutlineInputBorder(
-                    borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(10)),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
+              Container(
+                height: 250,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: GoogleMap(
+                    key: UniqueKey(), // Fix for "egl image with null texture object"
+                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                      Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                    },
+                    initialCameraPosition: CameraPosition(
+                      target: selectedLocation ?? const LatLng(3.1390, 101.6869),
+                      zoom: 14,
+                    ),
+                    onTap: (LatLng position) async {
+                      try {
+                        final placemarks = await placemarkFromCoordinates(
+                          position.latitude,
+                          position.longitude,
+                        );
 
+                        String address = "${position.latitude}, ${position.longitude}";
+                        if (placemarks.isNotEmpty) {
+                          final p = placemarks.first;
+                          address = "${p.street}, ${p.locality}, ${p.country}";
+                        }
+
+                        setState(() {
+                          selectedLocation = position;
+                          selectedAddress = address;
+                          _latitude = position.latitude;
+                          _longitude = position.longitude;
+                          _addressCtrl.text = address;
+                        });
+                      } catch (e) {
+                        debugPrint("Geocoding error: $e");
+                      }
+                    },
+                    markers: selectedLocation == null
+                        ? {}
+                        : {
+                            Marker(
+                              markerId: const MarkerId("selected"),
+                              position: selectedLocation!,
+                            ),
+                          },
+                    zoomControlsEnabled: false,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (selectedAddress != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.location_on, size: 16, color: accent),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          selectedAddress!,
+                          style: const TextStyle(color: accent, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
               if (widget.repliedTo == null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Selling',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to buy this item',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableSelling,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableSelling = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                _buildToggleRow(
+                  'Enable Selling',
+                  'Allow users to buy this item',
+                  _enableSelling,
+                  (val) => setState(() => _enableSelling = val),
                 ),
                 if (_enableSelling) ...[
                   const SizedBox(height: 10),
@@ -585,44 +618,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
                 const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Enable Trading',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5B21B6),
-                            ),
-                          ),
-                          Text(
-                            'Allow users to offer item trades',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                        activeTrackColor: const Color(0xFF5B21B6),
-                        value: _enableTrading,
-                        onChanged: (bool newValue) {
-                          setState(() {
-                            _enableTrading = newValue;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                _buildToggleRow(
+                  'Enable Trading',
+                  'Allow users to offer item trades',
+                  _enableTrading,
+                  (val) => setState(() => _enableTrading = val),
                 ),
                 if (_enableTrading) ...[
                   const SizedBox(height: 10),
@@ -677,6 +677,57 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildToggleRow(
+    String title,
+    String subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE9D5FF)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF5B21B6),
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              activeTrackColor: const Color(0xFF5B21B6),
+              value: value,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
       ),
     );
   }

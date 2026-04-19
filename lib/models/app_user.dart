@@ -1,8 +1,7 @@
 import '../core/utils/parsing.dart';
 
 class AppUser {
-  final int id;
-  final String authUserId;
+  final String id;
   final String username;
   final String email;
   final String? profileImage;
@@ -10,7 +9,6 @@ class AppUser {
 
   const AppUser({
     required this.id,
-    required this.authUserId,
     required this.username,
     required this.email,
     this.profileImage,
@@ -19,11 +17,7 @@ class AppUser {
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
     return AppUser(
-      id: parseInt(map['id'], fieldName: 'users.id'),
-      authUserId: parseString(
-        map['auth_user_id'],
-        fieldName: 'users.auth_user_id',
-      ),
+      id: parseString(map['id'], fieldName: 'users.id'),
       username: parseString(map['username'], fieldName: 'users.username'),
       email: parseString(map['email'], fieldName: 'users.email'),
       profileImage: parseNullableString(
@@ -39,7 +33,7 @@ class AppUser {
 
   Map<String, dynamic> toInsertMap() {
     return {
-      'auth_user_id': authUserId,
+      'id': id,
       'username': username,
       'email': email,
       'profile_image': profileImage,
@@ -51,7 +45,6 @@ class AppUser {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'auth_user_id': authUserId,
       'username': username,
       'email': email,
       'profile_image': profileImage,

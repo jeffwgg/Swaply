@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/views/screens/profile/profile_tabs.dart';
@@ -183,7 +185,7 @@ class ProfileScreen extends StatelessWidget {
       future: SupabaseService.client
           .from('users')
           .select()
-          .eq('auth_user_id', user!.id)
+          .eq('id', user!.id)
           .maybeSingle(),
       builder: (context, snapshot) {
         // ⏳ Loading
@@ -214,7 +216,7 @@ class ProfileScreen extends StatelessWidget {
           );
         }
 
-        final profile = snapshot.data as Map<String, dynamic>?;
+        final profile = snapshot.data;
 
         if (profile == null) {
           return Scaffold(
@@ -235,8 +237,6 @@ class ProfileScreen extends StatelessWidget {
         final fullName = profile['full_name'] ?? 'User';
         final username = profile['username'] ?? 'user';
         final bio = profile['bio'] ?? 'No bio yet';
-        final email = profile['email'] ?? '';
-        final phone = profile['phone'] ?? '';
 
         return Scaffold(
           backgroundColor: const Color(0xFFF4F3F8),
@@ -400,7 +400,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 20),
 
                   //tabs
-                  SizedBox(height: 400, child: ProfileTabs(userId: 8)), //todo
+                  SizedBox(height: 400, child: ProfileTabs(userId: user.id)),
 
                   const SizedBox(height: 20),
                 ],

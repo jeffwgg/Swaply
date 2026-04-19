@@ -41,7 +41,7 @@ class _MainShellState extends State<MainShell> {
     final authUser = SupabaseService.client.auth.currentUser;
     if (authUser == null) return;
 
-    final user = await UsersRepository().getByAuthUserId(authUser.id);
+    final user = await UsersRepository().getById(authUser.id);
 
     setState(() {
       _user = user;

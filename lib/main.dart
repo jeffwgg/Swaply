@@ -119,11 +119,11 @@
           // ✅ 用户已登录且邮件已验证：检查是否有 profile
           print("✅ Email confirmed for ${user.email}. Checking profile...");
           return FutureBuilder(
-            // 这里的 users 表名要和你数据库一致，auth_user_id 也是
+            // users.id maps directly to auth.users.id (UUID)
             future: SupabaseService.client
                 .from('users')
                 .select()
-                .eq('auth_user_id', user.id)
+              .eq('id', user.id)
                 .maybeSingle(),
             builder: (context, profileSnapshot) {
               // ⏳ 加载中，显示一个菊花图，防止白屏

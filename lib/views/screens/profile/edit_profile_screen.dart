@@ -53,7 +53,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final profileResponse = await SupabaseService.client
           .from('users')
           .select()
-          .eq('auth_user_id', user.id)
+          .eq('id', user.id)
           .maybeSingle();
 
       if (!mounted) return;
@@ -221,7 +221,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await SupabaseService.client
           .from('users')
           .update(updates)
-          .eq('auth_user_id', user.id);
+          .eq('id', user.id);
 
       if (!mounted) return;
 
