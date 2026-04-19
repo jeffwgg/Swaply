@@ -1,16 +1,18 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
 import 'package:swaply/services/supabase_service.dart';
-
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 import '../../../models/app_user.dart';
 
 class CreateItemScreen extends StatefulWidget {
@@ -61,6 +63,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final ImagePicker _picker = ImagePicker();
   final List<XFile> _images = [];
   List<String> _existingImageUrls = [];
+  List<dynamic> _searchResults = [];
+  Timer? _debounce;
   final _formKey = GlobalKey<FormState>();
 
   @override
@@ -139,6 +143,57 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     } catch (e) {
       debugPrint('Upload error: $e');
       return null;
+    }
+  }
+
+  Future<List<dynamic>> _searchPlaces(String query) async {
+    final url = Uri.parse(
+      "https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5",
+    );
+
+    final response = await http.get(
+      url,
+      headers: {"User-Agent": "com.example.swaply (your_email@example.com)"},
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception("Failed to search location");
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    _debounce = Timer(const Duration(milliseconds: 800), () async {
+      if (value.isEmpty) return;
+
+      final results = await _searchPlaces(value);
+
+      setState(() {
+        _searchResults = results;
+      });
+    });
+  }
+
+  Future<String> reverseGeocode(double lat, double lon) async {
+    final url = Uri.parse(
+      "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json",
+    );
+
+    final response = await http.get(
+      url,
+      headers: {
+        "User-Agent": "com.example.swaply (your_email@example.com)"
+      },
+    );
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return data["display_name"] ?? "Unknown location";
+    } else {
+      return "Unknown location";
     }
   }
 
@@ -271,32 +326,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  Widget _buildPreviewImage(
-    String url, {
-    double? width,
-    double? height,
-    BoxFit fit = BoxFit.cover,
-  }) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.asset(
-      url,
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     const accent = Color(0xFF5B21B6);
@@ -376,8 +405,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                             top: 5,
                             right: 15,
                             child: GestureDetector(
-                              onTap: () =>
-                                  _removeExistingImage(adjustedIndex),
+                              onTap: () => _removeExistingImage(adjustedIndex),
                               child: Container(
                                 decoration: const BoxDecoration(
                                   color: Colors.black54,
@@ -491,7 +519,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 26),
+
               const Text(
                 'Location',
                 style: TextStyle(
@@ -501,20 +530,60 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              TextFormField(
+
+              TextField(
                 controller: _locationSearchCtrl,
                 decoration: InputDecoration(
-                  hintText: "Search location",
+                  hintText: "Search location (e.g. KLCC)",
+                  prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: fieldFill,
-                  prefixIcon: const Icon(Icons.search, color: accent),
-                  border: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  fillColor: const Color(0xFFF3E8FF),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide.none,
                   ),
                 ),
+
+                onChanged: _onSearchChanged,
               ),
+
+              if (_searchResults.isNotEmpty)
+                Container(
+                  height: 150,
+                  margin: const EdgeInsets.only(top: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ListView.builder(
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final place = _searchResults[index];
+
+                      return ListTile(
+                        title: Text(place['display_name']),
+                        onTap: () {
+                          final lat = double.parse(place['lat']);
+                          final lon = double.parse(place['lon']);
+
+                          setState(() {
+                            selectedLocation = LatLng(lat, lon);
+                            selectedAddress = place['display_name'];
+                            _latitude = lat;
+                            _longitude = lon;
+                            _addressCtrl.text = selectedAddress!;
+                            _searchResults = [];
+                            _locationSearchCtrl.text = selectedAddress!;
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+
               const SizedBox(height: 10),
+
               Container(
                 height: 250,
                 decoration: BoxDecoration(
@@ -523,69 +592,52 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: GoogleMap(
-                    key: UniqueKey(), // Fix for "egl image with null texture object"
-                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                      Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-                    },
-                    initialCameraPosition: CameraPosition(
-                      target: selectedLocation ?? const LatLng(3.1390, 101.6869),
-                      zoom: 14,
-                    ),
-                    onTap: (LatLng position) async {
-                      try {
-                        final placemarks = await placemarkFromCoordinates(
-                          position.latitude,
-                          position.longitude,
-                        );
-
-                        String address = "${position.latitude}, ${position.longitude}";
-                        if (placemarks.isNotEmpty) {
-                          final p = placemarks.first;
-                          address = "${p.street}, ${p.locality}, ${p.country}";
-                        }
+                  child: FlutterMap(
+                    options: MapOptions(
+                      initialCenter:
+                          selectedLocation ?? LatLng(3.1390, 101.6869),
+                      initialZoom: 13,
+                      onTap: (tapPos, point) async {
+                        final address = await reverseGeocode(point.latitude, point.longitude);
 
                         setState(() {
-                          selectedLocation = position;
+                          selectedLocation = point;
                           selectedAddress = address;
-                          _latitude = position.latitude;
-                          _longitude = position.longitude;
+                          _latitude = point.latitude;
+                          _longitude = point.longitude;
                           _addressCtrl.text = address;
                         });
-                      } catch (e) {
-                        debugPrint("Geocoding error: $e");
-                      }
-                    },
-                    markers: selectedLocation == null
-                        ? {}
-                        : {
+                      },                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                        userAgentPackageName: "com.example.swaply", // REQUIRED
+                      ),
+                      if (selectedLocation != null)
+                        MarkerLayer(
+                          markers: [
                             Marker(
-                              markerId: const MarkerId("selected"),
-                              position: selectedLocation!,
-                            ),
-                          },
-                    zoomControlsEnabled: false,
+                              point: selectedLocation!,
+                              child: Icon(Icons.location_pin),
+                            )
+                          ],
+                        )                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
+
               if (selectedAddress != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.location_on, size: 16, color: accent),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          selectedAddress!,
-                          style: const TextStyle(color: accent, fontSize: 12),
-                        ),
-                      ),
-                    ],
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    selectedAddress!,
+                    style: const TextStyle(color: Colors.deepPurple),
                   ),
                 ),
+
               const SizedBox(height: 20),
+
               if (widget.repliedTo == null) ...[
                 _buildToggleRow(
                   'Enable Selling',
@@ -678,6 +730,32 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPreviewImage(
+    String url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+  }) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.asset(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 50),
     );
   }
 
