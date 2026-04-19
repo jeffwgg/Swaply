@@ -103,7 +103,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       // 💡 关键：使用 pushAndRemoveUntil 清空导航栈，防止返回到注册/验证页面
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) =>  MainShell(isDarkMode: false, onThemeChanged: (_) {})),
+        MaterialPageRoute(builder: (_) =>  MainShell()),
         (route) => false,
       );
 

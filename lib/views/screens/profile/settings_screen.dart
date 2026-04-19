@@ -7,14 +7,7 @@ import 'about_app_screen.dart';
 
 
 class SettingsScreen extends StatefulWidget {
-  final bool isDarkMode;
-  final Function(bool) onThemeChanged;
-
-  const SettingsScreen({
-    super.key,
-    required this.isDarkMode,
-    required this.onThemeChanged,
-  });
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -58,16 +51,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ⚙️ PREFERENCES
           _SectionTitle("Preferences"),
-
-          SwitchListTile(
-            title: const Text("Dark Mode"),
-            value: widget.isDarkMode,
-            activeColor: Colors.purple,
-            onChanged: (value) {
-              widget.onThemeChanged(value);
-              setState(() {});
-            },
-          ),
 
           SwitchListTile(
             title: const Text("Notifications"),

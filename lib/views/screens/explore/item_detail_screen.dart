@@ -1,6 +1,9 @@
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/services/follow_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '/services/supabase_service.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/items_repository.dart';
 import '../item/create_item_screen.dart';
@@ -18,12 +21,28 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
+  bool _isFollowing = false;
+  bool _isLoadingFollow = false;
 
   @override
   void initState() {
     super.initState();
     _fetchOwner();
     _fetchReplies();
+    _checkFollowStatus();
+  }
+
+  Future<void> _checkFollowStatus() async {
+    final currentUser = SupabaseService.client.auth.currentUser;
+    if (currentUser != null) {
+      final following = await FollowService.isFollowing(
+          currentUser.id, 
+          widget.item.ownerId.toString() 
+      );
+      if (mounted) {
+        setState(() => _isFollowing = following);
+      }
+    }
   }
 
   Future<void> _fetchOwner() async {
@@ -164,22 +183,68 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ),
               ),
               Row(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisSize: MainAxisSize.max,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(
-                    Icons.person,
-                    color: Color(0xFF7C3AED),
-                    size: 18.0,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.person,
+                        color: Color(0xFF7C3AED),
+                        size: 18.0,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _ownerName.isEmpty ? 'Unknown' : '@$_ownerName',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          color: Color(0xFF7C3AED),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _ownerName.isEmpty ? 'Unknown' : '@$_ownerName',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: Color(0xFF7C3AED),
-                      fontWeight: FontWeight.w600,
+                    // Follow/Unfollow Button
+                    GestureDetector(
+                      onTap: _isLoadingFollow ? null : _toggleFollowItem,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _isFollowing
+                              ? Colors.grey[300]
+                              : const Color(0xFF7C3AED),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_isLoadingFollow)
+                              const SizedBox(
+                                height: 14,
+                                width: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            else if (_isFollowing)
+                              const Icon(Icons.check, color: Colors.black87, size: 16)
+                            else
+                              const Icon(Icons.add, color: Colors.white, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              _isFollowing ? 'Following' : 'Follow',
+                              style: TextStyle(
+                                color: _isFollowing ? Colors.black87 : Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -640,5 +705,56 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _toggleFollowItem() async {
+    final currentUser = SupabaseService.client.auth.currentUser;
+    // final targetUserId = widget.item.ownerAuthUserId; // ✅ UUID
+
+    if (currentUser == null || currentUser.id == widget.item.ownerId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot follow yourself')),
+      );
+      return;
+    }
+
+    setState(() => _isLoadingFollow = true);
+
+    try {
+      if (_isFollowing) {
+        await FollowService.unfollowUser(currentUser.id, widget.item.ownerId.toString());
+        setState(() => _isFollowing = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unfollowed!')),
+          );
+        }
+      } else {
+        await FollowService.followUser(currentUser.id, widget.item.ownerId.toString());
+        setState(() => _isFollowing = true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Following!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error toggling follow: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error updating follow status'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingFollow = false);
+      }
+    }
   }
 }

@@ -82,11 +82,14 @@ class _LoginScreenState extends State<LoginScreen> {
               // 🔒 PASSWORD + FORGOT
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
-                  Text("Password"),
-                  Text(
-                    "Forgot Password?",
-                    style: TextStyle(color: Colors.purple),
+                children: [
+                  const Text("Password"),
+                  GestureDetector(
+                    onTap: _showForgotPasswordDialog,
+                    child: const Text(
+                      "Forgot Password?",
+                      style: TextStyle(color: Colors.purple),
+                    ),
                   )
                 ],
               ),
@@ -202,6 +205,88 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
+    );
+  }
+
+  void _showForgotPasswordDialog() {
+    final forgotEmailController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text("Reset Password"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Enter your email address to receive a password reset link.",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: forgotEmailController,
+                decoration: InputDecoration(
+                  hintText: "Enter your email",
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final email = forgotEmailController.text.trim();
+                if (email.isEmpty) {
+                  _showError("Email is required");
+                  return;
+                }
+                if (!email.contains("@")) {
+                  _showError("Invalid email format");
+                  return;
+                }
+
+                try {
+                  await SupabaseService.client.auth
+                      .resetPasswordForEmail(email);
+                  if (mounted) {
+                    Navigator.pop(dialogContext);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          "Password reset email sent! Check your inbox.",
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  print("Error sending reset email: $e");
+                  _showError("Failed to send reset email. Please try again.");
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5A2CA0),
+              ),
+              child: const Text(
+                "Send Reset Link",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

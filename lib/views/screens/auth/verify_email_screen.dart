@@ -80,7 +80,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
         print("✅ Profile found. Navigating to MainShell...");
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (_) => MainShell(isDarkMode: false, onThemeChanged: (_) {}),
+            builder: (_) => MainShell(),
           ),
           (route) => false,
         );

@@ -1,39 +1,60 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '/services/supabase_service.dart';
+import '/services/profile_service.dart';
+import '/services/follow_service.dart';
+import '/services/saved_items_service.dart';
 import '../auth/login_screen.dart';
 import 'settings_screen.dart';
+import '../../../models/app_user.dart';
+import 'dart:io';
 
-class ProfileScreen extends StatelessWidget {
-  final bool isDarkMode;
-  final Function(bool) onThemeChanged;
+class ProfileScreen extends StatefulWidget {
+  final String? viewingUserId; // If null, show current user's profile
 
-  const ProfileScreen({
-    super.key,
-    required this.isDarkMode,
-    required this.onThemeChanged,
-  });
+  const ProfileScreen({super.key, this.viewingUserId});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  bool _isFollowing = false;
+  bool _isLoadingFollow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFollowStatus();
+  }
+
+  Future<void> _checkFollowStatus() async {
+    final currentUser = SupabaseService.client.auth.currentUser;
+    if (currentUser != null && widget.viewingUserId != null) {
+      final following =
+          await FollowService.isFollowing(currentUser.id, widget.viewingUserId!);
+      setState(() => _isFollowing = following);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // 🟢 关键判断：获取当前用户状态
+
     final user = SupabaseService.client.auth.currentUser;
     print("🔥 NEW PROFILE SCREEN RUNNING");
-    // 💡 如果没登录，显示游客引导界面 (Guest View)
+  
     if (user == null) {
       return _buildGuestView(context);
     }
 
-    // ⏳ 如果已登录但邮件未验证，显示验证提示
     if (user.emailConfirmedAt == null) {
       return _buildUnverifiedEmailView(context, user);
     }
 
-    // ✅ 如果已登录且邮件已验证，显示完整的 Profile UI
     return _buildFullProfileView(context);
   }
 
-  // --- 1. 游客界面 (Guest View) ---
+  // --- 1. (Guest View) ---
   Widget _buildGuestView(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F3F8),
@@ -95,7 +116,7 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  // --- 1.5. 邮件未验证界面 (Unverified Email View) ---
+  // --- 1.5. (Unverified Email View) ---
   Widget _buildUnverifiedEmailView(BuildContext context, User user) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F3F8),
@@ -175,18 +196,17 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  // --- 2. 完整版界面 (从 Supabase 动态获取用户数据) ---
+  // --- 2. Verified User View (Full Profile) ---
   Widget _buildFullProfileView(BuildContext context) {
     final user = SupabaseService.client.auth.currentUser;
+    final profileUserId = widget.viewingUserId ?? user!.id;
+    final isOwnProfile = profileUserId == user!.id;
 
-    return FutureBuilder(
-      future: SupabaseService.client
-          .from('users')
-          .select()
-          .eq('auth_user_id', user!.id)
-          .maybeSingle(),
-      builder: (context, snapshot) {
-        // ⏳ Loading
+    return FutureBuilder<AppUser?>(
+      future: ProfileService.getProfile(profileUserId),
+
+      builder: (context, snapshot) {  
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
@@ -214,7 +234,7 @@ class ProfileScreen extends StatelessWidget {
           );
         }
 
-        final profile = snapshot.data as Map<String, dynamic>?;
+        final profile = snapshot.data;
 
         if (profile == null) {
           return Scaffold(
@@ -232,13 +252,13 @@ class ProfileScreen extends StatelessWidget {
         }
 
         // ✅ Data loaded successfully
-        final fullName = profile['full_name'] ?? 'User';
-        final username = profile['username'] ?? 'user';
-        final bio = profile['bio'] ?? 'No bio yet';
-        final email = profile['email'] ?? '';
-        final phone = profile['phone'] ?? '';
+        final fullName = profile.fullName ?? 'User';
+        final username = profile.username ?? 'user';
+        final bio = profile.bio ?? 'No bio yet';
+        final email = profile.email ?? '';
+        final phone = profile.phone ?? '';
 
-        return Scaffold(
+          return Scaffold(
           backgroundColor: const Color(0xFFF4F3F8),
           body: SafeArea(
             child: SingleChildScrollView(
@@ -258,20 +278,20 @@ class ProfileScreen extends StatelessWidget {
                           fullName,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.settings_outlined),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => SettingsScreen(
-                                  isDarkMode: isDarkMode,
-                                  onThemeChanged: onThemeChanged,
+                        if (isOwnProfile)
+                          IconButton(
+                            icon: const Icon(Icons.settings_outlined),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const SettingsScreen(),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
+                              );
+                            },
+                          )
+                        else
+                          const SizedBox(width: 40),
                       ],
                     ),
                   ),
@@ -285,29 +305,38 @@ class ProfileScreen extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             radius: 45,
-                            backgroundColor: Colors.grey[300],
-                            child: Icon(
-                              Icons.person,
-                              size: 45,
-                              color: Colors.grey[600],
+                            backgroundColor: Colors.purple,
+                            child: Text(
+                              profile.username[0].toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: Colors.purple,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.camera_alt,
-                                color: Colors.white,
-                                size: 16,
+                          if (isOwnProfile)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: GestureDetector(
+                                onTap: () {
+                                  // _showImagePickerBottomSheet();
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.purple,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.camera_alt,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
                               ),
                             ),
-                          )
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -317,9 +346,46 @@ class ProfileScreen extends StatelessWidget {
                             const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        "@$username",
-                        style: const TextStyle(color: Colors.grey, fontSize: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "@$username",
+                            style: const TextStyle(color: Colors.grey, fontSize: 14),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.yellow.withOpacity(0.3),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: const [
+                                Icon(Icons.star, size: 12, color: Colors.white),
+                                SizedBox(width: 2),
+                                Text(
+                                  '4.5/5',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -327,49 +393,99 @@ class ProfileScreen extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.grey, fontSize: 13),
                       ),
-                      const SizedBox(height: 16),
-                      // 🔥 EDIT BUTTON
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 24),
-                        height: 45,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(25),
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF7B61FF), Color(0xFF5A3FFF)],
-                          ),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            "Edit Profile",
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
 
                   const SizedBox(height: 20),
 
-                  // 📊 STATS CARD
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.purple.withOpacity(0.2)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: const [
-                        _Stat("0", "SOLD"),
-                        _Divider(),
-                        _Stat("0", "TRADES"),
-                        _Divider(),
-                        _Stat("0d", "JOINED"),
-                      ],
-                    ),
+                  // 📊 STATISTICS ROW (Following, Followers, Saved Items)
+                  FutureBuilder<Map<String, int>>(
+                    future: _loadStatistics(profileUserId),
+                    builder: (context, statsSnapshot) {
+                      if (!statsSnapshot.hasData) {
+                        return const SizedBox(height: 80);
+                      }
+
+                      final stats = statsSnapshot.data!;
+
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.withOpacity(0.2)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.purple.withOpacity(0.05),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _StatColumn(
+                              value: stats['following'].toString(),
+                              label: 'Following',
+                            ),
+                            Container(width: 1, height: 40, color: Colors.grey[300]),
+                            _StatColumn(
+                              value: stats['followers'].toString(),
+                              label: 'Followers',
+                            ),
+                            Container(width: 1, height: 40, color: Colors.grey[300]),
+                            _StatColumn(
+                              value: stats['saved'].toString(),
+                              label: 'Total Saved',
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
+
+                  const SizedBox(height: 16),
+
+                  // ➕ FOLLOW/UNFOLLOW BUTTON (if viewing another user's profile)
+                  if (!isOwnProfile)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed:
+                              _isLoadingFollow ? null : _toggleFollowUser,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isFollowing
+                                ? Colors.grey[300]
+                                : const Color(0xFF5A2CA0),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: _isLoadingFollow
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  _isFollowing ? 'Following ✓' : 'Follow +',
+                                  style: TextStyle(
+                                    color: _isFollowing
+                                        ? Colors.black87
+                                        : Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
 
                   const SizedBox(height: 16),
 
@@ -465,46 +581,180 @@ class ProfileScreen extends StatelessWidget {
       ],
     );
   }
-}
 
-// --- 以下是你所有的辅助 UI 组件 (完全保持不变) ---
+  Future<Map<String, int>> _loadStatistics(String userId) async {
+    final following = await FollowService.getFollowingCount(userId);
+    final followers = await FollowService.getFollowerCount(userId);
+    final saved = await SavedItemsService.getTotalSavedCount(userId);
 
-class _Badge extends StatelessWidget {
-  const _Badge();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.purple,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text("SUPER TRADER", style: TextStyle(color: Colors.white, fontSize: 12)),
-    );
+    return {
+      'following': following,
+      'followers': followers,
+      'saved': saved,
+    };
+  }
+
+  // void _showImagePickerBottomSheet() {
+  //   showModalBottomSheet(
+  //     context: context,
+  //     builder: (BuildContext context) {
+  //       return Container(
+  //         padding: const EdgeInsets.all(20),
+  //         child: Column(
+  //           mainAxisSize: MainAxisSize.min,
+  //           children: [
+  //             const Text(
+  //               'Choose Profile Picture',
+  //               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+  //             ),
+  //             const SizedBox(height: 20),
+  //             ListTile(
+  //               leading: const Icon(Icons.camera_alt, color: Colors.purple),
+  //               title: const Text('Take a Photo'),
+  //               onTap: () {
+  //                 Navigator.pop(context);
+  //                 _uploadProfilePicture(isCamera: true);
+  //               },
+  //             ),
+  //             ListTile(
+  //               leading: const Icon(Icons.image, color: Colors.purple),
+  //               title: const Text('Choose from Gallery'),
+  //               onTap: () {
+  //                 Navigator.pop(context);
+  //                 _uploadProfilePicture(isCamera: false);
+  //               },
+  //             ),
+  //             const SizedBox(height: 10),
+  //           ],
+  //         ),
+  //       );
+  //     },
+  //   );
+  // }
+
+  // Future<void> _uploadProfilePicture({required bool isCamera}) async {
+  //   try {
+  //     final File? imageFile = isCamera
+  //         ? await ProfileService.pickImageFromCamera()
+  //         : await ProfileService.pickImageFromGallery();
+
+  //     if (imageFile == null) return;
+
+  //     final user = SupabaseService.client.auth.currentUser;
+  //     if (user == null) return;
+
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       const SnackBar(content: Text('Uploading profile picture...')),
+  //     );
+
+  //     final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
+
+  //     if (url != null && mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         const SnackBar(
+  //           content: Text('Profile picture updated!'),
+  //           backgroundColor: Colors.green,
+  //         ),
+  //       );
+  //       // Refresh the UI
+  //       setState(() {});
+  //     } else if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         const SnackBar(
+  //           content: Text('Failed to upload profile picture'),
+  //           backgroundColor: Colors.red,
+  //         ),
+  //       );
+  //     }
+  //   } catch (e) {
+  //     print('Error uploading profile picture: $e');
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         const SnackBar(
+  //           content: Text('Error uploading profile picture'),
+  //           backgroundColor: Colors.red,
+  //         ),
+  //       );
+  //     }
+  //   }
+  // }
+
+  Future<void> _toggleFollowUser() async {
+    final currentUser = SupabaseService.client.auth.currentUser;
+    if (currentUser == null || widget.viewingUserId == null) return;
+
+    setState(() => _isLoadingFollow = true);
+
+    try {
+      if (_isFollowing) {
+        await FollowService.unfollowUser(currentUser.id, widget.viewingUserId!);
+        setState(() => _isFollowing = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unfollowed!')),
+          );
+        }
+      } else {
+        await FollowService.followUser(currentUser.id, widget.viewingUserId!);
+        setState(() => _isFollowing = true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Following!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error toggling follow: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error updating follow status'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingFollow = false);
+      }
+    }
   }
 }
 
-class _Stat extends StatelessWidget {
+class _StatColumn extends StatelessWidget {
   final String value;
   final String label;
-  const _Stat(this.value, this.label);
+
+  const _StatColumn({
+    required this.value,
+    required this.label,
+  });
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: Color(0xFF5A2CA0),
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 12)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.grey,
+          ),
+        ),
       ],
     );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  const _Divider();
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 1, height: 30, color: Colors.grey[300]);
   }
 }
 
