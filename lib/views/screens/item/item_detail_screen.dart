@@ -9,6 +9,8 @@ import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
+import '../../../services/chat_service.dart';
+import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
@@ -31,6 +33,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   bool _isFollowing = false;
   bool _isFavourite = false;
   int _favCount = 0;
+  final ChatService _chatService = ChatService();
 
   @override
   void initState() {
@@ -212,6 +215,259 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     await ItemsRepository().updateStatus('rejected', replyId);
   }
 
+  Future<void> _composeAndStartItemConversation() async {
+    final currentUser = widget.user;
+
+    if (currentUser == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    if (currentUser.id == widget.item.ownerId) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You cannot start chat on your own item.'),
+        ),
+      );
+      return;
+    }
+
+    final ownerName = _ownerName.trim().isEmpty ? 'there' : _ownerName.trim();
+    final initialMessage =
+        'Hi $ownerName, I\'m interested in your "${widget.item.name}". Is it still available?';
+    var draftMessage = initialMessage;
+
+    final shouldSend =
+        await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: StatefulBuilder(
+                builder: (context, setSheetState) {
+                  final canSend = draftMessage.trim().isNotEmpty;
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFE9D8FF)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Start conversation',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF5B21B6),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7F1FF),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE3D2FF)),
+                          ),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: widget.item.imageUrls.isNotEmpty
+                                      ? _buildImage(
+                                          widget.item.imageUrls.first,
+                                          width: 56,
+                                          height: 56,
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Container(
+                                          color: const Color(0xFFE9D8FF),
+                                          child: const Icon(
+                                            Icons.inventory_2_rounded,
+                                            color: Color(0xFF6F45FF),
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      widget.item.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF3F267A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'To: ${_ownerName.isEmpty ? 'Item owner' : _ownerName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF7868A8),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      widget.item.listingType.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF9060FF),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          initialValue: draftMessage,
+                          maxLines: 4,
+                          minLines: 3,
+                          autofocus: true,
+                          onChanged: (value) {
+                            draftMessage = value;
+                            setSheetState(() {});
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Write your first message...',
+                            filled: true,
+                            fillColor: const Color(0xFFFCFAFF),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFDCC9FF),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFDCC9FF),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF8B5DFF),
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: canSend
+                                    ? () => Navigator.of(context).pop(true)
+                                    : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6F45FF),
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text('Send'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ) ??
+        false;
+
+    final message = draftMessage.trim();
+
+    if (!shouldSend || message.isEmpty) {
+      return;
+    }
+
+    try {
+      final chat = await _chatService.createOrGetItemChat(
+        otherUserId: widget.item.ownerId,
+        itemId: widget.item.id,
+      );
+      await _chatService.sendMessage(chatId: chat.id, content: message);
+      await NotificationService.instance.sendSystemNotification(
+        title: 'Message Sent',
+        body:
+            'Your message to ${_ownerName.isEmpty ? 'the owner' : _ownerName} has been delivered.',
+        type: 'chat',
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Message sent to ${_ownerName.isEmpty ? 'owner' : _ownerName}. Open Inbox to continue chatting.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      final errorText = e.toString();
+      String message =
+          'Unable to start conversation right now. Please try again.';
+      if (errorText.contains('23505')) {
+        message =
+            'Conversation already exists with this user. Please open Inbox to continue chatting.';
+      } else if (errorText.contains('PGRST202')) {
+        message = 'Chat service is syncing. Please try again in a moment.';
+      } else if (errorText.contains('22P02')) {
+        message =
+            'Item information is not ready yet. Please refresh and try again.';
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
@@ -292,9 +548,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.share, color: Color(0xFF5B21B6)),
-            onPressed: () {
-              // todo: share functionality
-            },
+            onPressed: _composeAndStartItemConversation,
           ),
         ],
       ),
@@ -678,7 +932,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     if (item.address != null)
                       Row(
                         children: [
-                          const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                          const Icon(
+                            Icons.location_on,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
@@ -1176,19 +1434,23 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     Color color;
     switch (status.toLowerCase()) {
-      case 'available': color = Colors.green; break;
-      case 'dropped': color = Colors.red; break;
-      case 'reserved': color = Colors.orange; break;
+      case 'available':
+        color = Colors.green;
+        break;
+      case 'dropped':
+        color = Colors.red;
+        break;
+      case 'reserved':
+        color = Colors.orange;
+        break;
       case 'accepted':
       case 'pending':
-      default: color = Colors.blue;
+      default:
+        color = Colors.blue;
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 4,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(6),
