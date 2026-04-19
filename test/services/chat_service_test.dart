@@ -8,13 +8,13 @@ class _FakeChatsRepository extends ChatsRepository {}
 
 class _FakeMessagesRepository extends MessagesRepository {
   int? lastChatId;
-  int? lastSenderId;
+  String? lastSenderId;
   String? lastContent;
 
   @override
   Future<ChatMessage> send({
     required int chatId,
-    required int senderId,
+    required String senderId,
     required String content,
   }) async {
     lastChatId = chatId;
@@ -38,7 +38,7 @@ void main() {
         chatsRepository: _FakeChatsRepository(),
         messagesRepository: _FakeMessagesRepository(),
         authUserIdProvider: () => null,
-        appUserIdResolver: (_) async => 7,
+        appUserIdResolver: (_) async => '7b3f4f40-73b1-4cd0-aedf-f5f8f36fd6c8',
       );
 
       final userId = await service.refreshCurrentUserId();
@@ -55,16 +55,16 @@ void main() {
         authUserIdProvider: () => 'auth-abc',
         appUserIdResolver: (_) async {
           resolverCalls += 1;
-          return 42;
+          return '5a265f7e-2724-4bc6-9136-c3ed1d5bd798';
         },
       );
 
       final first = await service.refreshCurrentUserId();
       final second = await service.refreshCurrentUserId();
 
-      expect(first, 42);
-      expect(second, 42);
-      expect(service.currentUserId, 42);
+      expect(first, '5a265f7e-2724-4bc6-9136-c3ed1d5bd798');
+      expect(second, '5a265f7e-2724-4bc6-9136-c3ed1d5bd798');
+      expect(service.currentUserId, '5a265f7e-2724-4bc6-9136-c3ed1d5bd798');
       expect(resolverCalls, 1);
     });
   });
@@ -76,7 +76,7 @@ void main() {
         chatsRepository: _FakeChatsRepository(),
         messagesRepository: fakeMessages,
         authUserIdProvider: () => 'auth-xyz',
-        appUserIdResolver: (_) async => 9,
+        appUserIdResolver: (_) async => 'e6d7a5c1-545f-4caf-bf11-b4f594341f0a',
       );
 
       final sent = await service.sendMessage(
@@ -85,9 +85,9 @@ void main() {
       );
 
       expect(fakeMessages.lastChatId, 15);
-      expect(fakeMessages.lastSenderId, 9);
+      expect(fakeMessages.lastSenderId, 'e6d7a5c1-545f-4caf-bf11-b4f594341f0a');
       expect(fakeMessages.lastContent, 'hello there');
-      expect(sent.senderId, 9);
+      expect(sent.senderId, 'e6d7a5c1-545f-4caf-bf11-b4f594341f0a');
       expect(sent.content, 'hello there');
     });
 

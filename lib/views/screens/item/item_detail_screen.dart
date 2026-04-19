@@ -1183,45 +1183,36 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
 class _StatusBadge extends StatelessWidget {
   final String status;
-  final bool mini;
-  const _StatusBadge({required this.status, this.mini = false});
+  const _StatusBadge({required this.status});
 
   @override
   Widget build(BuildContext context) {
     Color color;
     switch (status.toLowerCase()) {
-      case 'available':
+      case 'available': color = Colors.green; break;
+      case 'dropped': color = Colors.red; break;
+      case 'reserved': color = Colors.orange; break;
       case 'accepted':
-        color = Colors.green;
-        break;
-      case 'dropped':
-      case 'rejected':
-        color = Colors.red;
-        break;
-      case 'reserved':
       case 'pending':
-        color = Colors.orange;
-        break;
-      default:
-        color = Colors.blue;
+      default: color = Colors.blue;
     }
 
     return Container(
       padding: EdgeInsets.symmetric(
-        horizontal: mini ? 8 : 10,
-        vertical: mini ? 3 : 4,
+        horizontal: 10,
+        vertical: 4,
       ),
       decoration: BoxDecoration(
-        color: mini ? color.withOpacity(0.9) : color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(mini ? 4 : 6),
-        border: mini ? null : Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
         status.toUpperCase(),
         style: TextStyle(
-          fontSize: mini ? 9 : 10,
+          fontSize: 10,
           fontWeight: FontWeight.bold,
-          color: mini ? Colors.white : color,
+          color: color,
         ),
       ),
     );

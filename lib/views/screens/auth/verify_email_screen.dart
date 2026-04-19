@@ -63,7 +63,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       final profileResponse = await SupabaseService.client
           .from('users')
           .select()
-          .eq('auth_user_id', userId)
+          .eq('id', userId)
           .maybeSingle();
 
       if (!mounted) return;

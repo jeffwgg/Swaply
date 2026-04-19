@@ -59,7 +59,7 @@ class _InboxScreenState extends State<InboxScreen> {
   DateTime? _voiceRecordingStartAt;
   bool _hasAttemptedAiConversationInit = false;
 
-  int? get _currentUserId => _inboxViewModel.currentUserId;
+  String? get _currentUserId => _inboxViewModel.currentUserId;
 
   @override
   void initState() {
@@ -492,7 +492,7 @@ class _InboxScreenState extends State<InboxScreen> {
       media: body.media,
       time: '$hour:$minute $suffix',
       isMine: !message.isAi,
-      senderId: message.userId.hashCode,
+      senderId: message.userId,
       createdAt: message.createdAt,
       readAt: message.createdAt,
       editedAt: null,
@@ -3136,7 +3136,7 @@ class _Message {
   final _MessageMedia? media;
   final String time;
   final bool isMine;
-  final int senderId;
+  final String senderId;
   final DateTime createdAt;
   final DateTime? readAt;
   final DateTime? editedAt;

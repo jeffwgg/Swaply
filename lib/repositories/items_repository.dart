@@ -31,7 +31,7 @@ class ItemsRepository {
   }
 
   Future<List<ItemListing>> getDiscoverList({
-    int? userId,
+    String? userId,
     String? category,
     String? listingType,
     String? searchQuery,
@@ -39,7 +39,7 @@ class ItemsRepository {
     log(userId.toString());
 
     try {
-      List<int> matchedUserIds = [];
+      List<String> matchedUserIds = [];
       
       // find user id whose username matches
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -48,10 +48,10 @@ class ItemsRepository {
               .from('users')
               .select('id')
               .ilike('username', '%$searchQuery%');
-          
-          if (usersRes is List) {
-            matchedUserIds = usersRes.map((u) => u['id'] as int).toList();
-          }
+
+          matchedUserIds = (usersRes as List)
+              .map((u) => u['id'].toString())
+              .toList();
         } catch (e) {
           log('User search error: $e');
         }
@@ -66,7 +66,7 @@ class ItemsRepository {
         String orClause = 'name.ilike.%$searchQuery%';
 
         if (matchedUserIds.isNotEmpty) {
-          final idsString = matchedUserIds.join(',');
+          final idsString = matchedUserIds.map((id) => '"$id"').join(',');
           orClause += ',owner_id.in.($idsString)';
         }
         
@@ -177,7 +177,7 @@ class ItemsRepository {
         .eq('id', id);
   }
 
-  Future<List<ItemListing>> getUserItems(int userId) async {
+  Future<List<ItemListing>> getUserItems(String userId) async {
     final response = await SupabaseService.client
         .from(_table)
         .select()
@@ -188,7 +188,7 @@ class ItemsRepository {
     return rows.map<ItemListing>(ItemListing.fromMap).toList();
   }
 
-  Future<List<ItemListing>> getFavouriteItems(int userId) async {
+  Future<List<ItemListing>> getFavouriteItems(String userId) async {
     final favIds = await FavouriteRepository().getUserFavouriteItemIds(userId);
     if (favIds.isEmpty) return [];
 

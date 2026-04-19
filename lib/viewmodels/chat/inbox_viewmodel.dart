@@ -38,10 +38,10 @@ class InboxViewModel extends ChangeNotifier {
   bool _isLoadingInbox = false;
   bool get isLoadingInbox => _isLoadingInbox;
 
-  int? _cachedCurrentUserId;
+  String? _cachedCurrentUserId;
   String? _cachedAuthUserId;
 
-  int? get currentUserId => _cachedCurrentUserId;
+  String? get currentUserId => _cachedCurrentUserId;
 
   Future<List<ChatThread>> loadInbox() async {
     _setLoading(true);
@@ -188,7 +188,7 @@ class InboxViewModel extends ChangeNotifier {
     return _chatsRepository.unsubscribe(channel);
   }
 
-  Future<int?> refreshCurrentUserId() async {
+  Future<String?> refreshCurrentUserId() async {
     final authUserId = _authUserIdProvider();
     if (authUserId == null || authUserId.isEmpty) {
       _cachedAuthUserId = null;
@@ -200,13 +200,13 @@ class InboxViewModel extends ChangeNotifier {
       return _cachedCurrentUserId;
     }
 
-    final user = await _usersRepository.getByAuthUserId(authUserId);
+    final user = await _usersRepository.getById(authUserId);
     _cachedAuthUserId = authUserId;
     _cachedCurrentUserId = user?.id;
     return _cachedCurrentUserId;
   }
 
-  Future<int> _requireUserId() async {
+  Future<String> _requireUserId() async {
     final userId = await refreshCurrentUserId();
     if (userId == null) {
       throw StateError(
