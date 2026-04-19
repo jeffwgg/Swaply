@@ -1,11 +1,27 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
-import 'item_detail_screen.dart';
+import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/views/screens/auth/login_screen.dart';
+import '../../../models/app_user.dart';
+import '../../../repositories/favourite_repository.dart';
+import '../item/item_detail_screen.dart';
 
-class DiscoverScreen extends StatelessWidget {
-  const DiscoverScreen({super.key});
+class DiscoverScreen extends StatefulWidget {
+  final AppUser? user;
+
+  const DiscoverScreen({super.key, this.user});
+
+  @override
+  State<DiscoverScreen> createState() => _DiscoverScreenState();
+}
+
+class _DiscoverScreenState extends State<DiscoverScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   final List<String> _categories = const [
     'All',
@@ -18,41 +34,78 @@ class DiscoverScreen extends StatelessWidget {
   ];
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
+    const accentSoft = Color(0xFFF3E8FF);
     return DefaultTabController(
       length: _categories.length,
       child: Scaffold(
-        body: Padding(
-          padding: const EdgeInsets.fromLTRB(20.0, 50.0, 20.0, 8.0),
-          child: Column(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20.0, 16.0, 20.0, 8.0),
+            child: Column(
             children: [
-              const TextField(
-                autofocus: false,
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  suffixIcon: Icon(Icons.tune),
-                  labelText: 'Search',
-                  hintText: 'Search items, trades or sellers',
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderSide: BorderSide.none,
-                    borderRadius: BorderRadius.all(Radius.circular(10.0)),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.deepPurple.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search, color: accent),
+                    suffixIcon: IconButton(
+                            icon: const Icon(Icons.clear, color: accent),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                          ),
+                    labelText: 'Search listings',
+                    labelStyle: const TextStyle(color: accent),
+                    hintText: 'Search items or sellers',
+                    filled: true,
+                    fillColor: Colors.transparent,
+                    border: const OutlineInputBorder(
+                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.all(Radius.circular(14.0)),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               TabBar(
                 dividerColor: Colors.transparent,
                 overlayColor: WidgetStateProperty.all(Colors.transparent),
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 labelColor: Colors.white,
-                unselectedLabelColor: Colors.black,
+                unselectedLabelColor: accent,
                 indicatorSize: TabBarIndicatorSize.tab,
                 indicator: const BubbleTabIndicator(
                   indicatorHeight: 30.0,
-                  indicatorColor: Colors.deepPurple,
+                  indicatorColor: accent,
                   indicatorRadius: 10.0,
                   tabBarIndicatorSize: TabBarIndicatorSize.tab,
                 ),
@@ -72,15 +125,22 @@ class DiscoverScreen extends StatelessWidget {
                   return Tab(text: cat);
                 }).toList(),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Expanded(
                 child: TabBarView(
                   children: _categories
-                      .map((cat) => NestedTabBar(cat))
+                      .map(
+                        (cat) => NestedTabBar(
+                          outerTab: cat,
+                          user: widget.user,
+                          searchQuery: _searchQuery,
+                        ),
+                      )
                       .toList(),
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -89,8 +149,15 @@ class DiscoverScreen extends StatelessWidget {
 }
 
 class NestedTabBar extends StatefulWidget {
-  const NestedTabBar(this.outerTab, {super.key});
   final String outerTab;
+  final AppUser? user;
+  final String searchQuery;
+  const NestedTabBar({
+    required this.outerTab,
+    required this.searchQuery,
+    this.user,
+    super.key,
+  });
 
   @override
   State<NestedTabBar> createState() => _NestedTabBarState();
@@ -98,15 +165,50 @@ class NestedTabBar extends StatefulWidget {
 
 class _NestedTabBarState extends State<NestedTabBar>
     with TickerProviderStateMixin {
-  final int? loginId = null; //todo
-
   late final TabController _tabController;
+
   final List<String> _types = const ['All Items', 'For Sale', 'For Trade'];
+
+  late Future<List<ItemListing>> _futureItems;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _types.length, vsync: this);
+
+    _loadItems();
+
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      setState(() {
+        _loadItems();
+      });
+    });
+  }
+
+  void _loadItems() {
+    _futureItems = ItemsRepository().getDiscoverList(
+      userId: widget.user?.id,
+      category: widget.outerTab,
+      listingType: _types[_tabController.index] == 'For Sale'
+          ? 'sell'
+          : _types[_tabController.index] == 'For Trade'
+          ? 'trade'
+          : 'both',
+      searchQuery: widget.searchQuery,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant NestedTabBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.user != widget.user ||
+        oldWidget.searchQuery != widget.searchQuery ||
+        oldWidget.outerTab != widget.outerTab) {
+      _loadItems();
+      setState(() {});
+    }
   }
 
   @override
@@ -117,66 +219,107 @@ class _NestedTabBarState extends State<NestedTabBar>
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF5B21B6);
     return Column(
       children: <Widget>[
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.shade50,
-              borderRadius: BorderRadius.circular(10.0),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3E8FF),
+            borderRadius: BorderRadius.circular(10.0),
+            border: Border.all(color: const Color(0xFFE9D5FF)),
+          ),
+          child: TabBar.secondary(
+            controller: _tabController,
+            dividerColor: Colors.transparent,
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            isScrollable: false,
+            labelColor: accent,
+            unselectedLabelColor: const Color(0xFF7C3AED),
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicator: const BubbleTabIndicator(
+              indicatorHeight: 40.0,
+              indicatorColor: Colors.white,
+              indicatorRadius: 10.0,
+              tabBarIndicatorSize: TabBarIndicatorSize.tab,
             ),
-            child: TabBar.secondary(
-              controller: _tabController,
-              dividerColor: Colors.transparent,
-              overlayColor: WidgetStateProperty.all(Colors.transparent),
-              isScrollable: true,
-              labelColor: Colors.deepPurple,
-              unselectedLabelColor: Colors.purple,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: const BubbleTabIndicator(
-                indicatorHeight: 40.0,
-                indicatorColor: Colors.white,
-                indicatorRadius: 10.0,
-                tabBarIndicatorSize: TabBarIndicatorSize.tab,
-              ),
-              tabs: _types.map((type) => Tab(text: type)).toList(),
-            ),
+            tabs: _types.map((type) => Tab(text: type)).toList(),
           ),
         ),
+
+        const SizedBox(height: 10),
+
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: _types.map((type) {
               return FutureBuilder<List<ItemListing>>(
-                future: ItemsRepository().getDiscoverList(
-                  userId: loginId,
-                  category: widget.outerTab,
-                  listingType: type == 'For Sale' ? 'sell' : type == 'For Trade' ? 'trade' : 'both',
-                ),
+                future: _futureItems,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(
+                      child: CircularProgressIndicator(color: accent),
+                    );
                   }
+
                   if (snapshot.hasError) {
                     return Center(child: Text('Error: ${snapshot.error}'));
                   }
+
                   final items = snapshot.data ?? [];
+
                   if (items.isEmpty) {
-                    return const Center(child: Text('No items found.'));
+                    return Container(
+                      margin: const EdgeInsets.only(top: 18),
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE9D5FF)),
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off, size: 38, color: accent),
+                          SizedBox(height: 10),
+                          Text(
+                            'No items found',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: accent,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Try changing category or search words.',
+                            style: TextStyle(color: Color(0xFF7C3AED)),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    );
                   }
+
                   return GridView.builder(
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                     itemCount: items.length,
                     gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.75,
-                        ),
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.82,
+                    ),
                     itemBuilder: (context, index) =>
-                        ItemCard(item: items[index]),
+                        ItemCard(
+                          user: widget.user, 
+                          item: items[index],
+                          onRefresh: () {
+                            setState(() {
+                              _loadItems();
+                            });
+                          },
+                        ),
                   );
                 },
               );
@@ -188,50 +331,58 @@ class _NestedTabBarState extends State<NestedTabBar>
   }
 }
 
-class ItemCard extends StatelessWidget {
+class ItemCard extends StatefulWidget {
+  final AppUser? user;
   final ItemListing item;
-  const ItemCard({super.key, required this.item});
+  final VoidCallback? onRefresh;
 
-  Widget _buildImage(String url) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        height: 120,
-        width: double.infinity,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.asset(
-      url,
-      height: 120,
-      width: double.infinity,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
-    );
+  const ItemCard({super.key, this.user, required this.item, this.onRefresh});
+
+  @override
+  State<ItemCard> createState() => _ItemCardState();
+}
+
+class _ItemCardState extends State<ItemCard> {
+  late final Future<AppUser?> _ownerFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownerFuture = UsersRepository().getById(widget.item.ownerId);
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        final result = await Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ItemDetailsScreen(item)),
+          MaterialPageRoute(
+            builder: (_) =>
+                ItemDetailsScreen(user: widget.user, item: widget.item),
+          ),
         );
+        
+        // Refresh the card UI when returning from details screen
+        // widget.item is updated inside ItemDetailsScreen
+        setState(() {});
+
+        if (result == true) {
+          if (widget.onRefresh != null) {
+            widget.onRefresh!();
+          }
+        }
       },
       child: Container(
-        height: 150,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE9D5FF)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
+              color: Colors.deepPurple.withOpacity(0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
@@ -244,25 +395,27 @@ class ItemCard extends StatelessWidget {
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(16),
                   ),
-                  child: item.imageUrls.isNotEmpty
-                      ? _buildImage(item.imageUrls[0])
+                  child: widget.item.imageUrls.isNotEmpty
+                      ? _buildImage(widget.item.imageUrls[0])
                       : const SizedBox(
                           height: 120,
                           width: double.infinity,
-                          child: Icon(Icons.image, size: 50, color: Colors.grey),
+                          child: Icon(Icons.image, size: 50),
                         ),
                 ),
+
+                /// PRICE & TRADE TAGS
                 Positioned(
                   top: 10,
                   left: 10,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (item.price != null)
+                      if (widget.item.price != null)
                         Container(
                           margin: const EdgeInsets.only(bottom: 4),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
+                            horizontal: 10,
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
@@ -270,7 +423,7 @@ class ItemCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            'RM ${item.price!.toStringAsFixed(2)}',
+                            'RM ${widget.item.price!.toStringAsFixed(2)}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -278,24 +431,41 @@ class ItemCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                      if (item.listingType == 'trade' ||
-                          item.listingType == 'both')
+                      if (widget.item.listingType == 'trade' ||
+                          widget.item.listingType == 'both')
                         Container(
-                          margin: const EdgeInsets.only(bottom: 4),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 4,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.purple.shade200,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Text(
-                            'FOR TRADE',
+                            'TRADE',
                             style: TextStyle(fontSize: 10, color: Colors.white),
                           ),
                         ),
                     ],
+                  ),
+                ),
+
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: CircleAvatar(
+                    backgroundColor: Colors.white,
+                    radius: 16,
+                    child: IconButton(
+                      onPressed: _toggleFavourite,
+                      iconSize: 18,
+                      padding: EdgeInsets.zero,
+                      icon: Icon(
+                        widget.item.isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: Colors.red,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -306,19 +476,44 @@ class ItemCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item.name,
+                    widget.item.name.toUpperCase(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.location_on, size: 14, color: Colors.grey),
-                      SizedBox(width: 4),
-                      Text(
-                        '0.8 miles away',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      FutureBuilder<AppUser?>(
+                        future: _ownerFuture,
+                        builder: (context, snapshot) {
+                          final owner = snapshot.data;
+                          final image = owner?.profileImage;
+                          final avatar = image != null && image.isNotEmpty
+                              ? (image.startsWith('http')
+                                    ? NetworkImage(image)
+                                    : AssetImage(image) as ImageProvider)
+                              : const AssetImage('assets/sample.jpeg');
+                          return CircleAvatar(
+                            radius: 9,
+                            backgroundImage: avatar,
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: FutureBuilder<AppUser?>(
+                          future: _ownerFuture,
+                          builder: (context, snapshot) {
+                            final ownerName = snapshot.data?.username ?? 'Unknown';
+                            return Text(
+                              ownerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Color(0xFF7C3AED)),
+                            );
+                          },
+                        ),
                       ),
                     ],
                   ),
@@ -329,5 +524,49 @@ class ItemCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildImage(String url) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        height: 150,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.asset(
+      url,
+      height: 120,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+    );
+  }
+
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    try {
+      final repo = FavouriteRepository();
+
+      final newState = await repo.toggleFavourite(
+        widget.user!.id,
+        widget.item.id,
+      );
+
+      setState(() {
+        widget.item.isFavorite = newState;
+      });
+    } catch (e) {
+      log("Favourite error: $e");
+    }
   }
 }

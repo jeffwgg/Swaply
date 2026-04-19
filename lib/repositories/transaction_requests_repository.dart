@@ -47,6 +47,19 @@ class TransactionRequestsRepository {
     return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
   }
 
+  Future<List<TransactionRequest>> listForItems(List<int> itemIds) async {
+    if (itemIds.isEmpty) return [];
+
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .inFilter('item_id', itemIds)
+        .order('created_at', ascending: false);
+
+    final rows = _requireListOfMaps(response, operation: 'listForItems');
+    return rows.map<TransactionRequest>(TransactionRequest.fromMap).toList();
+  }
+
   Future<void> create(TransactionRequest request) async {
     await SupabaseService.client.from(_table).insert(request.toInsertMap());
   }
