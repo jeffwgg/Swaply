@@ -12,7 +12,7 @@ class ChatsRepository {
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
-      'item:items(owner_id,title)';
+      'item:items(owner_id,name)';
 
   List<Map<String, dynamic>> _requireListOfMaps(
     dynamic response, {
