@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:permission_handler/permission_handler.dart' as handler;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
@@ -48,6 +48,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   double? _longitude;
   LatLng? selectedLocation;
   String? selectedAddress;
+  bool _permissionGranted = false;
+  bool _gpsEnabled = false;
 
   String? _selectedCategory;
   bool _enableSelling = true;
@@ -99,27 +101,42 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _enableTrading = false;
     }
 
+    checkStatus();
   }
 
+  Future<void> _captureImage() async {
+    try {
+      final XFile? photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85, // optional compression
+      );
+
+      if (photo != null) {
+        debugPrint("Captured image: ${photo.path}");
+        setState(() {
+          _images.add(photo);
+        });
+      } else {
+        debugPrint("Camera cancelled");
+      }
+    } catch (e) {
+      debugPrint("Camera error: $e");
+    }
+  }
 
   Future<void> _pickImage() async {
     try {
       final List<XFile> selectedImages = await _picker.pickMultiImage();
+
+      debugPrint("Gallery images: ${selectedImages.length}");
+
       if (selectedImages.isNotEmpty) {
         setState(() {
           _images.addAll(selectedImages);
         });
-        return;
       }
     } catch (e) {
-      debugPrint('pickMultiImage not supported or failed: $e');
-    }
-
-    final XFile? single = await _picker.pickImage(source: ImageSource.gallery);
-    if (single != null) {
-      setState(() {
-        _images.add(single);
-      });
+      debugPrint("Gallery error: $e");
     }
   }
 
@@ -162,13 +179,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       final contentType = _contentTypeForPath(imageFile.path);
 
-      await SupabaseService.client.storage.from('items').uploadBinary(
+      await SupabaseService.client.storage
+          .from('items')
+          .uploadBinary(
             fileName,
             bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: contentType,
-            ),
+            fileOptions: FileOptions(upsert: false, contentType: contentType),
           );
 
       return SupabaseService.client.storage
@@ -259,6 +275,70 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     return "Unknown location";
   }
 
+  Future<bool> isPermissionGranted() async {
+    return await handler.Permission.locationWhenInUse.isGranted;
+  }
+
+  Future<bool> isGpsEnabled() async {
+    return await handler.Permission.location.serviceStatus.isEnabled;
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception("Location services are disabled.");
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception("Location permission denied");
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception("Location permission permanently denied");
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final lat = position.latitude;
+      final lon = position.longitude;
+
+      final address = await reverseGeocode(lat, lon);
+
+      final pos = LatLng(lat, lon);
+
+      setState(() {
+        selectedLocation = pos;
+        selectedAddress = address;
+        _latitude = lat;
+        _longitude = lon;
+        _addressCtrl.text = address;
+        _locationSearchCtrl.text = address;
+      });
+
+      _mapController.move(pos, 15);
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Location error: $e")));
+    }
+  }
+
+  void checkStatus() async {
+    bool permissionGranted = await isPermissionGranted();
+    bool gpsEnabled = await isGpsEnabled();
+    setState(() {
+      _permissionGranted = permissionGranted;
+      _gpsEnabled = gpsEnabled;
+    });
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -317,19 +397,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       if (widget.repliedTo != null) {
         listingType = 'trade';
       } else {
-        if (!_enableSelling && !_enableTrading) throw Exception('Please enable selling or trading.');
+        if (!_enableSelling && !_enableTrading)
+          throw Exception('Please enable selling or trading.');
         if (_enableSelling && !_enableTrading) listingType = 'sell';
         if (!_enableSelling && _enableTrading) listingType = 'trade';
       }
 
-      if(_enableSelling){
-        if(price == null){
+      if (_enableSelling) {
+        if (price == null) {
           throw Exception('Price is required.');
         }
       }
 
-      if(_enableTrading){
-        if(preference.isEmpty){
+      if (_enableTrading) {
+        if (preference.isEmpty) {
           throw Exception('Preference is required.');
         }
       }
@@ -389,6 +470,14 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         );
         Navigator.pop(context, true);
       }
+
+      for (var img in _images) {
+        final file = File(img.path);
+        if (await file.exists()) {
+          await file.delete(); // Clean up permanent storage
+        }
+      }
+      _images.clear();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -447,7 +536,36 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return GestureDetector(
-                        onTap: _pickImage,
+                        onTap: () async {
+                          final choice = await showModalBottomSheet<String>(
+                            context: context,
+                            builder: (context) => SafeArea(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.photo),
+                                    title: const Text("Pick from Gallery"),
+                                    onTap: () =>
+                                        Navigator.pop(context, "gallery"),
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.camera_alt),
+                                    title: const Text("Take Photo"),
+                                    onTap: () =>
+                                        Navigator.pop(context, "camera"),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+
+                          if (choice == "gallery") {
+                            await _pickImage();
+                          } else if (choice == "camera") {
+                            await _captureImage();
+                          }
+                        },
                         child: Container(
                           width: 100,
                           margin: const EdgeInsets.only(right: 10),
@@ -463,7 +581,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         ),
                       );
                     }
-
                     final adjustedIndex = index - 1;
                     if (adjustedIndex < _existingImageUrls.length) {
                       return Stack(
@@ -554,8 +671,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(10)),
                   ),
                 ),
-                validator: (value){
-                  if(value == null || value.isEmpty){
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
                     return 'Please enter item name';
                   }
                   return null;
@@ -608,8 +725,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.all(Radius.circular(12)),
                   ),
                 ),
-                validator: (value){
-                  if(value == null || value.isEmpty){
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
                     return 'Please enter item description';
                   }
                   return null;
@@ -630,6 +747,14 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                           ),
                         )
                       : const Icon(Icons.search),
+                  suffixIcon: IconButton(
+                    icon: const Icon(
+                      Icons.my_location,
+                      color: Color(0xFF6D28D9),
+                    ),
+                    tooltip: "Use current location",
+                    onPressed: _getCurrentLocation,
+                  ),
                   filled: true,
                   fillColor: const Color(0xFFF3E8FF),
                   border: OutlineInputBorder(
