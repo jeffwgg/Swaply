@@ -8,12 +8,15 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
+import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
+import '../../../models/meetup_address_option.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../services/chat_service.dart';
 import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
+import '../checkout/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
 
@@ -29,6 +32,7 @@ class ItemDetailsScreen extends StatefulWidget {
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? user;
   String _ownerName = '';
+  String? _ownerAuthUserId;
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
@@ -56,6 +60,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
+        _ownerAuthUserId = user?.id;
       });
     }
   }
@@ -83,6 +88,68 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       setState(() {
         _favCount = count;
       });
+    }
+  }
+
+  Future<void> _openPurchaseCheckout() async {
+    if (user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+    if (user!.id == widget.item.ownerId) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You cannot buy your own listing.')),
+      );
+      return;
+    }
+    if (widget.item.price == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This listing has no purchase price.')),
+      );
+      return;
+    }
+
+    final meetups = MeetupAddressOption.fromSellerItem(widget.item);
+    final sellerName = _ownerName.trim().isEmpty ? 'Seller' : _ownerName;
+    final sellerId = _ownerAuthUserId;
+    if (sellerId == null || sellerId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seller account id not found.')),
+      );
+      return;
+    }
+
+    final completed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckoutScreen(
+          flowKind: CheckoutFlowKind.purchase,
+          primaryItem: widget.item,
+          sellerDisplayName: sellerName,
+          sellerId: sellerId,
+          buyerId: user!.id,
+          sellerMeetupOptions: meetups,
+        ),
+      ),
+    );
+
+    if (completed == true) {
+      if (!mounted) {
+        return;
+      }
+      Navigator.pop(context, true);
     }
   }
 
