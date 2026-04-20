@@ -13,13 +13,18 @@ import 'package:path/path.dart' as path_util;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../models/app_user.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/chat_pinned_message.dart';
 import '../../../models/chat_thread.dart';
 import '../../../models/ai_message.dart';
 import '../../../models/ai_pinned_message.dart';
+import '../../../repositories/items_repository.dart';
+import '../../../repositories/users_repository.dart';
+import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
+import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -62,6 +67,7 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _isRecordingVoice = false;
   DateTime? _voiceRecordingStartAt;
   bool _hasAttemptedAiConversationInit = false;
+  int _unreadNotificationCount = 0;
 
   String? get _currentUserId => _inboxViewModel.currentUserId;
 
@@ -75,11 +81,7 @@ class _InboxScreenState extends State<InboxScreen> {
       );
     }
     _loadInbox();
-    try {
-      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
-        onChange: _loadInbox,
-      );
-    } catch (_) {}
+    _ensureInboxRealtimeSubscription();
   }
 
   @override
@@ -97,6 +99,10 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   void _handleUserChanged() {
+    if (_inboxSubscription != null) {
+      unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
+      _inboxSubscription = null;
+    }
     _messagesSubscription?.cancel();
     _messagesSubscription = null;
     _aiMessagesSubscription?.cancel();
@@ -117,11 +123,24 @@ class _InboxScreenState extends State<InboxScreen> {
     });
     _composerController.clear();
     _loadInbox();
+    _ensureInboxRealtimeSubscription();
+  }
+
+  void _ensureInboxRealtimeSubscription() {
+    if (_inboxSubscription != null) {
+      return;
+    }
+    try {
+      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
+        onChange: _loadInbox,
+      );
+    } catch (_) {}
   }
 
   Future<void> _loadInbox() async {
     try {
       final threads = await _inboxViewModel.loadInbox();
+      _ensureInboxRealtimeSubscription();
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
         final itemTitle = (t.itemTitle ?? '').trim();
@@ -277,10 +296,23 @@ class _InboxScreenState extends State<InboxScreen> {
     await _saveConversationPrefs();
   }
 
-  void _openNotificationsScreen() {
-    Navigator.of(
+  Future<void> _openNotificationsScreen() async {
+    await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    await _refreshUnreadNotificationCount();
+  }
+
+  Future<void> _refreshUnreadNotificationCount() async {
+    try {
+      final count = await NotificationService.instance.unreadCount();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _unreadNotificationCount = count;
+      });
+    } catch (_) {}
   }
 
   Future<void> _togglePin(int id) async {
@@ -1090,12 +1122,17 @@ class _InboxScreenState extends State<InboxScreen> {
           ? (map['duration_seconds'] as num).toInt()
           : int.tryParse(map['duration_seconds']?.toString() ?? '');
       final caption = map['caption']?.toString().trim();
+      final itemIdRaw = map['item_id'];
+      final itemId = itemIdRaw is num
+          ? itemIdRaw.toInt()
+          : int.tryParse(itemIdRaw?.toString() ?? '');
       final media = _MessageMedia(
         type: type,
         url: urlValue,
         fileName: name == null || name.isEmpty ? null : name,
         durationSeconds: durationSeconds,
         caption: caption == null || caption.isEmpty ? null : caption,
+        itemId: itemId,
       );
       return _ParsedMessageBody.media(media);
     } catch (_) {
@@ -1111,6 +1148,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (media.durationSeconds != null)
         'duration_seconds': media.durationSeconds,
       if (media.caption != null) 'caption': media.caption,
+      if (media.itemId != null) 'item_id': media.itemId,
     };
     return '$_mediaPrefix${jsonEncode(payload)}';
   }
@@ -1973,6 +2011,7 @@ class _InboxScreenState extends State<InboxScreen> {
                       searchQuery: _searchQuery,
                       onSearchTap: _openSearchDialog,
                       onNotificationsTap: _openNotificationsScreen,
+                      unreadNotificationCount: _unreadNotificationCount,
                       pinnedChats: _pinnedChats,
                       manuallyUnreadChats: _manuallyUnreadChats,
                       onPinToggled: _togglePin,
@@ -2077,6 +2116,7 @@ class _InboxScreenState extends State<InboxScreen> {
               searchQuery: _searchQuery,
               onSearchTap: _openSearchDialog,
               onNotificationsTap: _openNotificationsScreen,
+              unreadNotificationCount: _unreadNotificationCount,
               pinnedChats: _pinnedChats,
               manuallyUnreadChats: _manuallyUnreadChats,
               onPinToggled: _togglePin,
@@ -2099,7 +2139,8 @@ class _InboxPanel extends StatelessWidget {
   final ValueChanged<int> onConversationSelected;
   final String searchQuery;
   final VoidCallback onSearchTap;
-  final VoidCallback onNotificationsTap;
+  final Future<void> Function() onNotificationsTap;
+  final int unreadNotificationCount;
   final Set<int> pinnedChats;
   final Set<int> manuallyUnreadChats;
   final ValueChanged<int> onPinToggled;
@@ -2116,6 +2157,7 @@ class _InboxPanel extends StatelessWidget {
     required this.searchQuery,
     required this.onSearchTap,
     required this.onNotificationsTap,
+    required this.unreadNotificationCount,
     required this.pinnedChats,
     required this.manuallyUnreadChats,
     required this.onPinToggled,
@@ -2167,11 +2209,52 @@ class _InboxPanel extends StatelessWidget {
                     compact: true,
                   ),
                   const SizedBox(width: 8),
-                  _HeaderIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    onTap: onNotificationsTap,
-                    filled: true,
-                    compact: true,
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      _HeaderIconButton(
+                        icon: Icons.notifications_none_rounded,
+                        onTap: () {
+                          onNotificationsTap();
+                        },
+                        filled: true,
+                        compact: true,
+                      ),
+                      if (unreadNotificationCount > 0)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE53935),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Text(
+                              unreadNotificationCount > 99
+                                  ? '99+'
+                                  : unreadNotificationCount.toString(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -3142,6 +3225,37 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
     } catch (_) {}
   }
+  
+  Future<void> _openMediaItemDetails(_MessageMedia media) async {
+    final itemId = media.itemId;
+    if (itemId == null) {
+      return;
+    }
+  
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -3155,15 +3269,17 @@ class _MessageBubbleState extends State<_MessageBubble> {
     final isImageOnly = message.media?.type == _MessageMediaType.image;
     final bubble = InkWell(
       onLongPress: widget.onLongPress,
-      borderRadius: BorderRadius.circular(isImageOnly ? 14 : 22),
+      borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
         padding: isImageOnly
-            ? EdgeInsets.zero
+            ? const EdgeInsets.all(8)
             : const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         decoration: BoxDecoration(
           color: isImageOnly
-              ? Colors.transparent
+              ? (message.isMine
+                    ? const Color(0xFFF0E7FF)
+                    : const Color(0xFFFAF8FF))
               : (message.isMine ? null : Colors.white),
           gradient: isImageOnly
               ? null
@@ -3172,9 +3288,18 @@ class _MessageBubbleState extends State<_MessageBubble> {
                         colors: [Color(0xFF9B68FF), Color(0xFF7D41FF)],
                       )
                     : null),
-          borderRadius: BorderRadius.circular(isImageOnly ? 14 : 22),
+          border: isImageOnly
+              ? Border.all(color: const Color(0xFFC4A1FF), width: 1.4)
+              : null,
+          borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
           boxShadow: isImageOnly
-              ? const []
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF7A54FF).withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
               : [
                   BoxShadow(
                     color: const Color(0xFF161A2B).withValues(alpha: 0.05),
@@ -3228,14 +3353,34 @@ class _MessageBubbleState extends State<_MessageBubble> {
               ),
             if (message.media?.caption != null) ...[
               const SizedBox(height: 10),
-              Text(
-                message.media!.caption!,
-                style: TextStyle(
-                  color: message.isMine
-                      ? Colors.white
-                      : const Color(0xFF24314D),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: isImageOnly
+                      ? const Color(0xFFEFE5FF)
+                      : (message.isMine
+                            ? Colors.white.withValues(alpha: 0.16)
+                            : const Color(0xFFF4EEFF)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: isImageOnly
+                      ? Border.all(color: const Color(0xFFCCB0FF))
+                      : null,
+                ),
+                child: Text(
+                  message.media!.caption!,
+                  style: TextStyle(
+                    color: isImageOnly
+                        ? const Color(0xFF42206E)
+                        : (message.isMine
+                              ? Colors.white
+                              : const Color(0xFF24314D)),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -3288,16 +3433,61 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Widget _buildMediaWidget(_MessageMedia media) {
     switch (media.type) {
       case _MessageMediaType.image:
-        return ClipRRect(
+        return InkWell(
+          onTap: media.itemId == null ? null : () => _openMediaItemDetails(media),
           borderRadius: BorderRadius.circular(14),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 280, maxHeight: 280),
-            child: Image.network(
-              media.url,
-              fit: BoxFit.cover,
-              errorBuilder: (_, error, stackTrace) =>
-                  _mediaErrorCard('Photo unavailable'),
-            ),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 280,
+                    maxHeight: 280,
+                  ),
+                  child: Image.network(
+                    media.url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, error, stackTrace) =>
+                        _mediaErrorCard('Photo unavailable'),
+                  ),
+                ),
+              ),
+              if (media.itemId != null)
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.65),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.open_in_new_rounded,
+                          color: Colors.white,
+                          size: 12,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'View item',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       case _MessageMediaType.voice:
@@ -3755,6 +3945,7 @@ class _MessageMedia {
   final String? fileName;
   final int? durationSeconds;
   final String? caption;
+  final int? itemId;
 
   const _MessageMedia({
     required this.type,
@@ -3762,6 +3953,7 @@ class _MessageMedia {
     this.fileName,
     this.durationSeconds,
     this.caption,
+    this.itemId,
   });
 
   String get defaultLabel {

@@ -17,12 +17,16 @@ class NotificationService {
   static const String _channelDescription =
       'General system notifications for Swaply';
   static const String _androidNotificationIcon = 'ic_stat_notify';
-  static const String _selectColumns = 'id,title,body,created_at,is_read,type';
+  static const String _selectColumns =
+      'id,title,body,created_at,is_read,type,data';
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   final StreamController<List<SystemNotificationItem>> _streamController =
       StreamController<List<SystemNotificationItem>>.broadcast();
+  StreamSubscription<AuthState>? _authSubscription;
+  RealtimeChannel? _notificationsChannel;
+  String? _subscribedRecipientId;
 
   bool _isInitialized = false;
 
@@ -57,7 +61,80 @@ class NotificationService {
     );
 
     await requestPermission();
+    _bindRealtimeNotifications();
     _isInitialized = true;
+  }
+
+  void _bindRealtimeNotifications() {
+    if (!SupabaseService.isConfigured) {
+      return;
+    }
+
+    _authSubscription ??= SupabaseService.client.auth.onAuthStateChange.listen((_) {
+      unawaited(_restartRealtimeSubscription());
+    });
+
+    unawaited(_restartRealtimeSubscription());
+  }
+
+  Future<void> _restartRealtimeSubscription() async {
+    final recipientId = SupabaseService.client.auth.currentUser?.id;
+    if (_subscribedRecipientId == recipientId && _notificationsChannel != null) {
+      return;
+    }
+
+    await _removeRealtimeSubscription();
+    _subscribedRecipientId = recipientId;
+
+    if (recipientId == null) {
+      _streamController.add(const []);
+      return;
+    }
+
+    final channel = SupabaseService.client.channel(
+      'notifications:$recipientId',
+    );
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: _table,
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'recipient_id',
+        value: recipientId,
+      ),
+      callback: (payload) {
+        unawaited(_handleIncomingNotification(payload.newRecord));
+      },
+    );
+
+    await channel.subscribe();
+    _notificationsChannel = channel;
+    await _emitLatest();
+  }
+
+  Future<void> _removeRealtimeSubscription() async {
+    final channel = _notificationsChannel;
+    _notificationsChannel = null;
+    if (channel != null) {
+      await SupabaseService.client.removeChannel(channel);
+    }
+  }
+
+  Future<void> _handleIncomingNotification(dynamic rawRow) async {
+    final row = _normalizeMap(rawRow);
+    final title = row['title']?.toString().trim() ?? '';
+    final body = row['body']?.toString().trim() ?? '';
+
+    if (title.isNotEmpty || body.isNotEmpty) {
+      await _showLocalNotification(
+        title: title.isEmpty ? 'Swaply' : title,
+        body: body,
+      );
+    }
+
+    await _emitLatest();
   }
 
   Future<void> requestPermission() async {
@@ -284,5 +361,15 @@ class NotificationService {
           throw StateError('Unexpected $operation row shape: expected Map.');
         })
         .toList(growable: false);
+  }
+
+  Map<String, dynamic> _normalizeMap(dynamic row) {
+    if (row is Map<String, dynamic>) {
+      return row;
+    }
+    if (row is Map) {
+      return row.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return const <String, dynamic>{};
   }
 }

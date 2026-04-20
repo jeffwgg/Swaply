@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:convert';
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,6 @@ import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
-import 'package:geocoding/geocoding.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
   final AppUser? user;
@@ -212,8 +212,15 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _acceptReply(int replyId) async {
+    final actingOwner = widget.user;
+    if (actingOwner == null) {
+      return;
+    }
+
+    ItemListing? acceptedReply;
     for (var r in _replies) {
       if (r.id == replyId) {
+        acceptedReply = r;
         await ItemsRepository().updateStatus('accepted', r.id);
       } else if (r.status != 'dropped') {
         await ItemsRepository().updateStatus('rejected', r.id);
@@ -221,11 +228,107 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
     await ItemsRepository().updateStatus('reserved', widget.item.id);
 
+    if (acceptedReply != null) {
+      final ownerName = actingOwner.username.trim().isNotEmpty
+          ? actingOwner.username.trim()
+          : (_ownerName.trim().isNotEmpty ? _ownerName.trim() : 'Item owner');
+      final offerImage = acceptedReply.imageUrls.isNotEmpty
+          ? acceptedReply.imageUrls.first
+          : null;
+
+      try {
+        final chat = await _chatService.createOrGetItemChat(
+          otherUserId: acceptedReply.ownerId,
+          itemId: widget.item.id,
+        );
+        final caption = StringBuffer()
+          ..writeln(
+            'I accepted your trade offer for "${widget.item.name}".',
+          )
+          ..writeln('Offered item: "${acceptedReply.name}"');
+        final autoMessagePayload = <String, dynamic>{
+          'type': 'image',
+          'url': offerImage ?? '',
+          'caption': caption.toString().trim(),
+          'item_id': widget.item.id,
+          'offered_item_id': acceptedReply.id,
+        };
+        final autoMessage = offerImage == null
+            ? caption.toString().trim()
+            : '[[media]]${jsonEncode(autoMessagePayload)}';
+
+        await _chatService.sendMessage(
+          chatId: chat.id,
+          content: autoMessage,
+        );
+
+        await NotificationService.instance.sendNotificationToUser(
+          recipientId: acceptedReply.ownerId,
+          title: 'Trade Offer Accepted',
+          body: '$ownerName accepted your trade offer on "${widget.item.name}".',
+          type: 'trade',
+          data: {
+            'action': 'open_item',
+            'item_id': widget.item.id,
+            'offered_item_id': acceptedReply.id,
+            'chat_id': chat.id,
+          },
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Offer accepted, but follow-up notification/chat failed: $e',
+              ),
+            ),
+          );
+        }
+      }
+    }
+
     await _fetchReplies();
   }
 
   Future<void> _rejectReply(int replyId) async {
+    ItemListing? rejectedReply;
+    for (final reply in _replies) {
+      if (reply.id == replyId) {
+        rejectedReply = reply;
+        break;
+      }
+    }
+
     await ItemsRepository().updateStatus('rejected', replyId);
+
+    if (rejectedReply != null && widget.user != null) {
+      final ownerName = widget.user!.username.trim().isNotEmpty
+          ? widget.user!.username.trim()
+          : (_ownerName.trim().isNotEmpty ? _ownerName.trim() : 'Item owner');
+      try {
+        await NotificationService.instance.sendNotificationToUser(
+          recipientId: rejectedReply.ownerId,
+          title: 'Trade Offer Rejected',
+          body: '$ownerName rejected your trade offer on "${widget.item.name}".',
+          type: 'trade',
+          data: {
+            'action': 'open_item',
+            'item_id': widget.item.id,
+            'offered_item_id': rejectedReply.id,
+          },
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Offer rejected, but notification failed to send: $e',
+              ),
+            ),
+          );
+        }
+      }
+    }
 
     await _fetchReplies();
   }

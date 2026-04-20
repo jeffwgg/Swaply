@@ -3,8 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../models/app_user.dart';
 import '../../../models/system_notification_item.dart';
+import '../../../repositories/items_repository.dart';
+import '../../../repositories/users_repository.dart';
 import '../../../services/notification_service.dart';
+import '../../../services/supabase_service.dart';
+import '../item/item_detail_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -15,20 +20,38 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final NotificationService _notificationService = NotificationService.instance;
+  final ItemsRepository _itemsRepository = ItemsRepository();
+  final UsersRepository _usersRepository = UsersRepository();
 
   List<SystemNotificationItem> _items = const [];
   bool _isLoading = true;
+  AppUser? _currentUser;
   StreamSubscription<List<SystemNotificationItem>>? _subscription;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUser();
     _loadItems();
     _subscription = _notificationService.notificationsStream.listen((items) {
       if (!mounted) {
         return;
       }
       setState(() => _items = items);
+    });
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final authUser = SupabaseService.client.auth.currentUser;
+    if (authUser == null) {
+      return;
+    }
+    final user = await _usersRepository.getById(authUser.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _currentUser = user;
     });
   }
 
@@ -67,6 +90,35 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       return;
     }
     await _notificationService.markAsRead(item.id);
+  }
+
+  Future<void> _onNotificationTap(SystemNotificationItem item) async {
+    await _markAsRead(item);
+
+    final itemId = item.itemId;
+    if (itemId == null || !mounted) {
+      return;
+    }
+
+    try {
+      final listing = await _itemsRepository.getById(itemId);
+      if (!mounted || listing == null) {
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: _currentUser, item: listing),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open the related item.')),
+      );
+    }
   }
 
   String _formatTimestamp(DateTime date) {
@@ -123,7 +175,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   itemBuilder: (context, index) {
                     final item = _items[index];
                     return InkWell(
-                      onTap: () => _markAsRead(item),
+                      onTap: () => _onNotificationTap(item),
                       borderRadius: BorderRadius.circular(18),
                       child: Container(
                         padding: const EdgeInsets.all(14),
