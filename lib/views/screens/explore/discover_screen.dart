@@ -307,7 +307,7 @@ class _NestedTabBarState extends State<NestedTabBar>
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: 0.82,
+                      childAspectRatio: 0.75,
                     ),
                     itemBuilder: (context, index) =>
                         ItemCard(

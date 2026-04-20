@@ -2,8 +2,9 @@ import 'dart:developer';
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
@@ -14,6 +15,7 @@ import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
+import 'package:geocoding/geocoding.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
   final AppUser? user;
@@ -49,6 +51,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   Future<void> _fetchOwner() async {
     final user = await UsersRepository().getById(widget.item.ownerId);
+    log('here $widget.item.ownerId');
+    log(user.toString());
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
@@ -909,20 +913,34 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: GoogleMap(
-                          initialCameraPosition: CameraPosition(
-                            target: LatLng(item.latitude!, item.longitude!),
-                            zoom: 15,
-                          ),
-                          markers: {
-                            Marker(
-                              markerId: const MarkerId("item_location"),
-                              position: LatLng(item.latitude!, item.longitude!),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            initialCenter: LatLng(item.latitude!, item.longitude!),
+                            initialZoom: 15,
+                            interactionOptions: const InteractionOptions(
+                              flags: InteractiveFlag.none,
                             ),
-                          },
-                          zoomControlsEnabled: false,
-                          myLocationButtonEnabled: false,
-                          liteModeEnabled: true, // ✅ smoother in scroll view
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                              userAgentPackageName: "com.example.swaply",
+                            ),
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: LatLng(item.latitude!, item.longitude!),
+                                  width: 40,
+                                  height: 40,
+                                  child: const Icon(
+                                    Icons.location_pin,
+                                    color: Colors.red,
+                                    size: 40,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -941,10 +959,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           Expanded(
                             child: Text(
                               item.address!,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey,
-                              ),
+                              style: const TextStyle(fontSize: 13, color: Colors.grey),
                             ),
                           ),
                         ],
@@ -1034,25 +1049,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               reply.name.toUpperCase(),
                                               style: const TextStyle(
-                                                fontSize: 20,
+                                                fontSize: 18,
                                                 color: Color(0xFF5B21B6),
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                           ),
                                         ),
-                                        if (user != null &&
-                                            user.id == reply.ownerId)
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.red,
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            onPressed: () =>
-                                                _dropReply(reply.id),
-                                          ),
                                       ],
                                     ),
                                     GestureDetector(
@@ -1091,7 +1094,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               _replyOwnerNames[reply.id]!,
                                               style: const TextStyle(
-                                                fontSize: 18,
+                                                fontSize: 16,
                                                 color: Color(0xFF7C3AED),
                                                 fontWeight: FontWeight.w600,
                                               ),
@@ -1202,6 +1205,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         right: 8,
                         child: _StatusBadge(status: reply.status),
                       ),
+                      if (user != null && user.id == reply.ownerId)
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _dropReply(reply.id),
+                          ),
+                        ),
                     ],
                   ),
                 );
