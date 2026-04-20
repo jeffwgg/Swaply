@@ -155,7 +155,6 @@ class ItemsRepository {
     var query = SupabaseService.client
         .from(_table)
         .select()
-        .neq('status', 'dropped')
         .eq('replied_to', id);
 
     final response = await query.order('created_at', ascending: false);

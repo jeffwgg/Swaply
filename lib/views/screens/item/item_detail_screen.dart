@@ -213,10 +213,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       }
     }
     await ItemsRepository().updateStatus('reserved', widget.item.id);
+
+    await _fetchReplies();
   }
 
   Future<void> _rejectReply(int replyId) async {
     await ItemsRepository().updateStatus('rejected', replyId);
+
+    await _fetchReplies();
   }
 
   Future<void> _composeAndStartItemConversation() async {
@@ -915,7 +919,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         borderRadius: BorderRadius.circular(12),
                         child: FlutterMap(
                           options: MapOptions(
-                            initialCenter: LatLng(item.latitude!, item.longitude!),
+                            initialCenter: LatLng(
+                              item.latitude!,
+                              item.longitude!,
+                            ),
                             initialZoom: 15,
                             interactionOptions: const InteractionOptions(
                               flags: InteractiveFlag.none,
@@ -923,13 +930,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           ),
                           children: [
                             TileLayer(
-                              urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                              urlTemplate:
+                                  "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                               userAgentPackageName: "com.example.swaply",
                             ),
                             MarkerLayer(
                               markers: [
                                 Marker(
-                                  point: LatLng(item.latitude!, item.longitude!),
+                                  point: LatLng(
+                                    item.latitude!,
+                                    item.longitude!,
+                                  ),
                                   width: 40,
                                   height: 40,
                                   child: const Icon(
@@ -959,7 +970,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           Expanded(
                             child: Text(
                               item.address!,
-                              style: const TextStyle(fontSize: 13, color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
                             ),
                           ),
                         ],
@@ -1224,80 +1238,23 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 );
               }).toList(),
               const SizedBox(height: 14),
-              if (user != null && user.id == item.ownerId)
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () async {
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  CreateItemScreen(user: user, item: item),
-                            ),
-                          );
-                          if (result == true && mounted) {
-                            Navigator.pop(context, true);
-                          }
-                        },
-                        style: TextButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text(
-                          'Edit Listing',
-                          style: TextStyle(fontSize: 16, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextButton(
-                        onPressed: _dropListing,
-                        style: TextButton.styleFrom(
-                          backgroundColor: accentSoft,
-                          shape: RoundedRectangleBorder(
-                            side: const BorderSide(
-                              color: Color(0xFF7C3AED),
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text(
-                          'Drop Listing',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF7C3AED),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else ...[
-                if (item.listingType == 'both')
+              if (item.status == 'available') ...[
+                if (user != null && user.id == item.ownerId)
                   Row(
                     children: [
                       Expanded(
                         child: TextButton(
-                          onPressed: () {
-                            if (user == null) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginScreen(),
-                                ),
-                              );
-                              return;
+                          onPressed: () async {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    CreateItemScreen(user: user, item: item),
+                              ),
+                            );
+                            if (result == true && mounted) {
+                              Navigator.pop(context, true);
                             }
-                            //todo: link to transaction page
                           },
                           style: TextButton.styleFrom(
                             backgroundColor: accent,
@@ -1308,7 +1265,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
-                            'Buy Now',
+                            'Edit Listing',
                             style: TextStyle(fontSize: 16, color: Colors.white),
                           ),
                         ),
@@ -1316,27 +1273,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextButton(
-                          onPressed: () async {
-                            if (user == null) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginScreen(),
-                                ),
-                              );
-                              return;
-                            }
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CreateItemScreen(
-                                  user: user,
-                                  repliedTo: item.id,
-                                ),
-                              ),
-                            );
-                            if (result == true) _fetchReplies();
-                          },
+                          onPressed: _dropListing,
                           style: TextButton.styleFrom(
                             backgroundColor: accentSoft,
                             shape: RoundedRectangleBorder(
@@ -1349,7 +1286,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
-                            'Offer Trade',
+                            'Drop Listing',
                             style: TextStyle(
                               fontSize: 16,
                               color: Color(0xFF7C3AED),
@@ -1359,81 +1296,163 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ),
                     ],
                   )
-                else if (item.listingType == 'sell')
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () {
-                        if (user == null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const LoginScreen(),
+                else ...[
+                  if (item.listingType == 'both')
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () {
+                              if (user == null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const LoginScreen(),
+                                  ),
+                                );
+                                return;
+                              }
+                              //todo: link to transaction page
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                          );
-                          return;
-                        }
-                        //todo: link to transaction page
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: accent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text(
-                        'Buy Now',
-                        style: TextStyle(fontSize: 16, color: Colors.white),
-                      ),
-                    ),
-                  )
-                else if (item.listingType == 'trade')
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () async {
-                        if (user == null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const LoginScreen(),
-                            ),
-                          );
-                          return;
-                        }
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => CreateItemScreen(
-                              user: user,
-                              repliedTo: item.id,
+                            child: const Text(
+                              'Buy Now',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                        );
-                        if (result == true) _fetchReplies();
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: accentSoft,
-                        shape: RoundedRectangleBorder(
-                          side: const BorderSide(
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () async {
+                              if (user == null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const LoginScreen(),
+                                  ),
+                                );
+                                return;
+                              }
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CreateItemScreen(
+                                    user: user,
+                                    repliedTo: item.id,
+                                  ),
+                                ),
+                              );
+                              if (result == true) _fetchReplies();
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: accentSoft,
+                              shape: RoundedRectangleBorder(
+                                side: const BorderSide(
+                                  color: Color(0xFF7C3AED),
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            child: const Text(
+                              'Offer Trade',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF7C3AED),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (item.listingType == 'sell')
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () {
+                          if (user == null) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            );
+                            return;
+                          }
+                          //todo: link to transaction page
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text(
+                          'Buy Now',
+                          style: TextStyle(fontSize: 16, color: Colors.white),
+                        ),
+                      ),
+                    )
+                  else if (item.listingType == 'trade')
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () async {
+                          if (user == null) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            );
+                            return;
+                          }
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreateItemScreen(
+                                user: user,
+                                repliedTo: item.id,
+                              ),
+                            ),
+                          );
+                          if (result == true) _fetchReplies();
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: accentSoft,
+                          shape: RoundedRectangleBorder(
+                            side: const BorderSide(
+                              color: Color(0xFF7C3AED),
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text(
+                          'Offer Trade',
+                          style: TextStyle(
+                            fontSize: 16,
                             color: Color(0xFF7C3AED),
-                            width: 2,
                           ),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text(
-                        'Offer Trade',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF7C3AED),
                         ),
                       ),
                     ),
-                  ),
+                ],
               ],
             ],
           ),
