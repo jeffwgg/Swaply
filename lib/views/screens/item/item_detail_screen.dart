@@ -1,5 +1,4 @@
 import 'dart:developer';
-
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -9,10 +8,12 @@ import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
+import '../../../services/follow_service.dart';
 import '../auth/login_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
-
+import '../../../services/supabase_service.dart';
+import  'package:supabase_flutter/supabase_flutter.dart';
 class ItemDetailsScreen extends StatefulWidget {
   final AppUser? user;
   final ItemListing item;
@@ -29,6 +30,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
   bool _isFollowing = false;
+  bool _isLoadingFollow = false;
   bool _isFavourite = false;
   int _favCount = 0;
 
@@ -42,6 +44,30 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     _fetchOwner();
     _fetchReplies();
     _fetchFavouriteCount();
+    _loadFollowState();
+  }
+
+  Future<void> _loadFollowState() async {
+    final currentUser = SupabaseService.client.auth.currentUser;
+    if (currentUser == null || currentUser.id == widget.item.ownerId) return;
+
+    final following = await FollowService.isFollowing(
+      currentUser.id,
+      widget.item.ownerId,
+    );
+
+    if (!mounted) return;
+    setState(() => _isFollowing = following);
+  }
+
+  void _showFollowError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   Future<void> _fetchOwner() async {
@@ -219,6 +245,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     const accent = Color(0xFF5B21B6);
     const accentSoft = Color(0xFFF3E8FF);
 
+    print("CURRENT USER: ${user?.id}");
+  print("ITEM OWNER: ${item.ownerId}");
+  print(SupabaseService.client.rest.url);
+  
+
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -229,9 +260,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => ProfileScreen(
-                      isDarkMode:
-                          Theme.of(context).brightness == Brightness.dark,
-                      onThemeChanged: (_) {},
                     ),
                   ),
                 );
@@ -253,11 +281,80 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             ),
             if (user == null || user.id != item.ownerId)
               TextButton(
-                onPressed: () {
-                  setState(() {
-                    _isFollowing = !_isFollowing;
-                  });
-                },
+                onPressed: _isLoadingFollow
+                    ? null
+                    : () async {
+                        final currentUser = SupabaseService.client.auth.currentUser;
+                        final targetUserId = item.ownerId;
+
+                        print("USER ID: ${currentUser?.id}");
+                        print("SESSION: ${SupabaseService.client.auth.currentSession}");
+                         print("USER ID: $targetUserId");
+                         print("JWT: ${SupabaseService.client.auth.currentSession?.accessToken}");
+                         print("TOKEN: ${Supabase.instance.client.auth.currentSession?.accessToken}");
+                        if (currentUser == null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(),
+                            ),
+                          );
+                          return;
+                        }
+
+                        if (currentUser.id == targetUserId) {
+                          _showFollowError('You cannot follow yourself.');
+                          return;
+                        }
+
+                        setState(() => _isLoadingFollow = true);
+
+                        try {
+                          final bool wasFollowing = _isFollowing;
+                          final success = wasFollowing
+                              ? await FollowService.unfollowUser(currentUser.id, targetUserId)
+                              : await FollowService.followUser(currentUser.id, targetUserId);
+
+                          if (!mounted) return;
+
+                          if (!success) {
+                            setState(() => _isLoadingFollow = false);
+                            _showFollowError(
+                              _isFollowing
+                                  ? 'Unable to unfollow right now.'
+                                  : 'Unable to follow right now.',
+                            );
+                            return;
+                          }
+
+                          setState(() {
+                            _isFollowing = !wasFollowing;
+                            _isLoadingFollow = false;
+                          });
+
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(_isFollowing
+                                    ? 'Following now!'
+                                    : 'Unfollowed successfully.'),
+                                backgroundColor: _isFollowing
+                                    ? Colors.green
+                                    : Colors.grey[700],
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          print('Follow error: $e');
+                          if (mounted) {
+                            setState(() => _isLoadingFollow = false);
+                            _showFollowError(
+                                'Error updating follow state. Please try again.');
+                          }
+                        }
+                      },
                 style: TextButton.styleFrom(
                   backgroundColor: _isFollowing
                       ? const Color(0xFF5B21B6)
@@ -803,12 +900,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (context) => ProfileScreen(
-                                              isDarkMode:
-                                                  Theme.of(
-                                                    context,
-                                                  ).brightness ==
-                                                  Brightness.dark,
-                                              onThemeChanged: (_) {},
+                                            
                                             ),
                                           ),
                                         );

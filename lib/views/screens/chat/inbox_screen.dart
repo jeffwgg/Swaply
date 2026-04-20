@@ -118,6 +118,7 @@ class _InboxScreenState extends State<InboxScreen> {
   Future<void> _loadInbox() async {
     try {
       final threads = await _inboxViewModel.loadInbox();
+      if (!mounted) return;
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
         return _Conversation(

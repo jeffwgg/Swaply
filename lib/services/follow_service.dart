@@ -5,35 +5,49 @@ import 'package:postgrest/postgrest.dart';
 class FollowService {
   /// Follow a user
   static Future<bool> followUser(String followerId, String followeeId) async {
-  try {
-    await SupabaseService.client.from('follows').insert({
-      'follower_id': followerId, 
-      'followee_id': followeeId, 
-    });
-    return true;
-  } catch (e) {
-    print('Error: $e');
-    return false;
+    final response = await SupabaseService.client
+        .from('follows')
+        .insert({
+          'follower_id': followerId,
+          'followee_id': followeeId,
+        })
+        .select()
+        .maybeSingle();
+    print("DATABASE RESPONSE: $response");
+    return response != null;
   }
-}
 
   /// Unfollow a user
   static Future<bool> unfollowUser(String followerId, String followeeId) async {
     try {
-      await SupabaseService.client
+      
+      final response = await SupabaseService.client
           .from('follows')
           .delete()
           .eq('follower_id', followerId)
-          .eq('followee_id', followeeId);
-      return true;
+          .eq('followee_id', followeeId)
+          .select()
+          .maybeSingle();
+
+      if (response != null) {
+        print("✅ Unfollowed successfully: $response");
+        return true;
+      } else {
+        print("⚠️ Unfollow failed: No matching record found.");
+        return false;
+      }
     } catch (e) {
-      print('Error unfollowing user: $e');
+      print('❌ Error unfollowing user: $e');
       return false;
     }
   }
 
   /// Check if a user is following another user
   static Future<bool> isFollowing(String followerId, String followeeId) async {
+    if (followerId == followeeId) {
+      return false;
+    }
+
     try {
       final result = await SupabaseService.client
           .from('follows')

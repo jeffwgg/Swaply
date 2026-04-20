@@ -259,7 +259,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 try {
                   await SupabaseService.client.auth
-                      .resetPasswordForEmail(email);
+                      .resetPasswordForEmail(
+                    email,
+                    redirectTo: 'swaply://login-callback',
+                  );
                   if (mounted) {
                     Navigator.pop(dialogContext);
                     ScaffoldMessenger.of(context).showSnackBar(

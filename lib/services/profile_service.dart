@@ -63,8 +63,8 @@ class ProfileService {
       // Update user profile in database
       await SupabaseService.client
           .from('users')
-          .update({'avatar_url': publicUrl})
-          .eq('auth_user_id', userId);
+          .update({'profile_image': publicUrl})
+          .eq('id', userId);
 
       return publicUrl;
     } catch (e) {
@@ -84,7 +84,7 @@ class ProfileService {
   }
 
   static Future<AppUser?> getProfile(String userId) {
-    return UsersRepository().getByAuthUserId(userId);
+    return UsersRepository().getById(userId);
   }
 
 }

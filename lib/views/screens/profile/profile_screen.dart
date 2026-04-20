@@ -204,12 +204,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = SupabaseService.client.auth.currentUser;
     final profileUserId = widget.viewingUserId ?? user!.id;
     final isOwnProfile = profileUserId == user!.id;
-
+    print("🔥 THIS SCREEN BUILdsdweD");
     return FutureBuilder<AppUser?>(
       future: ProfileService.getProfile(profileUserId),
 
+        
       builder: (context, snapshot) {  
 
+          print("STATE: ${snapshot.connectionState}");
+          print("ERROR: ${snapshot.error}");
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
@@ -309,23 +312,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           CircleAvatar(
                             radius: 45,
                             backgroundColor: Colors.purple,
-                            child: Text(
-                              profile.username[0].toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            backgroundImage: profile.profileImage != null
+                                ? NetworkImage(profile.profileImage!)
+                                : null,
+                            child: profile.profileImage == null
+                                ? Text(
+                                    profile.username[0].toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  )
+                                : null,
                           ),
                           if (isOwnProfile)
                             Positioned(
                               bottom: 0,
                               right: 0,
                               child: GestureDetector(
-                                onTap: () {
-                                  // _showImagePickerBottomSheet();
-                                },
+                                onTap: _showImagePickerBottomSheet,
                                 child: Container(
                                   padding: const EdgeInsets.all(6),
                                   decoration: const BoxDecoration(
@@ -553,6 +559,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final followers = await FollowService.getFollowerCount(userId);
     final saved = await SavedItemsService.getTotalSavedCount(userId);
 
+    
+
     return {
       'following': following,
       'followers': followers,
@@ -560,90 +568,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
     };
   }
 
-  // void _showImagePickerBottomSheet() {
-  //   showModalBottomSheet(
-  //     context: context,
-  //     builder: (BuildContext context) {
-  //       return Container(
-  //         padding: const EdgeInsets.all(20),
-  //         child: Column(
-  //           mainAxisSize: MainAxisSize.min,
-  //           children: [
-  //             const Text(
-  //               'Choose Profile Picture',
-  //               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-  //             ),
-  //             const SizedBox(height: 20),
-  //             ListTile(
-  //               leading: const Icon(Icons.camera_alt, color: Colors.purple),
-  //               title: const Text('Take a Photo'),
-  //               onTap: () {
-  //                 Navigator.pop(context);
-  //                 _uploadProfilePicture(isCamera: true);
-  //               },
-  //             ),
-  //             ListTile(
-  //               leading: const Icon(Icons.image, color: Colors.purple),
-  //               title: const Text('Choose from Gallery'),
-  //               onTap: () {
-  //                 Navigator.pop(context);
-  //                 _uploadProfilePicture(isCamera: false);
-  //               },
-  //             ),
-  //             const SizedBox(height: 10),
-  //           ],
-  //         ),
-  //       );
-  //     },
-  //   );
-  // }
+  void _showImagePickerBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Choose Profile Picture',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.purple),
+                title: const Text('Take a Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _uploadProfilePicture(isCamera: true);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.purple),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _uploadProfilePicture(isCamera: false);
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
-  // Future<void> _uploadProfilePicture({required bool isCamera}) async {
-  //   try {
-  //     final File? imageFile = isCamera
-  //         ? await ProfileService.pickImageFromCamera()
-  //         : await ProfileService.pickImageFromGallery();
+  Future<void> _uploadProfilePicture({required bool isCamera}) async {
+    try {
+      final File? imageFile = isCamera
+          ? await ProfileService.pickImageFromCamera()
+          : await ProfileService.pickImageFromGallery();
 
-  //     if (imageFile == null) return;
+      if (imageFile == null) return;
 
-  //     final user = SupabaseService.client.auth.currentUser;
-  //     if (user == null) return;
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return;
 
-  //     ScaffoldMessenger.of(context).showSnackBar(
-  //       const SnackBar(content: Text('Uploading profile picture...')),
-  //     );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Uploading profile picture...')),
+        );
+      }
 
-  //     final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
+      final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
 
-  //     if (url != null && mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(
-  //           content: Text('Profile picture updated!'),
-  //           backgroundColor: Colors.green,
-  //         ),
-  //       );
-  //       // Refresh the UI
-  //       setState(() {});
-  //     } else if (mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(
-  //           content: Text('Failed to upload profile picture'),
-  //           backgroundColor: Colors.red,
-  //         ),
-  //       );
-  //     }
-  //   } catch (e) {
-  //     print('Error uploading profile picture: $e');
-  //     if (mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(
-  //           content: Text('Error uploading profile picture'),
-  //           backgroundColor: Colors.red,
-  //         ),
-  //       );
-  //     }
-  //   }
-  // }
+      if (url != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile picture updated!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        setState(() {});
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to upload profile picture'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error uploading profile picture: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error uploading profile picture'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _toggleFollowUser() async {
     final currentUser = SupabaseService.client.auth.currentUser;
