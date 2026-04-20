@@ -6,6 +6,8 @@ import '../models/chat_message.dart';
 import '../models/chat_pinned_message.dart';
 import '../models/chat_thread.dart';
 import '../repositories/chats_repository.dart';
+import '../repositories/local/local_chats_repository.dart';
+import '../repositories/local/local_messages_repository.dart';
 import '../repositories/messages_repository.dart';
 import '../repositories/users_repository.dart';
 import '../services/supabase_service.dart';
@@ -14,20 +16,31 @@ class ChatService {
   ChatService({
     ChatsRepository? chatsRepository,
     MessagesRepository? messagesRepository,
+    LocalChatsRepository? localChatsRepository,
+    LocalMessagesRepository? localMessagesRepository,
     UsersRepository? usersRepository,
     String? Function()? authUserIdProvider,
     Future<String?> Function(String authUserId)? appUserIdResolver,
   }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
        _messagesRepository = messagesRepository ?? MessagesRepository(),
+       _localChatsRepository = localChatsRepository ?? LocalChatsRepository(),
+       _localMessagesRepository =
+           localMessagesRepository ?? LocalMessagesRepository(),
        _usersRepository = usersRepository ?? UsersRepository(),
        _authUserIdProvider = authUserIdProvider ?? _defaultAuthUserIdProvider,
        _appUserIdResolver = appUserIdResolver;
 
   final ChatsRepository _chatsRepository;
   final MessagesRepository _messagesRepository;
+  final LocalChatsRepository _localChatsRepository;
+  final LocalMessagesRepository _localMessagesRepository;
   final UsersRepository _usersRepository;
   final String? Function() _authUserIdProvider;
   final Future<String?> Function(String authUserId)? _appUserIdResolver;
+
+  final Map<int, StreamSubscription<List<ChatMessage>>> _remoteMessageMirrors =
+      {};
+  bool _isDisposed = false;
 
   String? _cachedCurrentUserId;
   String? _cachedAuthUserId;
@@ -47,8 +60,8 @@ class ChatService {
     }
 
     final resolvedUserId = _appUserIdResolver != null
-      ? await _appUserIdResolver(authUserId)
-      : (await _usersRepository.getById(authUserId))?.id;
+        ? await _appUserIdResolver(authUserId)
+        : (await _usersRepository.getById(authUserId))?.id;
     _cachedAuthUserId = authUserId;
     _cachedCurrentUserId = resolvedUserId;
     return _cachedCurrentUserId;
@@ -56,7 +69,31 @@ class ChatService {
 
   Future<List<ChatThread>> loadInbox() async {
     final userId = await _requireUserId();
-    return _chatsRepository.listForUser(userId);
+    final localThreads = await _localChatsRepository.listForUser(userId);
+    final remoteFuture = _chatsRepository.listForUser(userId);
+
+    if (localThreads.isNotEmpty) {
+      try {
+        final remoteThreads = await remoteFuture.timeout(
+          const Duration(milliseconds: 350),
+        );
+        await _localChatsRepository.upsertMany(remoteThreads);
+        return remoteThreads;
+      } on TimeoutException {
+        unawaited(_refreshInboxCache(remoteFuture));
+        return localThreads;
+      } catch (_) {
+        return localThreads;
+      }
+    }
+
+    try {
+      final remoteThreads = await remoteFuture;
+      await _localChatsRepository.upsertMany(remoteThreads);
+      return remoteThreads;
+    } catch (_) {
+      return localThreads;
+    }
   }
 
   Future<ChatThread> createOrGetItemChat({
@@ -66,15 +103,24 @@ class ChatService {
     final userId = await _requireUserId();
     _requireNonEmptyId(otherUserId, fieldName: 'otherUserId');
     _requirePositiveId(itemId, fieldName: 'itemId');
-    return _chatsRepository.createOrGetItemChat(
+    final thread = await _chatsRepository.createOrGetItemChat(
       currentUserId: userId,
       otherUserId: otherUserId,
       itemId: itemId,
     );
+    await _localChatsRepository.upsertOne(thread);
+    return thread;
   }
 
   Stream<List<ChatMessage>> watchMessages(int chatId) {
-    return _messagesRepository.watchForChat(chatId);
+    if (_isDisposed) {
+      return const Stream.empty();
+    }
+    _requirePositiveId(chatId, fieldName: 'chatId');
+    _ensureRemoteMessageMirror(chatId);
+    unawaited(_primeMessages(chatId));
+    unawaited(flushPendingQueue(chatId: chatId));
+    return _localMessagesRepository.watchForChat(chatId);
   }
 
   Future<ChatMessage> sendMessage({
@@ -84,17 +130,81 @@ class ChatService {
     _requirePositiveId(chatId, fieldName: 'chatId');
     final normalizedContent = _requireNonEmptyContent(content);
     final senderId = await _requireUserId();
-    return _messagesRepository.send(
+
+    final pending = await _localMessagesRepository.insertPending(
       chatId: chatId,
       senderId: senderId,
       content: normalizedContent,
     );
+    await _localChatsRepository.updateLastMessage(
+      chatId: chatId,
+      messagePreview: normalizedContent,
+    );
+
+    try {
+      final remote = await _messagesRepository.send(
+        chatId: chatId,
+        senderId: senderId,
+        content: normalizedContent,
+      );
+      await _localMessagesRepository.resolvePendingWithRemote(
+        pending: pending,
+        remote: remote,
+      );
+      return remote;
+    } catch (error) {
+      await _localMessagesRepository.markPendingFailed(
+        pending: pending,
+        error: error,
+      );
+      return ChatMessage(
+        id: pending.tempMessageId,
+        chatId: chatId,
+        senderId: senderId,
+        content: normalizedContent,
+        createdAt: pending.createdAt,
+      );
+    }
+  }
+
+  Future<void> flushPendingQueue({required int chatId}) async {
+    _requirePositiveId(chatId, fieldName: 'chatId');
+    final pendingMessages = await _localMessagesRepository.listPendingByChat(
+      chatId,
+    );
+    if (pendingMessages.isEmpty) {
+      return;
+    }
+
+    for (final pending in pendingMessages) {
+      try {
+        final remote = await _messagesRepository.send(
+          chatId: pending.chatId,
+          senderId: pending.senderId,
+          content: pending.content,
+        );
+        await _localMessagesRepository.resolvePendingWithRemote(
+          pending: pending,
+          remote: remote,
+        );
+      } catch (error) {
+        await _localMessagesRepository.markPendingFailed(
+          pending: pending,
+          error: error,
+        );
+        break;
+      }
+    }
   }
 
   Future<void> markChatAsRead(int chatId) async {
     _requirePositiveId(chatId, fieldName: 'chatId');
     final viewerId = await _requireUserId();
-    return _messagesRepository.markAsRead(chatId: chatId, viewerId: viewerId);
+    await _messagesRepository.markAsRead(chatId: chatId, viewerId: viewerId);
+    await _localMessagesRepository.markChatReadLocally(
+      chatId: chatId,
+      viewerId: viewerId,
+    );
   }
 
   Future<void> editMessage({
@@ -104,9 +214,13 @@ class ChatService {
     _requirePositiveId(messageId, fieldName: 'messageId');
     final normalizedContent = _requireNonEmptyContent(content);
     final actorId = await _requireUserId();
-    return _messagesRepository.editMessage(
+    await _messagesRepository.editMessage(
       messageId: messageId,
       actorId: actorId,
+      content: normalizedContent,
+    );
+    await _localMessagesRepository.markMessageEditedLocally(
+      messageId: messageId,
       content: normalizedContent,
     );
   }
@@ -114,7 +228,11 @@ class ChatService {
   Future<void> deleteMessage(int messageId) async {
     _requirePositiveId(messageId, fieldName: 'messageId');
     final actorId = await _requireUserId();
-    return _messagesRepository.deleteMessage(
+    await _messagesRepository.deleteMessage(
+      messageId: messageId,
+      actorId: actorId,
+    );
+    await _localMessagesRepository.markMessageDeletedLocally(
       messageId: messageId,
       actorId: actorId,
     );
@@ -164,7 +282,10 @@ class ChatService {
 
     return _chatsRepository.subscribeToChanges(
       userId: userId,
-      onRelevantChange: onChange,
+      onRelevantChange: () {
+        unawaited(_refreshInboxFromRemoteNow(userId));
+        onChange();
+      },
     );
   }
 
@@ -180,6 +301,60 @@ class ChatService {
       );
     }
     return userId;
+  }
+
+  void _ensureRemoteMessageMirror(int chatId) {
+    if (_isDisposed) {
+      return;
+    }
+    if (_remoteMessageMirrors.containsKey(chatId)) {
+      return;
+    }
+
+    _remoteMessageMirrors[chatId] = _messagesRepository
+        .watchForChat(chatId)
+        .listen((remoteMessages) async {
+          if (_isDisposed) {
+            return;
+          }
+          await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
+        }, onError: (_) {});
+  }
+
+  Future<void> _primeMessages(int chatId) async {
+    try {
+      final remoteMessages = await _messagesRepository.listForChat(chatId);
+      await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
+    } catch (_) {}
+  }
+
+  Future<void> _refreshInboxCache(Future<List<ChatThread>> remoteFuture) async {
+    try {
+      final remoteThreads = await remoteFuture;
+      await _localChatsRepository.upsertMany(remoteThreads);
+    } catch (_) {}
+  }
+
+  Future<void> _refreshInboxFromRemoteNow(String userId) async {
+    if (_isDisposed) {
+      return;
+    }
+    try {
+      final remoteThreads = await _chatsRepository.listForUser(userId);
+      await _localChatsRepository.upsertMany(remoteThreads);
+    } catch (_) {}
+  }
+
+  Future<void> dispose() async {
+    if (_isDisposed) {
+      return;
+    }
+    _isDisposed = true;
+    final subscriptions = _remoteMessageMirrors.values.toList(growable: false);
+    _remoteMessageMirrors.clear();
+    for (final subscription in subscriptions) {
+      await subscription.cancel();
+    }
   }
 
   void _requireNonEmptyId(String value, {required String fieldName}) {

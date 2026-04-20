@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:swaply/services/local_db_service.dart';
 import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
 import 'views/screens/main_shell.dart';
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SupabaseService.initialize();
+  await LocalDbService.instance.initialize();
   await NotificationService.instance.initialize();
   runApp(const MyApp());
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -7,57 +9,80 @@ import '../../models/chat_message.dart';
 import '../../models/chat_pinned_message.dart';
 import '../../models/chat_thread.dart';
 import '../../repositories/ai_messages_repository.dart';
-import '../../repositories/chats_repository.dart';
-import '../../repositories/messages_repository.dart';
 import '../../repositories/users_repository.dart';
 import '../../services/ai_chat_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/supabase_service.dart';
 
 class InboxViewModel extends ChangeNotifier {
   InboxViewModel({
-    ChatsRepository? chatsRepository,
-    MessagesRepository? messagesRepository,
+    ChatService? chatService,
     AiMessagesRepository? aiMessagesRepository,
     UsersRepository? usersRepository,
     AiChatService? aiChatService,
     String? Function()? authUserIdProvider,
-  }) : _chatsRepository = chatsRepository ?? ChatsRepository(),
-       _messagesRepository = messagesRepository ?? MessagesRepository(),
+  }) : _usersRepository = usersRepository ?? UsersRepository(),
+       _chatService =
+           chatService ??
+           ChatService(
+             usersRepository: usersRepository ?? UsersRepository(),
+             authUserIdProvider:
+                 authUserIdProvider ?? _defaultAuthUserIdProvider,
+             appUserIdResolver: (authUserId) async {
+               try {
+                 final user = await (usersRepository ?? UsersRepository())
+                     .getById(authUserId);
+                 return user?.id ?? authUserId;
+               } catch (_) {
+                 return authUserId;
+               }
+             },
+           ),
        _aiMessagesRepository = aiMessagesRepository ?? AiMessagesRepository(),
-       _usersRepository = usersRepository ?? UsersRepository(),
        _aiChatService = aiChatService ?? AiChatService(),
        _authUserIdProvider = authUserIdProvider ?? _defaultAuthUserIdProvider;
 
-  final ChatsRepository _chatsRepository;
-  final MessagesRepository _messagesRepository;
+  final ChatService _chatService;
   final AiMessagesRepository _aiMessagesRepository;
   final UsersRepository _usersRepository;
   final AiChatService _aiChatService;
   final String? Function() _authUserIdProvider;
 
   bool _isLoadingInbox = false;
+  bool _isDisposed = false;
   bool get isLoadingInbox => _isLoadingInbox;
 
   String? _cachedCurrentUserId;
   String? _cachedAuthUserId;
 
-  String? get currentUserId => _cachedCurrentUserId;
+  String? get currentUserId =>
+      _chatService.currentUserId ?? _cachedCurrentUserId;
 
   Future<List<ChatThread>> loadInbox() async {
+    if (_isDisposed) {
+      return const <ChatThread>[];
+    }
     _setLoading(true);
     try {
-      final userId = await _requireUserId();
-      return _chatsRepository.listForUser(userId);
+      final inbox = await _chatService.loadInbox();
+      _cachedCurrentUserId = _chatService.currentUserId;
+      return inbox;
     } finally {
       _setLoading(false);
     }
   }
 
   Stream<List<ChatMessage>> watchMessages(int chatId) {
-    return _messagesRepository.watchForChat(chatId);
+    if (_isDisposed) {
+      return const Stream.empty();
+    }
+    return _chatService.watchMessages(chatId);
   }
 
   Stream<List<AiMessage>> watchAiMessages() {
+    if (_isDisposed) {
+      return const Stream.empty();
+    }
     return _aiMessagesRepository.watchMessages();
   }
 
@@ -65,35 +90,33 @@ class InboxViewModel extends ChangeNotifier {
     required int chatId,
     required String content,
   }) async {
-    final senderId = await _requireUserId();
+    if (_isDisposed) {
+      return;
+    }
     final normalized = _requireNonEmptyContent(content);
-    await _messagesRepository.send(
-      chatId: chatId,
-      senderId: senderId,
-      content: normalized,
-    );
+    await _chatService.sendMessage(chatId: chatId, content: normalized);
   }
 
   Future<void> sendAiMessage(String text, {String? promptForAi}) {
     return _aiChatService.sendMessage(text, promptForAi: promptForAi);
   }
 
-  Future<void> markChatAsRead(int chatId) async {
-    final viewerId = await _requireUserId();
-    await _messagesRepository.markAsRead(chatId: chatId, viewerId: viewerId);
+  Future<void> markChatAsRead(int chatId) {
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.markChatAsRead(chatId);
   }
 
   Future<void> editChatMessage({
     required int messageId,
     required String content,
   }) async {
-    final actorId = await _requireUserId();
+    if (_isDisposed) {
+      return;
+    }
     final normalized = _requireNonEmptyContent(content);
-    await _messagesRepository.editMessage(
-      messageId: messageId,
-      actorId: actorId,
-      content: normalized,
-    );
+    await _chatService.editMessage(messageId: messageId, content: normalized);
   }
 
   Future<void> editAiMessage({
@@ -106,48 +129,42 @@ class InboxViewModel extends ChangeNotifier {
     );
   }
 
-  Future<void> deleteChatMessage(int messageId) async {
-    final actorId = await _requireUserId();
-    await _messagesRepository.deleteMessage(
-      messageId: messageId,
-      actorId: actorId,
-    );
+  Future<void> deleteChatMessage(int messageId) {
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.deleteMessage(messageId);
   }
 
   Future<void> deleteAiMessage(int messageId) {
     return _aiMessagesRepository.deleteMessage(messageId);
   }
 
-  Future<void> pinChatMessage({
-    required int chatId,
-    required int messageId,
-  }) async {
-    final actorId = await _requireUserId();
-    await _chatsRepository.pinMessage(
-      chatId: chatId,
-      messageId: messageId,
-      actorId: actorId,
-    );
+  Future<void> pinChatMessage({required int chatId, required int messageId}) {
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.pinMessage(chatId: chatId, messageId: messageId);
   }
 
   Future<void> clearPinnedChatMessage({
     required int chatId,
     required int messageId,
-  }) async {
-    final actorId = await _requireUserId();
-    await _chatsRepository.clearPinnedMessage(
+  }) {
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.clearPinnedMessage(
       chatId: chatId,
       messageId: messageId,
-      actorId: actorId,
     );
   }
 
-  Future<List<ChatPinnedMessage>> listPinnedChatMessages(int chatId) async {
-    final actorId = await _requireUserId();
-    return _chatsRepository.listPinnedMessages(
-      chatId: chatId,
-      actorId: actorId,
-    );
+  Future<List<ChatPinnedMessage>> listPinnedChatMessages(int chatId) {
+    if (_isDisposed) {
+      return Future.value(const <ChatPinnedMessage>[]);
+    }
+    return _chatService.listPinnedMessages(chatId);
   }
 
   Future<void> pinAiMessage(int messageId) {
@@ -171,21 +188,17 @@ class InboxViewModel extends ChangeNotifier {
   }
 
   RealtimeChannel subscribeInboxChanges({required void Function() onChange}) {
-    final userId = _cachedCurrentUserId;
-    if (userId == null) {
-      throw StateError(
-        'No active user profile. Load inbox after sign-in first.',
-      );
+    if (_isDisposed) {
+      throw StateError('InboxViewModel is disposed.');
     }
-
-    return _chatsRepository.subscribeToChanges(
-      userId: userId,
-      onRelevantChange: onChange,
-    );
+    return _chatService.subscribeInboxChanges(onChange: onChange);
   }
 
   Future<void> unsubscribeInboxChanges(RealtimeChannel channel) {
-    return _chatsRepository.unsubscribe(channel);
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.unsubscribeInboxChanges(channel);
   }
 
   Future<String?> refreshCurrentUserId() async {
@@ -204,24 +217,12 @@ class InboxViewModel extends ChangeNotifier {
 
     try {
       final user = await _usersRepository.getById(authUserId);
-      // Fallback to auth UUID when users profile row is missing so inbox/AI can still load.
       _cachedCurrentUserId = user?.id ?? authUserId;
     } catch (_) {
-      // If users query fails (e.g. temporary schema mismatch), continue with auth UUID.
       _cachedCurrentUserId = authUserId;
     }
 
     return _cachedCurrentUserId;
-  }
-
-  Future<String> _requireUserId() async {
-    final userId = await refreshCurrentUserId();
-    if (userId == null) {
-      throw StateError(
-        'No active user profile found. Sign in and create a users row first.',
-      );
-    }
-    return userId;
   }
 
   String _requireNonEmptyContent(String value) {
@@ -233,11 +234,21 @@ class InboxViewModel extends ChangeNotifier {
   }
 
   void _setLoading(bool value) {
+    if (_isDisposed) {
+      return;
+    }
     if (_isLoadingInbox == value) {
       return;
     }
     _isLoadingInbox = value;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    unawaited(_chatService.dispose());
+    super.dispose();
   }
 
   static String? _defaultAuthUserIdProvider() {
