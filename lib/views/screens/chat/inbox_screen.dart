@@ -3384,6 +3384,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 ),
               ),
             ],
+            if (isImageOnly && message.media?.itemId != null) ...[
+              const SizedBox(height: 10),
+              _buildItemActionButtons(),
+            ],
           ],
         ),
       ),
@@ -3534,6 +3538,54 @@ class _MessageBubbleState extends State<_MessageBubble> {
       case _MessageMediaType.document:
         return _mediaErrorCard('Document attachment');
     }
+  }
+
+  Widget _buildItemActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF6F45FF),
+              side: const BorderSide(color: Color(0xFFB895FF), width: 1.4),
+              backgroundColor: const Color(0xFFF8F3FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFF7A54FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _mediaErrorCard(String text) {
