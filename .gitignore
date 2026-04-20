@@ -63,3 +63,4 @@ supabase/.temp/
 
 # VS Code workspace settings (optional: comment out if team shares settings)
 .vscode/
+/stripe-api/node_modules
