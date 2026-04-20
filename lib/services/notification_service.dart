@@ -120,6 +120,26 @@ class NotificationService {
     }
   }
 
+  Future<void> sendNotificationToUser({
+    required String recipientId,
+    required String title,
+    required String body,
+    String type = 'general',
+    Map<String, dynamic>? data,
+    bool showLocal = false,
+  }) async {
+    final actorId = _requireCurrentUserId();
+    await sendSystemNotification(
+      title: title,
+      body: body,
+      type: type,
+      recipientId: recipientId,
+      actorId: actorId,
+      data: data,
+      showLocal: showLocal,
+    );
+  }
+
   Future<List<SystemNotificationItem>> getNotifications({
     int limit = 100,
   }) async {
