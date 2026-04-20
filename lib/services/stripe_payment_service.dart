@@ -1,15 +1,21 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';import 'package:http/http.dart' as http;
+import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:http/http.dart' as http;
 
 import '../core/constants/app_config.dart';
 
 class StripePaymentResult {
   final bool success;
   final String? message;
+  final String? paymentIntentId;
 
-  const StripePaymentResult({required this.success, this.message});
+  const StripePaymentResult({
+    required this.success,
+    this.message,
+    this.paymentIntentId,
+  });
 }
 
 /// Handles Stripe PaymentSheet when a backend URL is configured, otherwise
@@ -21,9 +27,12 @@ class StripePaymentService {
     if (!AppConfig.hasStripePublishableKey) {
       return;
     }
+
     Stripe.publishableKey = AppConfig.stripePublishableKey.trim();
     await Stripe.instance.applySettings();
   }
+
+
 
   Future<StripePaymentResult> payCheckoutTotal({
     required BuildContext context,
@@ -51,15 +60,21 @@ class StripePaymentService {
           message: 'Could not start payment.',
         );
       }
+      final intentId = _paymentIntentIdFromClientSecret(clientSecret);
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Swaply',
+          googlePay: PaymentSheetGooglePay(
+            merchantCountryCode: 'MY',
+            currencyCode: currencyCode.toUpperCase(),
+            testEnv: true,
+          ),
         ),
       );
       await Stripe.instance.presentPaymentSheet();
-      return const StripePaymentResult(success: true);
+      return StripePaymentResult(success: true, paymentIntentId: intentId);
     } on StripeException catch (e) {
       final canceled = e.error.code == FailureCode.Canceled;
       if (canceled) {
@@ -138,6 +153,15 @@ class StripePaymentService {
       return const StripePaymentResult(success: true);
     }
     return const StripePaymentResult(success: false, message: 'Canceled.');
+  }
+
+  String? _paymentIntentIdFromClientSecret(String clientSecret) {
+    // Stripe client secret looks like: pi_XXX_secret_YYY
+    final i = clientSecret.indexOf('_secret_');
+    if (i <= 0) {
+      return null;
+    }
+    return clientSecret.substring(0, i);
   }
 
   int _myrToMinorUnits(double myr) {

@@ -9,6 +9,20 @@
   Future<void> main() async {
     WidgetsFlutterBinding.ensureInitialized();
     await SupabaseService.initialize();
+    const stripeKey = String.fromEnvironment('STRIPE_PUBLISHABLE_KEY');
+    const intentUrl = String.fromEnvironment('STRIPE_PAYMENT_INTENT_URL');
+
+    try {
+      await StripePaymentService.ensureStripeConfigured();
+      print("✅ Stripe 初始配置成功");
+    } catch (e) {
+      print("❌ Stripe 初始配置失败: $e");
+    }
+    // 2. Print them to the debug console
+    print('--- Debugging Environment Variables ---');
+    print('Stripe Key: ${stripeKey.isEmpty ? "NOT FOUND ❌" : "FOUND ✅"}');
+    print('Intent URL: $intentUrl');
+    print('---------------------------------------');
     runApp(const MyApp());
   }
 

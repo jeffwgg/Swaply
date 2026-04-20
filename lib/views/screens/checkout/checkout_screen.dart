@@ -4,14 +4,16 @@ import '../../../core/theme/app_colors.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
 import '../../../models/meetup_address_option.dart';
-import '../../../models/transaction_request.dart';
-import '../../../repositories/transaction_requests_repository.dart';
+import '../../../models/payment.dart';
+import '../../../models/transaction.dart';
+import '../../../repositories/payments_repository.dart';
+import '../../../repositories/transactions_repository.dart';
 import '../../../services/location_address_service.dart';
 import '../../../services/stripe_payment_service.dart';
 
 enum _Fulfillment { meetup, shipping }
 
-enum _UiPaymentMethod { card, onlineBanking, touchNGo }
+enum _UiPaymentMethod { card, grabPay, googlePay }
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({
@@ -19,6 +21,7 @@ class CheckoutScreen extends StatefulWidget {
     required this.flowKind,
     required this.primaryItem,
     required this.sellerDisplayName,
+    required this.sellerId,
     required this.buyerId,
     this.swapItem,
     required this.sellerMeetupOptions,
@@ -29,7 +32,8 @@ class CheckoutScreen extends StatefulWidget {
   final ItemListing primaryItem;
   final ItemListing? swapItem;
   final String sellerDisplayName;
-  final int buyerId;
+  final String sellerId;
+  final String buyerId;
   final List<MeetupAddressOption> sellerMeetupOptions;
   final double shippingFeeMyr;
 
@@ -42,8 +46,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final TextEditingController _shippingAddressController = TextEditingController();
   final LocationAddressService _locationService = LocationAddressService();
   final StripePaymentService _stripe = StripePaymentService();
-  final TransactionRequestsRepository _transactions =
-      TransactionRequestsRepository();
+  final TransactionsRepository _transactions = TransactionsRepository();
+  final PaymentsRepository _payments = PaymentsRepository();
 
   _UiPaymentMethod _paymentMethod = _UiPaymentMethod.card;
   bool _agreedToTerms = false;
@@ -147,8 +151,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     setState(() => _busy = true);
     try {
+      StripePaymentResult? paymentResult;
       if (_requiresPayment) {
-        final result = await _stripe.payCheckoutTotal(
+        paymentResult = await _stripe.payCheckoutTotal(
           context: context,
           totalMyr: _grandTotal,
           currencyCode: 'myr',
@@ -156,40 +161,98 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         if (!mounted) {
           return;
         }
-        if (!result.success) {
-          if (result.message != null) {
+        if (!paymentResult.success) {
+          if (paymentResult.message != null) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(result.message!)),
+              SnackBar(content: Text(paymentResult.message!)),
             );
           }
           return;
         }
       }
 
-      if (widget.flowKind == CheckoutFlowKind.purchase) {
-        final listPrice = widget.primaryItem.price;
-        if (listPrice == null) {
+      // Create transaction row
+      final txType = widget.flowKind == CheckoutFlowKind.swap ? 'trade' : 'purchase';
+      final txStatus = _requiresPayment ? 'paid' : 'confirmed';
+      final itemPrice = widget.flowKind == CheckoutFlowKind.purchase
+          ? widget.primaryItem.price
+          : null;
+      if (widget.flowKind == CheckoutFlowKind.purchase && itemPrice == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This listing has no price.')),
+          );
+        }
+        return;
+      }
+
+      final fulfillment = _fulfillment == _Fulfillment.shipping ? 'shipping' : 'meetup';
+      final address = _fulfillment == _Fulfillment.shipping
+          ? _shippingAddressController.text.trim()
+          : (widget.sellerMeetupOptions
+                  .firstWhere((o) => o.id == _selectedMeetupId)
+                  .fullAddress);
+
+      Transaction createdTx;
+      try {
+        createdTx = await _transactions.create(
+          Transaction(
+            transactionId: 0,
+            buyerId: widget.buyerId,
+            sellerId: widget.sellerId,
+            itemId: widget.primaryItem.id,
+            tradedItemId: widget.swapItem?.id,
+            transactionType: txType,
+            transactionStatus: txStatus,
+            itemPrice: itemPrice,
+            shippingFee: _shippingFee,
+            totalAmount: _grandTotal,
+            fulfillmentMethod: fulfillment,
+            address: address,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+          ),
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saving transaction failed: $e')),
+          );
+        }
+        return;
+      }
+
+      // Create payment row if a real charge happened
+      if (_requiresPayment) {
+        final intentId = paymentResult?.paymentIntentId;
+        if (intentId == null || intentId.isEmpty) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('This listing has no price; cannot record a purchase.'),
-              ),
+              const SnackBar(content: Text('Payment succeeded but no intent id found.')),
             );
           }
           return;
         }
+        final method = switch (_paymentMethod) {
+          _UiPaymentMethod.card => 'card',
+          _UiPaymentMethod.grabPay => 'grabpay',
+          _UiPaymentMethod.googlePay => 'google_pay',
+        };
         try {
-          await _transactions.create(
-            TransactionRequest.insertPurchase(
-              itemId: widget.primaryItem.id,
-              requesterId: widget.buyerId,
-              offeredPrice: listPrice,
+          await _payments.create(
+            Payment(
+              paymentId: 0,
+              paymentIntentId: intentId,
+              paymentMethod: method,
+              paymentAmount: _grandTotal,
+              paymentStatus: 'paid',
+              transactionId: createdTx.transactionId,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
             ),
           );
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Payment OK, but saving the order failed: $e')),
+              SnackBar(content: Text('Payment OK, but saving payment failed: $e')),
             );
           }
           return;
@@ -879,8 +942,8 @@ class _PaymentMethodsCard extends StatelessWidget {
           ),
           const Divider(height: 22),
           row('Credit / Debit Card', _UiPaymentMethod.card),
-          row('Online Banking', _UiPaymentMethod.onlineBanking),
-          row('Touch & Go', _UiPaymentMethod.touchNGo),
+          row('GrabPay', _UiPaymentMethod.grabPay),
+          row('Google Pay', _UiPaymentMethod.googlePay),
         ],
       ),
     );

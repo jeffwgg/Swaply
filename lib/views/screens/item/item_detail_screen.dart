@@ -28,6 +28,7 @@ class ItemDetailsScreen extends StatefulWidget {
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? user;
   String _ownerName = '';
+  String? _ownerAuthUserId;
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
@@ -52,6 +53,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
+        _ownerAuthUserId = user?.id;
       });
     }
   }
@@ -111,6 +113,16 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     final meetups = MeetupAddressOption.fromSellerItem(widget.item);
     final sellerName = _ownerName.trim().isEmpty ? 'Seller' : _ownerName;
+    final sellerId = _ownerAuthUserId;
+    if (sellerId == null || sellerId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seller account id not found.')),
+      );
+      return;
+    }
 
     final completed = await Navigator.push<bool>(
       context,
@@ -119,6 +131,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           flowKind: CheckoutFlowKind.purchase,
           primaryItem: widget.item,
           sellerDisplayName: sellerName,
+          sellerId: sellerId,
           buyerId: user!.id,
           sellerMeetupOptions: meetups,
         ),
@@ -1152,8 +1165,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             ),
                           );
                           return;
+                        }else{
+                          _openPurchaseCheckout();
                         }
-                        //todo: link to transaction page
                       },
                       style: TextButton.styleFrom(
                         backgroundColor: accent,

@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:swaply/models/app_user.dart';
 import 'package:swaply/models/item_listing.dart';
+import 'package:swaply/models/payment.dart';
+import 'package:swaply/models/transaction.dart';
 import 'package:swaply/repositories/items_repository.dart';
+import 'package:swaply/repositories/payments_repository.dart';
+import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 
@@ -85,14 +89,173 @@ class ReviewTab extends StatelessWidget {
   }
 }
 
-class TransactionTab extends StatelessWidget {
+class TransactionTab extends StatefulWidget {
   final AppUser user;
   const TransactionTab({super.key, required this.user});
 
   @override
-  Widget build(BuildContext context) {
-    return _buildEmptyState(Icons.receipt_long_outlined, "No transactions yet");
+  State<TransactionTab> createState() => _TransactionTabState();
+}
+
+class _TransactionTabState extends State<TransactionTab> {
+  late final Future<List<_TransactionRow>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadRows();
   }
+
+  Future<List<_TransactionRow>> _loadRows() async {
+    final repo = TransactionsRepository();
+    final paymentsRepo = PaymentsRepository();
+    final itemsRepo = ItemsRepository();
+
+    final buyerTxs = await repo.listForBuyer(widget.user.id);
+    final sellerTxs = await repo.listForSeller(widget.user.id);
+
+    final all = <Transaction>[
+      ...buyerTxs,
+      ...sellerTxs,
+    ];
+
+    // Deduplicate by transactionId (in case policies allow seeing both views).
+    final byId = <int, Transaction>{};
+    for (final t in all) {
+      byId[t.transactionId] = t;
+    }
+
+    final unique = byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final rows = <_TransactionRow>[];
+    for (final tx in unique) {
+      final item = await itemsRepo.getById(tx.itemId);
+      final payments = await paymentsRepo.listForTransaction(tx.transactionId);
+      final latestPayment = payments.isNotEmpty ? payments.first : null;
+      rows.add(_TransactionRow(tx: tx, item: item, payment: latestPayment));
+    }
+    return rows;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<_TransactionRow>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF5B21B6)),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final rows = snapshot.data ?? [];
+        if (rows.isEmpty) {
+          return _buildEmptyState(Icons.receipt_long_outlined, "No transactions yet");
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(12),
+          itemCount: rows.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, i) {
+            final row = rows[i];
+            final tx = row.tx;
+            final item = row.item;
+            final title = item?.name ?? 'Item #${tx.itemId}';
+
+            final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
+            final amountLabel = amount > 0 ? 'RM ${amount.toStringAsFixed(2)}' : 'RM 0.00';
+
+            final status = tx.transactionStatus ?? 'unknown';
+            final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
+
+            final paymentLine = row.payment == null
+                ? null
+                : '${row.payment!.paymentMethod} • ${row.payment!.paymentStatus}';
+
+            return Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE9D5FF)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ListTile(
+                onTap: item == null
+                    ? null
+                    : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ItemDetailsScreen(
+                              user: widget.user,
+                              item: item,
+                            ),
+                          ),
+                        );
+                      },
+                title: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(dateLabel),
+                      const SizedBox(height: 4),
+                      Text('Status: $status'),
+                      if (paymentLine != null) ...[
+                        const SizedBox(height: 4),
+                        Text('Payment: $paymentLine'),
+                      ],
+                    ],
+                  ),
+                ),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      amountLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF5B21B6),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _StatusBadge(status: status, mini: true),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _TransactionRow {
+  final Transaction tx;
+  final ItemListing? item;
+  final Payment? payment;
+
+  const _TransactionRow({required this.tx, required this.item, required this.payment});
 }
 
 class FavouriteTab extends StatelessWidget {
