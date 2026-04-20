@@ -158,6 +158,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     if (confirm == true) {
       await ItemsRepository().dropListing(widget.item.id);
+
+      for(var r in _replies){
+        if(r.status == 'pending'){
+          await ItemsRepository().updateStatus('rejected', r.id);
+        }
+      }
+
       if (mounted) {
         Navigator.pop(context, true);
       }
@@ -1015,6 +1022,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ),
               const SizedBox(height: 10),
               ..._replies.map((reply) {
+                if (reply.status == 'dropped' && reply.ownerId != user?.id) {
+                  return Container();
+                }
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   decoration: BoxDecoration(
@@ -1219,7 +1229,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         right: 8,
                         child: _StatusBadge(status: reply.status),
                       ),
-                      if (user != null && user.id == reply.ownerId)
+                      if (user != null && user.id == reply.ownerId && item.status == 'available')
                         Positioned(
                           bottom: 8,
                           right: 8,
@@ -1471,16 +1481,17 @@ class _StatusBadge extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'available':
+      case 'accepted':
         color = Colors.green;
         break;
       case 'dropped':
+      case 'rejected':
         color = Colors.red;
         break;
       case 'reserved':
+      case 'pending':
         color = Colors.orange;
         break;
-      case 'accepted':
-      case 'pending':
       default:
         color = Colors.blue;
     }

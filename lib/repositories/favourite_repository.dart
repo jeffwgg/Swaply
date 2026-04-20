@@ -47,7 +47,16 @@ class FavouriteRepository {
     }
   }
 
-  /// Get all favourites for a user
+  Future<int> getUserFavouriteCount(String userId) async {
+    final response = await _supabase
+        .from('favourites')
+        .select('item_id')
+        .eq('user_id', userId)
+        .count(CountOption.exact);
+
+    return response.count;
+  }
+
   Future<Set<int>> getUserFavouriteItemIds(String userId) async {
     final response = await _supabase
         .from('favourites')
