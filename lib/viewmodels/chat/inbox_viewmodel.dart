@@ -200,9 +200,17 @@ class InboxViewModel extends ChangeNotifier {
       return _cachedCurrentUserId;
     }
 
-    final user = await _usersRepository.getById(authUserId);
     _cachedAuthUserId = authUserId;
-    _cachedCurrentUserId = user?.id;
+
+    try {
+      final user = await _usersRepository.getById(authUserId);
+      // Fallback to auth UUID when users profile row is missing so inbox/AI can still load.
+      _cachedCurrentUserId = user?.id ?? authUserId;
+    } catch (_) {
+      // If users query fails (e.g. temporary schema mismatch), continue with auth UUID.
+      _cachedCurrentUserId = authUserId;
+    }
+
     return _cachedCurrentUserId;
   }
 

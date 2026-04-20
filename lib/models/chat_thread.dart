@@ -11,6 +11,7 @@ class ChatThread {
   final int? itemId;
   final String? itemTitle;
   final String? itemOwnerId;
+  final List<String> itemImageUrls;
   final String? lastMessage;
   final int? pinnedMessageId;
   final DateTime? pinnedAt;
@@ -27,6 +28,7 @@ class ChatThread {
     this.itemId,
     this.itemTitle,
     this.itemOwnerId,
+    this.itemImageUrls = const [],
     this.lastMessage,
     this.pinnedMessageId,
     this.pinnedAt,
@@ -52,6 +54,22 @@ class ChatThread {
     final user1 = parseNestedMap(map['user1']);
     final user2 = parseNestedMap(map['user2']);
     final item = parseNestedMap(map['item']);
+    final rawItemImageUrls = item == null ? null : item['image_urls'];
+    final rawItemImageUrl = item == null ? null : item['image_url'];
+
+    List<String> parseItemImageUrls() {
+      if (rawItemImageUrls is List) {
+        return rawItemImageUrls
+            .where((value) => value != null)
+            .map((value) => value.toString())
+            .where((value) => value.trim().isNotEmpty)
+            .toList();
+      }
+      if (rawItemImageUrl is String && rawItemImageUrl.trim().isNotEmpty) {
+        return [rawItemImageUrl.trim()];
+      }
+      return const [];
+    }
 
     return ChatThread(
       id: parseInt(map['id'], fieldName: 'chats.id'),
@@ -78,10 +96,14 @@ class ChatThread {
       itemId: parseNullableInt(map['item_id'], fieldName: 'chats.item_id'),
       itemTitle: item == null
           ? null
-          : parseNullableString(item['name'], fieldName: 'items.name'),
+          : parseNullableString(
+            item['name'] ?? item['title'],
+            fieldName: 'items.name_or_title',
+          ),
       itemOwnerId: item == null
           ? null
           : parseNullableString(item['owner_id'], fieldName: 'items.owner_id'),
+        itemImageUrls: parseItemImageUrls(),
       lastMessage: parseNullableString(
         map['last_message'],
         fieldName: 'chats.last_message',

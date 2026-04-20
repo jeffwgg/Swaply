@@ -45,14 +45,10 @@ dependencies:
   record: ^6.1.2
   just_audio: ^0.10.5
   path: ^1.9.1
+  flutter_local_notifications: ^17.2.4
+  google_maps_flutter: ^2.17.0
   intl: ^0.20.2
   geocoding: ^4.0.0
-  flutter_map: ^8.3.0
-  latlong2: ^0.9.0
-  http: ^1.2.0
-  location: ^8.0.1
-  permission_handler: ^12.0.1
-  sqflite: ^2.4.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
