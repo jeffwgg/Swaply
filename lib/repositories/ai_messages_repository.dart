@@ -58,6 +58,29 @@ class AiMessagesRepository {
 
   Future<void> ensureConversationInitialized({String? welcomeMessage}) async {
     final userId = _requireAuthUserId();
+    final effectiveWelcomeMessage =
+      (welcomeMessage ?? _defaultWelcomeMessage).trim();
+
+    // Cleanup old auto-pinned default welcome message from previous app versions.
+    final defaultWelcomeRows = await _supabase
+      .from('ai_messages')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_ai', true)
+      .eq('content', effectiveWelcomeMessage);
+
+    final defaultWelcomeIds = (defaultWelcomeRows as List<dynamic>)
+      .map((row) => row is Map<String, dynamic> ? row['id'] : null)
+      .whereType<int>()
+      .toList();
+
+    if (defaultWelcomeIds.isNotEmpty) {
+      await _supabase
+        .from('ai_message_pins')
+        .delete()
+        .eq('user_id', userId)
+        .inFilter('message_id', defaultWelcomeIds);
+    }
 
     final existing = await _supabase
         .from('ai_messages')
@@ -70,22 +93,14 @@ class AiMessagesRepository {
       return;
     }
 
-    final inserted = await _supabase
-        .from('ai_messages')
-        .insert({
-          'user_id': userId,
-          'content': (welcomeMessage ?? _defaultWelcomeMessage).trim(),
-          'is_ai': true,
-        })
-        .select('id')
-        .single();
-
-    final messageId = inserted['id'] as int;
-
-    await _supabase.from('ai_message_pins').upsert({
+    await _supabase.from('ai_messages').insert({
       'user_id': userId,
-      'message_id': messageId,
-    }, onConflict: 'user_id,message_id');
+      'content': effectiveWelcomeMessage,
+      'is_ai': true,
+    });
+
+    // Keep a welcome message for an empty AI thread, but do not auto-pin it.
+    // Users can choose which messages to pin manually.
   }
 
   Future<void> editMessage({

@@ -405,12 +405,18 @@ class _ItemTabState extends State<ItemTab> {
             final item = items[index];
             return GestureDetector(
               onTap: () async {
+                ItemListing? repliedItem;
+                if (item.repliedTo != null) {
+                  repliedItem = await ItemsRepository().getById(
+                    item.repliedTo!,
+                  );
+                }
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
                       user: widget.user,
-                      item: item,
+                      item: repliedItem ?? item,
                     ),
                   ),
                 );
@@ -570,10 +576,7 @@ class _StatusBadge extends StatelessWidget {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 4,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: mini ? color.withOpacity(0.3) : color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(6),
