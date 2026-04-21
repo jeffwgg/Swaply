@@ -528,7 +528,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     height: 400,
                     child: ProfileTabs(
                       userId: profileUserId,
-                      isOwnProfile: isOwnProfile,
+                      // isOwnProfile: isOwnProfile,
                     ),
                   ),
 

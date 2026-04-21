@@ -58,14 +58,6 @@ class InboxViewModel extends ChangeNotifier {
   String? get currentUserId =>
       _chatService.currentUserId ?? _cachedCurrentUserId;
 
-  bool _isDisposed = false;
-
-  @override
-  void dispose() {
-    _isDisposed = true; // 2. 标记已销毁
-    super.dispose();
-  }
-
   @override
   void notifyListeners() {
     // 3. 重写此方法：只有在未销毁时才通知 UI
