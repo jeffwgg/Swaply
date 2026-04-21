@@ -5,6 +5,7 @@ class SystemNotificationItem {
   final DateTime createdAt;
   final bool isRead;
   final String type;
+  final Map<String, dynamic> data;
 
   const SystemNotificationItem({
     required this.id,
@@ -13,6 +14,7 @@ class SystemNotificationItem {
     required this.createdAt,
     this.isRead = false,
     this.type = 'general',
+    this.data = const <String, dynamic>{},
   });
 
   SystemNotificationItem copyWith({
@@ -22,6 +24,7 @@ class SystemNotificationItem {
     DateTime? createdAt,
     bool? isRead,
     String? type,
+    Map<String, dynamic>? data,
   }) {
     return SystemNotificationItem(
       id: id ?? this.id,
@@ -30,6 +33,7 @@ class SystemNotificationItem {
       createdAt: createdAt ?? this.createdAt,
       isRead: isRead ?? this.isRead,
       type: type ?? this.type,
+      data: data ?? this.data,
     );
   }
 
@@ -41,6 +45,7 @@ class SystemNotificationItem {
       'created_at': createdAt.toIso8601String(),
       'is_read': isRead,
       'type': type,
+      'data': data,
     };
   }
 
@@ -54,6 +59,25 @@ class SystemNotificationItem {
           DateTime.now(),
       isRead: map['is_read'] == true,
       type: (map['type'] ?? 'general').toString(),
+      data: _normalizeDataMap(map['data']),
     );
+  }
+
+  int? get itemId {
+    final raw = data['item_id'] ?? data['itemId'];
+    if (raw is int) {
+      return raw;
+    }
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  static Map<String, dynamic> _normalizeDataMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) {
+      return raw;
+    }
+    if (raw is Map) {
+      return raw.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return const <String, dynamic>{};
   }
 }

@@ -78,6 +78,7 @@ class LocalDbService {
         chat_id INTEGER NOT NULL,
         sender_id TEXT NOT NULL,
         content TEXT NOT NULL,
+        cached_media_path TEXT,
         read_at TEXT,
         edited_at TEXT,
         deleted_at TEXT,
@@ -89,6 +90,10 @@ class LocalDbService {
         sync_error TEXT
       )
     ''');
+
+    await db.execute('''
+      ALTER TABLE chat_messages_cache ADD COLUMN cached_media_path TEXT
+    ''').catchError((_) {});
 
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_chat_messages_cache_chat_created

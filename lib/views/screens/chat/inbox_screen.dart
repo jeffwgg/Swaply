@@ -13,13 +13,18 @@ import 'package:path/path.dart' as path_util;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../models/app_user.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/chat_pinned_message.dart';
 import '../../../models/chat_thread.dart';
 import '../../../models/ai_message.dart';
 import '../../../models/ai_pinned_message.dart';
+import '../../../repositories/items_repository.dart';
+import '../../../repositories/users_repository.dart';
+import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
+import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -62,6 +67,7 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _isRecordingVoice = false;
   DateTime? _voiceRecordingStartAt;
   bool _hasAttemptedAiConversationInit = false;
+  int _unreadNotificationCount = 0;
 
   String? get _currentUserId => _inboxViewModel.currentUserId;
 
@@ -75,11 +81,7 @@ class _InboxScreenState extends State<InboxScreen> {
       );
     }
     _loadInbox();
-    try {
-      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
-        onChange: _loadInbox,
-      );
-    } catch (_) {}
+    _ensureInboxRealtimeSubscription();
   }
 
   @override
@@ -97,6 +99,10 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   void _handleUserChanged() {
+    if (_inboxSubscription != null) {
+      unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
+      _inboxSubscription = null;
+    }
     _messagesSubscription?.cancel();
     _messagesSubscription = null;
     _aiMessagesSubscription?.cancel();
@@ -117,11 +123,24 @@ class _InboxScreenState extends State<InboxScreen> {
     });
     _composerController.clear();
     _loadInbox();
+    _ensureInboxRealtimeSubscription();
+  }
+
+  void _ensureInboxRealtimeSubscription() {
+    if (_inboxSubscription != null) {
+      return;
+    }
+    try {
+      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
+        onChange: _loadInbox,
+      );
+    } catch (_) {}
   }
 
   Future<void> _loadInbox() async {
     try {
       final threads = await _inboxViewModel.loadInbox();
+      _ensureInboxRealtimeSubscription();
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
         final itemTitle = (t.itemTitle ?? '').trim();
@@ -277,10 +296,54 @@ class _InboxScreenState extends State<InboxScreen> {
     await _saveConversationPrefs();
   }
 
-  void _openNotificationsScreen() {
-    Navigator.of(
+  Future<void> _openNotificationsScreen() async {
+    await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    await _refreshUnreadNotificationCount();
+  }
+
+  Future<void> _openConversationItemDetails(_Conversation conversation) async {
+    final itemId = conversation.chatThread?.itemId;
+    if (itemId == null) {
+      return;
+    }
+
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
+  Future<void> _refreshUnreadNotificationCount() async {
+    try {
+      final count = await NotificationService.instance.unreadCount();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _unreadNotificationCount = count;
+      });
+    } catch (_) {}
   }
 
   Future<void> _togglePin(int id) async {
@@ -541,6 +604,22 @@ class _InboxScreenState extends State<InboxScreen> {
                                 final h = history[index];
                                 return InkWell(
                                   onTap: () {
+                                    final historyMatches = _buildSearchMatches(
+                                      h,
+                                    );
+                                    if (historyMatches.isNotEmpty) {
+                                      Navigator.pop(
+                                        context,
+                                        _SearchDialogResult(
+                                          query: h,
+                                          conversationId:
+                                              historyMatches.first
+                                                  .conversationId,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
                                     controller.text = h;
                                     controller.selection =
                                         TextSelection.fromPosition(
@@ -710,7 +789,7 @@ class _InboxScreenState extends State<InboxScreen> {
     if (result.conversationId != null) {
       _selectConversationById(
         result.conversationId!,
-        openMobile: focusConversationId != null,
+        openMobile: true,
       );
     } else if (focusConversationId != null) {
       _selectConversationById(focusConversationId, openMobile: true);
@@ -1090,12 +1169,17 @@ class _InboxScreenState extends State<InboxScreen> {
           ? (map['duration_seconds'] as num).toInt()
           : int.tryParse(map['duration_seconds']?.toString() ?? '');
       final caption = map['caption']?.toString().trim();
+      final itemIdRaw = map['item_id'];
+      final itemId = itemIdRaw is num
+          ? itemIdRaw.toInt()
+          : int.tryParse(itemIdRaw?.toString() ?? '');
       final media = _MessageMedia(
         type: type,
         url: urlValue,
         fileName: name == null || name.isEmpty ? null : name,
         durationSeconds: durationSeconds,
         caption: caption == null || caption.isEmpty ? null : caption,
+        itemId: itemId,
       );
       return _ParsedMessageBody.media(media);
     } catch (_) {
@@ -1111,6 +1195,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (media.durationSeconds != null)
         'duration_seconds': media.durationSeconds,
       if (media.caption != null) 'caption': media.caption,
+      if (media.itemId != null) 'item_id': media.itemId,
     };
     return '$_mediaPrefix${jsonEncode(payload)}';
   }
@@ -1973,6 +2058,7 @@ class _InboxScreenState extends State<InboxScreen> {
                       searchQuery: _searchQuery,
                       onSearchTap: _openSearchDialog,
                       onNotificationsTap: _openNotificationsScreen,
+                      unreadNotificationCount: _unreadNotificationCount,
                       pinnedChats: _pinnedChats,
                       manuallyUnreadChats: _manuallyUnreadChats,
                       onPinToggled: _togglePin,
@@ -2019,6 +2105,8 @@ class _InboxScreenState extends State<InboxScreen> {
                             ),
                             onOpenConversationMenu: () =>
                                 _showConversationActions(selected),
+                            onOpenItemDetails: () =>
+                              _openConversationItemDetails(selected),
                           )
                         : const Center(
                             child: Text(
@@ -2063,6 +2151,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 isConversationPinned: _pinnedChats.contains(selected.id),
                 onOpenConversationMenu: () =>
                     _showConversationActions(selected),
+                onOpenItemDetails: () => _openConversationItemDetails(selected),
               );
             }
 
@@ -2077,6 +2166,7 @@ class _InboxScreenState extends State<InboxScreen> {
               searchQuery: _searchQuery,
               onSearchTap: _openSearchDialog,
               onNotificationsTap: _openNotificationsScreen,
+              unreadNotificationCount: _unreadNotificationCount,
               pinnedChats: _pinnedChats,
               manuallyUnreadChats: _manuallyUnreadChats,
               onPinToggled: _togglePin,
@@ -2099,7 +2189,8 @@ class _InboxPanel extends StatelessWidget {
   final ValueChanged<int> onConversationSelected;
   final String searchQuery;
   final VoidCallback onSearchTap;
-  final VoidCallback onNotificationsTap;
+  final Future<void> Function() onNotificationsTap;
+  final int unreadNotificationCount;
   final Set<int> pinnedChats;
   final Set<int> manuallyUnreadChats;
   final ValueChanged<int> onPinToggled;
@@ -2116,6 +2207,7 @@ class _InboxPanel extends StatelessWidget {
     required this.searchQuery,
     required this.onSearchTap,
     required this.onNotificationsTap,
+    required this.unreadNotificationCount,
     required this.pinnedChats,
     required this.manuallyUnreadChats,
     required this.onPinToggled,
@@ -2167,11 +2259,52 @@ class _InboxPanel extends StatelessWidget {
                     compact: true,
                   ),
                   const SizedBox(width: 8),
-                  _HeaderIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    onTap: onNotificationsTap,
-                    filled: true,
-                    compact: true,
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      _HeaderIconButton(
+                        icon: Icons.notifications_none_rounded,
+                        onTap: () {
+                          onNotificationsTap();
+                        },
+                        filled: true,
+                        compact: true,
+                      ),
+                      if (unreadNotificationCount > 0)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE53935),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Text(
+                              unreadNotificationCount > 99
+                                  ? '99+'
+                                  : unreadNotificationCount.toString(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -2235,6 +2368,7 @@ class _InboxPanel extends StatelessWidget {
                               (m) => !m.isMine && m.readAt == null,
                             ) ||
                             manuallyUnreadChats.contains(conversation.id);
+                        final showUnreadDot = hasUnread && index != selectedIndex;
                         return GestureDetector(
                           onLongPress: () =>
                               onConversationLongPress(conversation),
@@ -2394,7 +2528,7 @@ class _InboxPanel extends StatelessWidget {
                                       children: [
                                         if (conversation.item != null)
                                           _ItemThumb(item: conversation.item!),
-                                        if (hasUnread) ...[
+                                        if (showUnreadDot) ...[
                                           const SizedBox(height: 10),
                                           Container(
                                             width: 16,
@@ -2445,6 +2579,7 @@ class _ChatPanel extends StatefulWidget {
   final bool isRecordingVoice;
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
+  final VoidCallback onOpenItemDetails;
 
   const _ChatPanel({
     required this.conversation,
@@ -2467,6 +2602,7 @@ class _ChatPanel extends StatefulWidget {
     required this.isRecordingVoice,
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
+    required this.onOpenItemDetails,
   });
 
   @override
@@ -2593,6 +2729,102 @@ class _ChatPanelState extends State<_ChatPanel> {
     _scrollController.jumpTo(target);
   }
 
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _dayLabel(DateTime date) {
+    final local = date.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDay = DateTime(local.year, local.month, local.day);
+    final dayDiff = today.difference(messageDay).inDays;
+
+    if (dayDiff == 0) {
+      return 'TODAY';
+    }
+    if (dayDiff == 1) {
+      return 'YESTERDAY';
+    }
+
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    return '${months[local.month - 1]} ${local.day}, ${local.year}';
+  }
+
+  List<Widget> _buildTimelineWidgets() {
+    final widgets = <Widget>[];
+    DateTime? lastDay;
+
+    for (var index = 0; index < widget.conversation.messages.length; index++) {
+      final message = widget.conversation.messages[index];
+      final messageDay = message.createdAt.toLocal();
+
+      if (lastDay == null || !_isSameDay(lastDay, messageDay)) {
+        widgets.add(
+          Text(
+            _dayLabel(messageDay),
+            style: const TextStyle(
+              color: Color(0xFFC18EFF),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+        );
+        widgets.add(const SizedBox(height: 22));
+        lastDay = messageDay;
+      }
+
+      final showOffer =
+          widget.conversation.offer != null &&
+          index == 1 &&
+          widget.conversation.id != -1;
+
+      widgets.add(
+        _MessageBubble(
+          message: message,
+          onLongPress: () => widget.onLongPressMessage(message),
+        ),
+      );
+
+      if (showOffer) {
+        widgets.add(const SizedBox(height: 18));
+        widgets.add(_OfferCard(offer: widget.conversation.offer!));
+        widgets.add(const SizedBox(height: 18));
+      }
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(
+        const Text(
+          'TODAY',
+          style: TextStyle(
+            color: Color(0xFFC18EFF),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(height: 22));
+    }
+
+    return widgets;
+  }
+
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
@@ -2636,27 +2868,6 @@ class _ChatPanelState extends State<_ChatPanel> {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Container(
-                            width: 9,
-                            height: 9,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF32C965),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            widget.conversation.status,
-                            style: const TextStyle(
-                              color: Color(0xFF925AFF),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
                       if (widget.conversation.item != null) ...[
                         const SizedBox(height: 6),
                         Text(
@@ -2674,16 +2885,20 @@ class _ChatPanelState extends State<_ChatPanel> {
                   ),
                 ),
                 if (widget.conversation.item != null)
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8F4FF),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE6D9FF)),
-                    ),
-                    child: _ItemThumb(
-                      item: widget.conversation.item!,
-                      size: 48,
+                  InkWell(
+                    onTap: widget.onOpenItemDetails,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8F4FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6D9FF)),
+                      ),
+                      child: _ItemThumb(
+                        item: widget.conversation.item!,
+                        size: 48,
+                      ),
                     ),
                   ),
                 const SizedBox(width: 8),
@@ -2745,39 +2960,7 @@ class _ChatPanelState extends State<_ChatPanel> {
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
               child: Column(
-                children: [
-                  const Text(
-                    'TODAY',
-                    style: TextStyle(
-                      color: Color(0xFFC18EFF),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  ...widget.conversation.messages.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final message = entry.value;
-                    final showOffer =
-                        widget.conversation.offer != null &&
-                        index == 1 &&
-                        widget.conversation.id != -1;
-                    return Column(
-                      children: [
-                        _MessageBubble(
-                          message: message,
-                          onLongPress: () => widget.onLongPressMessage(message),
-                        ),
-                        if (showOffer) ...[
-                          const SizedBox(height: 18),
-                          _OfferCard(offer: widget.conversation.offer!),
-                          const SizedBox(height: 18),
-                        ],
-                      ],
-                    );
-                  }),
-                ],
+                children: _buildTimelineWidgets(),
               ),
             ),
           ),
@@ -3142,6 +3325,37 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
     } catch (_) {}
   }
+  
+  Future<void> _openMediaItemDetails(_MessageMedia media) async {
+    final itemId = media.itemId;
+    if (itemId == null) {
+      return;
+    }
+  
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -3155,15 +3369,17 @@ class _MessageBubbleState extends State<_MessageBubble> {
     final isImageOnly = message.media?.type == _MessageMediaType.image;
     final bubble = InkWell(
       onLongPress: widget.onLongPress,
-      borderRadius: BorderRadius.circular(isImageOnly ? 14 : 22),
+      borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
         padding: isImageOnly
-            ? EdgeInsets.zero
+            ? const EdgeInsets.all(8)
             : const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         decoration: BoxDecoration(
           color: isImageOnly
-              ? Colors.transparent
+              ? (message.isMine
+                    ? const Color(0xFFF0E7FF)
+                    : const Color(0xFFFAF8FF))
               : (message.isMine ? null : Colors.white),
           gradient: isImageOnly
               ? null
@@ -3172,9 +3388,18 @@ class _MessageBubbleState extends State<_MessageBubble> {
                         colors: [Color(0xFF9B68FF), Color(0xFF7D41FF)],
                       )
                     : null),
-          borderRadius: BorderRadius.circular(isImageOnly ? 14 : 22),
+          border: isImageOnly
+              ? Border.all(color: const Color(0xFFC4A1FF), width: 1.4)
+              : null,
+          borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
           boxShadow: isImageOnly
-              ? const []
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF7A54FF).withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
               : [
                   BoxShadow(
                     color: const Color(0xFF161A2B).withValues(alpha: 0.05),
@@ -3228,16 +3453,40 @@ class _MessageBubbleState extends State<_MessageBubble> {
               ),
             if (message.media?.caption != null) ...[
               const SizedBox(height: 10),
-              Text(
-                message.media!.caption!,
-                style: TextStyle(
-                  color: message.isMine
-                      ? Colors.white
-                      : const Color(0xFF24314D),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: isImageOnly
+                      ? const Color(0xFFEFE5FF)
+                      : (message.isMine
+                            ? Colors.white.withValues(alpha: 0.16)
+                            : const Color(0xFFF4EEFF)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: isImageOnly
+                      ? Border.all(color: const Color(0xFFCCB0FF))
+                      : null,
+                ),
+                child: Text(
+                  message.media!.caption!,
+                  style: TextStyle(
+                    color: isImageOnly
+                        ? const Color(0xFF42206E)
+                        : (message.isMine
+                              ? Colors.white
+                              : const Color(0xFF24314D)),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+            ],
+            if (isImageOnly && message.media?.itemId != null) ...[
+              const SizedBox(height: 10),
+              _buildItemActionButtons(),
             ],
           ],
         ),
@@ -3288,16 +3537,61 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Widget _buildMediaWidget(_MessageMedia media) {
     switch (media.type) {
       case _MessageMediaType.image:
-        return ClipRRect(
+        return InkWell(
+          onTap: media.itemId == null ? null : () => _openMediaItemDetails(media),
           borderRadius: BorderRadius.circular(14),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 280, maxHeight: 280),
-            child: Image.network(
-              media.url,
-              fit: BoxFit.cover,
-              errorBuilder: (_, error, stackTrace) =>
-                  _mediaErrorCard('Photo unavailable'),
-            ),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 280,
+                    maxHeight: 280,
+                  ),
+                  child: Image.network(
+                    media.url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, error, stackTrace) =>
+                        _mediaErrorCard('Photo unavailable'),
+                  ),
+                ),
+              ),
+              if (media.itemId != null)
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.65),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.open_in_new_rounded,
+                          color: Colors.white,
+                          size: 12,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'View item',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       case _MessageMediaType.voice:
@@ -3344,6 +3638,54 @@ class _MessageBubbleState extends State<_MessageBubble> {
       case _MessageMediaType.document:
         return _mediaErrorCard('Document attachment');
     }
+  }
+
+  Widget _buildItemActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF6F45FF),
+              side: const BorderSide(color: Color(0xFFB895FF), width: 1.4),
+              backgroundColor: const Color(0xFFF8F3FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFF7A54FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _mediaErrorCard(String text) {
@@ -3755,6 +4097,7 @@ class _MessageMedia {
   final String? fileName;
   final int? durationSeconds;
   final String? caption;
+  final int? itemId;
 
   const _MessageMedia({
     required this.type,
@@ -3762,6 +4105,7 @@ class _MessageMedia {
     this.fileName,
     this.durationSeconds,
     this.caption,
+    this.itemId,
   });
 
   String get defaultLabel {

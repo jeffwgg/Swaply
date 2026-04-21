@@ -11,6 +11,7 @@ import 'package:swaply/models/item_draft.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
 import 'package:swaply/services/supabase_service.dart';
+import 'package:swaply/services/notification_service.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -697,6 +698,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       } else {
         final lastId = await ItemsRepository().getLastId();
         int nextIdNum = (lastId ?? 0) + 1;
+        ItemListing? repliedItem;
+        if (widget.repliedTo != null) {
+          repliedItem = await ItemsRepository().getById(widget.repliedTo!);
+        }
 
         final newItem = ItemListing(
           id: nextIdNum,
@@ -717,6 +722,21 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         );
 
         await ItemsRepository().create(newItem);
+
+        if (widget.repliedTo != null && repliedItem != null) {
+          await NotificationService.instance.sendNotificationToUser(
+            recipientId: repliedItem.ownerId,
+            title: 'New Trade Offer',
+            body:
+                '${widget.user.username} offered "${newItem.name}" for your item "${repliedItem.name}". Message: ${newItem.description}',
+            type: 'trade',
+            data: {
+              'action': 'open_item',
+              'item_id': repliedItem.id,
+              'offered_item_id': newItem.id,
+            },
+          );
+        }
       }
 
       if (mounted) {
