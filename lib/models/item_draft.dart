@@ -1,71 +1,78 @@
 import '../core/utils/parsing.dart';
 
-class ItemListing {
-  final int id;
-  final String name;
-  final String description;
-  final double? price;
-  final String listingType;
-  final String ownerId;
-  final String status;
-  final String category;
-  final List<String> imageUrls;
-  final String? preference;
-  final int? repliedTo;
+class ItemDraft {
+  int id;
+  String? name;
+  String? description;
+  double? price;
+  String? listingType;
+  String ownerId;
+  String? category;
+  List<String>? imageUrls;
+  String? preference;
+  int? repliedTo;
   final DateTime createdAt;
-  final String? address;
-  final double? latitude;
-  final double? longitude;
-  bool isFavorite; // not from db
+  String? address;
+  double? latitude;
+  double? longitude;
+  bool isPendingSubmit;
 
-  ItemListing({
+  ItemDraft({
     required this.id,
-    required this.name,
-    required this.description,
-    required this.price,
-    required this.listingType,
+    this.name,
+    this.description,
+    this.price,
+    this.listingType,
     required this.ownerId,
-    required this.status,
-    required this.category,
-    required this.imageUrls,
-    required this.preference,
+    this.category,
+    this.imageUrls,
+    this.preference,
     this.repliedTo,
     required this.createdAt,
     this.address,
     this.latitude,
     this.longitude,
-    this.isFavorite = false
+    required this.isPendingSubmit,
   });
 
-  factory ItemListing.fromMap(Map<String, dynamic> map) {
-    return ItemListing(
+  factory ItemDraft.fromMap(Map<String, dynamic> map) {
+    return ItemDraft(
       id: parseInt(map['id'], fieldName: 'items.id'),
-      name: parseString(map['name'], fieldName: 'items.name'),
-      description: parseString(
+      name: parseNullableString(map['name'], fieldName: 'items.name'),
+      description: parseNullableString(
         map['description'],
         fieldName: 'items.description',
       ),
       price: parseNullableDouble(map['price'], fieldName: 'items.price'),
-      listingType: parseString(
+      listingType: parseNullableString(
         map['listing_type'],
         fieldName: 'items.listing_type',
       ),
       ownerId: parseString(map['owner_id'], fieldName: 'items.owner_id'),
-      status: parseString(map['status'], fieldName: 'items.status'),
-      category: parseString(map['category'], fieldName: 'items.category'),
+      category: parseNullableString(map['category'], fieldName: 'items.category'),
       imageUrls: List<String>.from(map['image_urls'] ?? []),
       preference: parseNullableString(
         map['preference'],
         fieldName: 'items.preference',
       ),
-      repliedTo: parseNullableInt(map['replied_to'], fieldName: 'items.replied_to'),
+      repliedTo: parseNullableInt(
+        map['replied_to'],
+        fieldName: 'items.replied_to',
+      ),
       createdAt: parseDateTime(
         map['created_at'],
         fieldName: 'items.created_at',
       ),
       address: parseNullableString(map['address'], fieldName: 'items.address'),
-      latitude: parseNullableDouble(map['latitude'], fieldName: 'items.latitude'),
-      longitude: parseNullableDouble(map['longitude'], fieldName: 'items.longitude'),
+      latitude: parseNullableDouble(
+        map['latitude'],
+        fieldName: 'items.latitude',
+      ),
+      longitude: parseNullableDouble(
+        map['longitude'],
+        fieldName: 'items.longitude',
+      ),
+      isPendingSubmit: (map['is_pending_upload'] ?? 0) == 1,
     );
   }
 
@@ -76,7 +83,6 @@ class ItemListing {
       'price': price,
       'listing_type': listingType,
       'owner_id': ownerId,
-      'status': status,
       'category': category,
       'image_urls': imageUrls,
       'preference': preference,
@@ -95,7 +101,6 @@ class ItemListing {
       'price': price,
       'listing_type': listingType,
       'owner_id': ownerId,
-      'status': status,
       'category': category,
       'image_urls': imageUrls,
       'preference': preference,
@@ -104,6 +109,7 @@ class ItemListing {
       'address': address,
       'latitude': latitude,
       'longitude': longitude,
+      'is_pending_upload': isPendingSubmit ? 1 : 0,
     };
   }
 }
