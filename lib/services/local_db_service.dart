@@ -25,9 +25,14 @@ class LocalDbService {
 
     final db = await openDatabase(
       fullPath,
+      version: 1,
+      onCreate: (db, version) async {
+        await _createSchema(db);
+      },
+      onOpen: (db) async {
+        await _createSchema(db);
+      },
     );
-
-    await _createSchema(db);
     _db = db;
 
     return _db!;
@@ -114,5 +119,101 @@ class LocalDbService {
       CREATE INDEX IF NOT EXISTS idx_pending_outgoing_messages_chat
       ON pending_outgoing_messages(chat_id, created_at)
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS item_draft (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT,
+        description TEXT,
+        price REAL,
+        listing_type TEXT,
+        owner_id TEXT,
+        category TEXT,
+        image_urls TEXT,
+        preference TEXT,
+        replied_to INTEGER,
+        address TEXT,
+        latitude REAL,
+        longitude REAL,
+  
+        is_pending_upload INTEGER DEFAULT 0,
+        retry_count INTEGER DEFAULT 0,
+        sync_error TEXT,
+      
+        updated_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+  ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS items_cache (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price REAL,
+      listing_type TEXT,
+      owner_id TEXT,
+      status TEXT,
+      category TEXT,
+      image_urls TEXT,
+      preference TEXT,
+      replied_to INTEGER,
+      address TEXT,
+      latitude REAL,
+      longitude REAL,
+      created_at TEXT,
+      last_synced_at TEXT,
+      cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+  ''');
+
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS favourites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      item_id INTEGER NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      is_synced INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, item_id)
+    )
+  ''');
+
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS user_items (
+      id INTEGER PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      price REAL,
+      listing_type TEXT,
+      owner_id TEXT,
+      category TEXT,
+      image_urls TEXT,
+      preference TEXT,
+      status TEXT,
+      replied_to INTEGER,
+      address TEXT,
+      latitude REAL,
+      longitude REAL,
+      is_trade_offer INTEGER DEFAULT 0,
+      created_at TEXT,
+      is_synced INTEGER DEFAULT 1,
+      is_deleted INTEGER DEFAULT 0,
+      last_synced_at TEXT
+    )
+  ''');
+
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS offline_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      retry_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      last_attempt_at TEXT
+    )
+  ''');
   }
 }

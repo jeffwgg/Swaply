@@ -1,6 +1,6 @@
 import 'dart:developer';
+import 'dart:io';
 import 'dart:convert';
-
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -14,6 +14,7 @@ import '../../../models/meetup_address_option.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../services/chat_service.dart';
+import '../../../services/item_service.dart';
 import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
 import '../checkout/checkout_screen.dart';
@@ -38,7 +39,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   int _currentImageIndex = 0;
   bool _isFollowing = false;
   bool _isFavourite = false;
-  int _favCount = 0;
+  int? _favCount;
   final ChatService _chatService = ChatService();
 
   @override
@@ -83,11 +84,19 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _fetchFavouriteCount() async {
-    final count = await FavouriteRepository().getFavouriteCount(widget.item.id);
-    if (mounted) {
-      setState(() {
-        _favCount = count;
-      });
+    try {
+      final count = await FavouriteRepository().getFavouriteCount(widget.item.id);
+      if (mounted) {
+        setState(() {
+          _favCount = count;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _favCount = null;
+        });
+      }
     }
   }
 
@@ -169,8 +178,18 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             const Icon(Icons.broken_image, size: 50),
       );
     }
-    return Image.asset(
-      url,
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.file(
+      File(url),
       width: width,
       height: height,
       fit: fit,
@@ -188,17 +207,37 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       return;
     }
 
+    final previousState = _isFavourite;
+    final previousCount = _favCount;
+
+    setState(() {
+      _isFavourite = !previousState;
+      widget.item.isFavorite = _isFavourite;
+      if (previousCount != null) {
+        _favCount = _isFavourite ? previousCount + 1 : previousCount - 1;
+      }
+    });
+
     try {
-      final newState = await FavouriteRepository().toggleFavourite(
-        widget.user!.id,
+      final newState = await ItemService().toggleFavourite(
         widget.item.id,
+        widget.user!.id,
       );
+      if (!mounted) return;
       setState(() {
-        widget.item.isFavorite = newState;
         _isFavourite = newState;
-        _isFavourite ? _favCount++ : _favCount--;
+        widget.item.isFavorite = newState;
+        if (previousCount != null) {
+          _favCount = newState ? previousCount + 1 : previousCount - 1;
+        }
       });
     } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isFavourite = previousState;
+        widget.item.isFavorite = previousState;
+        _favCount = previousCount;
+      });
       log("Favourite error: $e");
     }
   }
@@ -864,15 +903,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$_favCount',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF5B21B6),
+                      if (_favCount != null) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          '$_favCount',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF5B21B6),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ],
