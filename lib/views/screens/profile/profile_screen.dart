@@ -1,5 +1,3 @@
-// ignore_for_file: unused_element
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/views/screens/profile/profile_tabs.dart';
@@ -89,7 +87,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // --- 1. (Guest View) ---
   Widget _buildGuestView(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F3F8),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -151,7 +148,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // --- 1.5. (Unverified Email View) ---
   Widget _buildUnverifiedEmailView(BuildContext context, User user) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F3F8),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -292,47 +288,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final bio = profile.bio ?? 'No bio yet';
 
           return Scaffold(
-          backgroundColor: const Color(0xFFF4F3F8),
           body: SafeArea(
             child: SingleChildScrollView(
               child: Column(
                 children: [
                   // 🔝 TOP BAR
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Show back button only when viewing another user's profile
-                        if (!isOwnProfile)
-                          GestureDetector(
-                            onTap: () {
-                              if (Navigator.canPop(context)) {
-                                Navigator.pop(context);
-                              }
-                            },
-                            child: const Icon(Icons.arrow_back_ios_new),
-                          )
-                        else
-                          const SizedBox(width: 40),
-                        Text(
-                          fullName,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        // ✅ Swaply 左边，跟 home screen 一样
+                        const Text(
+                          'Swaply',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF5A2CA0),
+                          ),
                         ),
+                        // ✅ 右边：自己显示设置，别人显示返回
                         if (isOwnProfile)
                           IconButton(
-                            icon: const Icon(Icons.settings_outlined),
+                            icon: const Icon(Icons.settings_outlined, color: Color(0xFF5A2CA0)),
                             onPressed: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const SettingsScreen(),
-                                ),
+                                MaterialPageRoute(builder: (_) => const SettingsScreen()),
                               );
                             },
                           )
                         else
-                          const SizedBox(width: 40),
+                          GestureDetector(
+                            onTap: () {
+                              if (Navigator.canPop(context)) Navigator.pop(context);
+                            },
+                            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF5A2CA0)),
+                          ),
                       ],
                     ),
                   ),

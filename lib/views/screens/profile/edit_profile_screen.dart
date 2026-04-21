@@ -300,7 +300,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     // 🔄 Loading state
     if (isLoading) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF4F3F8),
         appBar: AppBar(
           title: const Text("Edit Profile"),
           backgroundColor: Colors.transparent,

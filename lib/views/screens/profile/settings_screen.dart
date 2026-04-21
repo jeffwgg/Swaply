@@ -20,7 +20,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F3F8),
       appBar: AppBar(
         title: const Text("Settings"),
         backgroundColor: Colors.transparent,
