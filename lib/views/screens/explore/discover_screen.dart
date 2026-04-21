@@ -1,13 +1,13 @@
 import 'dart:developer';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
-import 'package:swaply/repositories/items_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
 import '../../../models/app_user.dart';
-import '../../../repositories/favourite_repository.dart';
+import '../../../services/item_service.dart';
 import '../item/item_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
@@ -186,7 +186,7 @@ class _NestedTabBarState extends State<NestedTabBar>
   }
 
   void _loadItems() {
-    _futureItems = ItemsRepository().getDiscoverList(
+    _futureItems = ItemService().loadItems(
       userId: widget.user?.id,
       category: widget.outerTab,
       listingType: _types[_tabController.index] == 'For Sale'
@@ -307,7 +307,7 @@ class _NestedTabBarState extends State<NestedTabBar>
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: 0.82,
+                      childAspectRatio: 0.75,
                     ),
                     itemBuilder: (context, index) =>
                         ItemCard(
@@ -535,8 +535,17 @@ class _ItemCardState extends State<ItemCard> {
         errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
       );
     }
-    return Image.asset(
-      url,
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        height: 120,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.file(
+      File(url),
       height: 120,
       width: double.infinity,
       fit: BoxFit.cover,
@@ -553,18 +562,25 @@ class _ItemCardState extends State<ItemCard> {
       return;
     }
 
+    final previousState = widget.item.isFavorite;
+    setState(() {
+      widget.item.isFavorite = !previousState;
+    });
+
     try {
-      final repo = FavouriteRepository();
-
-      final newState = await repo.toggleFavourite(
-        widget.user!.id,
+      final newState = await ItemService().toggleFavourite(
         widget.item.id,
+        widget.user!.id,
       );
-
+      if (!mounted) return;
       setState(() {
         widget.item.isFavorite = newState;
       });
     } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        widget.item.isFavorite = previousState;
+      });
       log("Favourite error: $e");
     }
   }

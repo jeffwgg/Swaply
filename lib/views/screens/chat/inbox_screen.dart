@@ -13,12 +13,18 @@ import 'package:path/path.dart' as path_util;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../models/app_user.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/chat_pinned_message.dart';
 import '../../../models/chat_thread.dart';
 import '../../../models/ai_message.dart';
 import '../../../models/ai_pinned_message.dart';
+import '../../../repositories/items_repository.dart';
+import '../../../repositories/users_repository.dart';
+import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
+import '../../../views/screens/notifications/notifications_screen.dart';
+import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -32,6 +38,7 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> {
   static const _mediaPrefix = '[[media]]';
+  static const _ragItemsPrefix = '[[rag_items_json]]';
   static const _chatMediaBucket = 'chat-media';
 
   int _selectedFilter = 0;
@@ -39,7 +46,10 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _showMobileChat = false;
   bool _isLoading = true;
   String _searchQuery = '';
+  List<String> _recentSearchQueries = const [];
   Set<int> _pinnedChats = {};
+  Set<int> _manuallyUnreadChats = {};
+  Set<int> _hiddenChats = {};
 
   final InboxViewModel _inboxViewModel = InboxViewModel();
   dynamic _inboxSubscription;
@@ -58,24 +68,21 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _isRecordingVoice = false;
   DateTime? _voiceRecordingStartAt;
   bool _hasAttemptedAiConversationInit = false;
+  int _unreadNotificationCount = 0;
 
   String? get _currentUserId => _inboxViewModel.currentUserId;
 
   @override
   void initState() {
     super.initState();
-    _loadPinned();
+    _loadConversationPrefs();
     if (SupabaseService.isConfigured) {
       _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
         (_) => _handleUserChanged(),
       );
     }
     _loadInbox();
-    try {
-      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
-        onChange: _loadInbox,
-      );
-    } catch (_) {}
+    _ensureInboxRealtimeSubscription();
   }
 
   @override
@@ -93,6 +100,10 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   void _handleUserChanged() {
+    if (_inboxSubscription != null) {
+      unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
+      _inboxSubscription = null;
+    }
     _messagesSubscription?.cancel();
     _messagesSubscription = null;
     _aiMessagesSubscription?.cancel();
@@ -113,14 +124,37 @@ class _InboxScreenState extends State<InboxScreen> {
     });
     _composerController.clear();
     _loadInbox();
+    _ensureInboxRealtimeSubscription();
+  }
+
+  void _ensureInboxRealtimeSubscription() {
+    if (_inboxSubscription != null) {
+      return;
+    }
+    try {
+      _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
+        onChange: _loadInbox,
+      );
+    } catch (_) {}
   }
 
   Future<void> _loadInbox() async {
     try {
       final threads = await _inboxViewModel.loadInbox();
-      if (!mounted) return;
+      _ensureInboxRealtimeSubscription();
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
+        final itemTitle = (t.itemTitle ?? '').trim();
+        final itemPreview = itemTitle.isEmpty
+            ? null
+            : _ItemPreview(
+                title: itemTitle,
+                imageUrl: t.itemImageUrls.isNotEmpty
+                    ? t.itemImageUrls.first
+                    : null,
+                icon: Icons.inventory_2_rounded,
+                colors: const [Color(0xFFB58AFF), Color(0xFF7A54FF)],
+              );
         return _Conversation(
           id: t.id,
           chatThread: t,
@@ -136,7 +170,7 @@ class _InboxScreenState extends State<InboxScreen> {
                   _parseReplyMetadata(t.lastMessage!).messageText,
                 ).previewText,
           avatarColors: const [Color(0xFFE7DFFF), Color(0xFFC18EFF)],
-          item: null,
+          item: itemPreview,
           messages: _messagesByChat[t.id] ?? const [],
         );
       }).toList();
@@ -213,13 +247,107 @@ class _InboxScreenState extends State<InboxScreen> {
     final prefs = await SharedPreferences.getInstance();
     final pinnedRaw = prefs.getStringList('pinned_chats') ?? [];
     final pinned = pinnedRaw.map(int.tryParse).whereType<int>().toSet();
+    final unreadRaw = prefs.getStringList('manual_unread_chats') ?? [];
+    final hiddenRaw = prefs.getStringList('hidden_chats') ?? [];
+    final searchRaw = prefs.getStringList('chat_search_history') ?? [];
     setState(() {
       _pinnedChats = pinned;
+      _manuallyUnreadChats = unreadRaw
+          .map(int.tryParse)
+          .whereType<int>()
+          .toSet();
+      _hiddenChats = hiddenRaw.map(int.tryParse).whereType<int>().toSet();
+      _recentSearchQueries = searchRaw;
     });
   }
 
-  Future<void> _togglePin(int id) async {
+  Future<void> _loadConversationPrefs() => _loadPinned();
+
+  Future<void> _saveConversationPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'pinned_chats',
+      _pinnedChats.map((id) => id.toString()).toList(),
+    );
+    await prefs.setStringList(
+      'manual_unread_chats',
+      _manuallyUnreadChats.map((id) => id.toString()).toList(),
+    );
+    await prefs.setStringList(
+      'hidden_chats',
+      _hiddenChats.map((id) => id.toString()).toList(),
+    );
+    await prefs.setStringList('chat_search_history', _recentSearchQueries);
+  }
+
+  Future<void> _recordSearchQuery(String query) async {
+    final normalized = query.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _recentSearchQueries = [
+        normalized,
+        ..._recentSearchQueries.where(
+          (q) => q.toLowerCase() != normalized.toLowerCase(),
+        ),
+      ].take(12).toList();
+    });
+    await _saveConversationPrefs();
+  }
+
+  Future<void> _openNotificationsScreen() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    await _refreshUnreadNotificationCount();
+  }
+
+  Future<void> _openConversationItemDetails(_Conversation conversation) async {
+    final itemId = conversation.chatThread?.itemId;
+    if (itemId == null) {
+      return;
+    }
+
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
+  Future<void> _refreshUnreadNotificationCount() async {
+    try {
+      final count = await NotificationService.instance.unreadCount();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _unreadNotificationCount = count;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _togglePin(int id) async {
     setState(() {
       if (_pinnedChats.contains(id)) {
         _pinnedChats.remove(id);
@@ -227,10 +355,446 @@ class _InboxScreenState extends State<InboxScreen> {
         _pinnedChats.add(id);
       }
     });
-    await prefs.setStringList(
-      'pinned_chats',
-      _pinnedChats.map((id) => id.toString()).toList(),
+    await _saveConversationPrefs();
+  }
+
+  Future<void> _toggleManualUnread(int id) async {
+    setState(() {
+      if (_manuallyUnreadChats.contains(id)) {
+        _manuallyUnreadChats.remove(id);
+      } else {
+        _manuallyUnreadChats.add(id);
+      }
+    });
+    await _saveConversationPrefs();
+  }
+
+  Future<void> _hideConversationForCurrentUser(int id) async {
+    setState(() {
+      _hiddenChats.add(id);
+      _pinnedChats.remove(id);
+      _manuallyUnreadChats.remove(id);
+      if (_selectedConversation >= _conversations.length - 1) {
+        _selectedConversation = 0;
+      }
+      _showMobileChat = false;
+    });
+    await _saveConversationPrefs();
+  }
+
+  Future<void> _showConversationActions(_Conversation conversation) async {
+    final isPinned = _pinnedChats.contains(conversation.id);
+    final isManualUnread = _manuallyUnreadChats.contains(conversation.id);
+    final canDeleteConversation = conversation.id != -1;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.search_rounded),
+                title: const Text('Search in this chat'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openSearchDialog(focusConversationId: conversation.id);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                ),
+                title: Text(
+                  isPinned ? 'Unpin conversation' : 'Pin conversation',
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _togglePin(conversation.id);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  isManualUnread
+                      ? Icons.mark_email_read_outlined
+                      : Icons.mark_email_unread_outlined,
+                ),
+                title: Text(isManualUnread ? 'Mark as read' : 'Mark as unread'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _toggleManualUnread(conversation.id);
+                },
+              ),
+              if (canDeleteConversation)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded),
+                  title: const Text('Clear chat history (only for you)'),
+                  subtitle: const Text('The other user will keep this chat.'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final confirmed = await showDialog<bool>(
+                      context: this.context,
+                      builder: (context) {
+                        return AlertDialog(
+                          title: const Text('Clear this chat for you?'),
+                          content: const Text(
+                            'This only hides the conversation on your side. The other user is not affected.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+
+                    if (confirmed == true) {
+                      await _hideConversationForCurrentUser(conversation.id);
+                    }
+                  },
+                ),
+            ],
+          ),
+        );
+      },
     );
+  }
+
+  List<_SearchMatch> _buildSearchMatches(String query) {
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return const [];
+    }
+
+    final matches = <_SearchMatch>[];
+    for (final conversation in _allConversations) {
+      if (_hiddenChats.contains(conversation.id)) {
+        continue;
+      }
+
+      String? snippet;
+      if (conversation.preview.toLowerCase().contains(normalized)) {
+        snippet = conversation.preview;
+      }
+
+      for (final message in conversation.messages.reversed) {
+        final text = message.text.toLowerCase();
+        if (text.contains(normalized)) {
+          snippet = message.text;
+          break;
+        }
+      }
+
+      if (snippet != null) {
+        matches.add(
+          _SearchMatch(
+            conversationId: conversation.id,
+            conversationName: conversation.name,
+            snippet: snippet,
+          ),
+        );
+      }
+    }
+    return matches;
+  }
+
+  void _selectConversationById(int conversationId, {bool openMobile = false}) {
+    final idx = _conversations.indexWhere((c) => c.id == conversationId);
+    if (idx == -1) {
+      return;
+    }
+    _onConversationSelected(idx, openMobile: openMobile);
+  }
+
+  Future<void> _openSearchDialog({int? focusConversationId}) async {
+    final controller = TextEditingController(text: _searchQuery);
+    final result = await showDialog<_SearchDialogResult>(
+      context: context,
+      builder: (context) {
+        var localQuery = controller.text.trim();
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final results = _buildSearchMatches(localQuery);
+            final history = _recentSearchQueries;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFFFCFAFF),
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              title: const Text('Search chats'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6DBFF)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(
+                              0xFF7A54FF,
+                            ).withValues(alpha: 0.06),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: TextField(
+                        controller: controller,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Search by user or message',
+                          prefixIcon: Icon(
+                            Icons.search_rounded,
+                            color: Color(0xFF7A54FF),
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 14,
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            localQuery = value.trim();
+                          });
+                        },
+                        onSubmitted: (value) {
+                          final query = value.trim();
+                          Navigator.pop(
+                            context,
+                            _SearchDialogResult(query: query),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (history.isNotEmpty)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Recent searches',
+                              style: TextStyle(
+                                color: Color(0xFF6B56A5),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 36,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemBuilder: (context, index) {
+                                final h = history[index];
+                                return InkWell(
+                                  onTap: () {
+                                    final historyMatches = _buildSearchMatches(
+                                      h,
+                                    );
+                                    if (historyMatches.isNotEmpty) {
+                                      Navigator.pop(
+                                        context,
+                                        _SearchDialogResult(
+                                          query: h,
+                                          conversationId:
+                                              historyMatches.first
+                                                  .conversationId,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    controller.text = h;
+                                    controller.selection =
+                                        TextSelection.fromPosition(
+                                          TextPosition(offset: h.length),
+                                        );
+                                    setDialogState(() {
+                                      localQuery = h;
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFE7FF),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: const Color(0xFFE0D1FF),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      h,
+                                      style: const TextStyle(
+                                        color: Color(0xFF5D3FC2),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 8),
+                              itemCount: history.length,
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (history.isNotEmpty) const SizedBox(height: 10),
+                    Flexible(
+                      child: results.isEmpty
+                          ? const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'No matching chat history found.',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: results.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 6),
+                              itemBuilder: (context, index) {
+                                final item = results[index];
+                                return Material(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(14),
+                                    onTap: () {
+                                      Navigator.pop(
+                                        context,
+                                        _SearchDialogResult(
+                                          query: localQuery,
+                                          conversationId: item.conversationId,
+                                        ),
+                                      );
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 34,
+                                            height: 34,
+                                            decoration: const BoxDecoration(
+                                              color: Color(0xFFF1EBFF),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(
+                                              Icons.history_rounded,
+                                              size: 18,
+                                              color: Color(0xFF7A54FF),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  item.conversationName,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF2A2550),
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  item.snippet,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF6B6791),
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(
+                    context,
+                    const _SearchDialogResult(query: ''),
+                  ),
+                  child: const Text('Clear'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _SearchDialogResult(query: controller.text.trim()),
+                  ),
+                  child: const Text('Search'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    setState(() {
+      _searchQuery = result.query;
+      _selectedConversation = 0;
+    });
+
+    if (result.query.isNotEmpty) {
+      await _recordSearchQuery(result.query);
+    }
+
+    if (result.conversationId != null) {
+      _selectConversationById(
+        result.conversationId!,
+        openMobile: true,
+      );
+    } else if (focusConversationId != null) {
+      _selectConversationById(focusConversationId, openMobile: true);
+    }
   }
 
   static const _filters = ['All', 'Selling', 'Buying'];
@@ -239,6 +803,10 @@ class _InboxScreenState extends State<InboxScreen> {
 
   List<_Conversation> get _conversations {
     List<_Conversation> filtered = _allConversations.where((conv) {
+      if (_hiddenChats.contains(conv.id)) {
+        return false;
+      }
+
       final matchesSearch =
           conv.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           conv.preview.toLowerCase().contains(_searchQuery.toLowerCase());
@@ -256,9 +824,6 @@ class _InboxScreenState extends State<InboxScreen> {
 
     // Sort pinned to top
     filtered.sort((a, b) {
-      if (a.id == -1) return -1; // AI chat is always top
-      if (b.id == -1) return 1;
-
       final aPinned = _pinnedChats.contains(a.id);
       final bPinned = _pinnedChats.contains(b.id);
       if (aPinned && !bPinned) return -1;
@@ -298,10 +863,13 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   void _onConversationSelected(int index, {bool openMobile = false}) {
+    final selected = _conversations[index];
     setState(() {
       _selectedConversation = index;
       _replyingTo = null;
+      _manuallyUnreadChats.remove(selected.id);
     });
+    unawaited(_saveConversationPrefs());
     if (openMobile) {
       _setMobileConversationView(true);
     }
@@ -471,16 +1039,17 @@ class _InboxScreenState extends State<InboxScreen> {
     required Map<int, AiMessage> messageById,
   }) {
     final parsed = _parseReplyMetadata(message.content);
-    final body = _parseMessageBody(parsed.messageText);
+    final ragParsed = _parseAiRagItems(parsed.messageText);
+    final body = _parseMessageBody(ragParsed.visibleText);
     final replied = parsed.repliedMessageId == null
         ? null
         : messageById[parsed.repliedMessageId!];
 
     final replyText = replied == null
         ? null
-        : _parseMessageBody(
+        : _parseMessageBody(_parseAiRagItems(
             _parseReplyMetadata(replied.content).messageText,
-          ).previewText;
+          ).visibleText).previewText;
 
     final local = message.createdAt.toLocal();
     final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
@@ -500,7 +1069,74 @@ class _InboxScreenState extends State<InboxScreen> {
       deletedAt: null,
       replyToMessageId: parsed.repliedMessageId,
       replyToText: replyText,
+      ragItems: ragParsed.items,
     );
+  }
+
+  ({String visibleText, List<_AiRagItem> items}) _parseAiRagItems(
+    String content,
+  ) {
+    final markerIndex = content.indexOf(_ragItemsPrefix);
+    if (markerIndex == -1) {
+      return (visibleText: content.trim(), items: const []);
+    }
+
+    final visibleText = content.substring(0, markerIndex).trimRight();
+    final rawPayload = content
+        .substring(markerIndex + _ragItemsPrefix.length)
+        .trim();
+
+    if (rawPayload.isEmpty) {
+      return (visibleText: visibleText, items: const []);
+    }
+
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is! List) {
+        return (visibleText: visibleText, items: const []);
+      }
+
+      final ragItems = <_AiRagItem>[];
+      for (final entry in decoded) {
+        if (entry is! Map) {
+          continue;
+        }
+
+        final map = entry.map<String, dynamic>(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+
+        final itemIdRaw = map['id'];
+        final itemId = itemIdRaw is num
+            ? itemIdRaw.toInt()
+            : int.tryParse(itemIdRaw?.toString() ?? '');
+        final title = map['title']?.toString().trim() ?? '';
+
+        if (itemId == null || title.isEmpty) {
+          continue;
+        }
+
+        final priceValue = map['price'];
+        final price = (priceValue == null || priceValue.toString().trim().isEmpty)
+            ? null
+            : priceValue.toString();
+
+        ragItems.add(
+          _AiRagItem(
+            id: itemId,
+            title: title,
+            price: price,
+            listingType: map['listing_type']?.toString(),
+            condition: map['condition']?.toString(),
+            category: map['category']?.toString(),
+          ),
+        );
+      }
+
+      return (visibleText: visibleText, items: ragItems);
+    } catch (_) {
+      return (visibleText: visibleText, items: const []);
+    }
   }
 
   void _applyAiMessages(List<AiMessage> aiMessages) {
@@ -602,12 +1238,17 @@ class _InboxScreenState extends State<InboxScreen> {
           ? (map['duration_seconds'] as num).toInt()
           : int.tryParse(map['duration_seconds']?.toString() ?? '');
       final caption = map['caption']?.toString().trim();
+      final itemIdRaw = map['item_id'];
+      final itemId = itemIdRaw is num
+          ? itemIdRaw.toInt()
+          : int.tryParse(itemIdRaw?.toString() ?? '');
       final media = _MessageMedia(
         type: type,
         url: urlValue,
         fileName: name == null || name.isEmpty ? null : name,
         durationSeconds: durationSeconds,
         caption: caption == null || caption.isEmpty ? null : caption,
+        itemId: itemId,
       );
       return _ParsedMessageBody.media(media);
     } catch (_) {
@@ -623,6 +1264,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (media.durationSeconds != null)
         'duration_seconds': media.durationSeconds,
       if (media.caption != null) 'caption': media.caption,
+      if (media.itemId != null) 'item_id': media.itemId,
     };
     return '$_mediaPrefix${jsonEncode(payload)}';
   }
@@ -1483,9 +2125,13 @@ class _InboxScreenState extends State<InboxScreen> {
                       onConversationSelected: (index) =>
                           _onConversationSelected(index),
                       searchQuery: _searchQuery,
-                      onSearchChanged: (q) => setState(() => _searchQuery = q),
+                      onSearchTap: _openSearchDialog,
+                      onNotificationsTap: _openNotificationsScreen,
+                      unreadNotificationCount: _unreadNotificationCount,
                       pinnedChats: _pinnedChats,
+                      manuallyUnreadChats: _manuallyUnreadChats,
                       onPinToggled: _togglePin,
+                      onConversationLongPress: _showConversationActions,
                       isLoading: _isLoading,
                     ),
                   ),
@@ -1500,6 +2146,7 @@ class _InboxScreenState extends State<InboxScreen> {
                             isSending: _isSending,
                             replyingTo: _replyingTo,
                             pinnedMessages: pinnedMessages,
+                            isAiConversation: selected.id == -1,
                             onDismissReply: () =>
                                 setState(() => _replyingTo = null),
                             onLongPressMessage: (message) =>
@@ -1515,6 +2162,20 @@ class _InboxScreenState extends State<InboxScreen> {
                             onVoiceRecordStop: () =>
                                 _stopVoiceRecording(selected),
                             isRecordingVoice: _isRecordingVoice,
+                            onUnpinPinnedMessage: (message) {
+                              if (selected.id == -1) {
+                                _unpinAiMessage(message);
+                              } else {
+                                _unpinMessage(selected, message);
+                              }
+                            },
+                            isConversationPinned: _pinnedChats.contains(
+                              selected.id,
+                            ),
+                            onOpenConversationMenu: () =>
+                                _showConversationActions(selected),
+                            onOpenItemDetails: () =>
+                              _openConversationItemDetails(selected),
                           )
                         : const Center(
                             child: Text(
@@ -1536,6 +2197,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 isSending: _isSending,
                 replyingTo: _replyingTo,
                 pinnedMessages: pinnedMessages,
+                isAiConversation: selected.id == -1,
                 onDismissReply: () => setState(() => _replyingTo = null),
                 onLongPressMessage: (message) => _showMessageActions(
                   conversation: selected,
@@ -1548,6 +2210,17 @@ class _InboxScreenState extends State<InboxScreen> {
                 onVoiceRecordStart: _startVoiceRecording,
                 onVoiceRecordStop: () => _stopVoiceRecording(selected),
                 isRecordingVoice: _isRecordingVoice,
+                onUnpinPinnedMessage: (message) {
+                  if (selected.id == -1) {
+                    _unpinAiMessage(message);
+                  } else {
+                    _unpinMessage(selected, message);
+                  }
+                },
+                isConversationPinned: _pinnedChats.contains(selected.id),
+                onOpenConversationMenu: () =>
+                    _showConversationActions(selected),
+                onOpenItemDetails: () => _openConversationItemDetails(selected),
               );
             }
 
@@ -1560,9 +2233,13 @@ class _InboxScreenState extends State<InboxScreen> {
               onConversationSelected: (index) =>
                   _onConversationSelected(index, openMobile: true),
               searchQuery: _searchQuery,
-              onSearchChanged: (q) => setState(() => _searchQuery = q),
+              onSearchTap: _openSearchDialog,
+              onNotificationsTap: _openNotificationsScreen,
+              unreadNotificationCount: _unreadNotificationCount,
               pinnedChats: _pinnedChats,
+              manuallyUnreadChats: _manuallyUnreadChats,
               onPinToggled: _togglePin,
+              onConversationLongPress: _showConversationActions,
               isLoading: _isLoading,
             );
           },
@@ -1580,9 +2257,13 @@ class _InboxPanel extends StatelessWidget {
   final ValueChanged<int> onFilterSelected;
   final ValueChanged<int> onConversationSelected;
   final String searchQuery;
-  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onSearchTap;
+  final Future<void> Function() onNotificationsTap;
+  final int unreadNotificationCount;
   final Set<int> pinnedChats;
+  final Set<int> manuallyUnreadChats;
   final ValueChanged<int> onPinToggled;
+  final ValueChanged<_Conversation> onConversationLongPress;
   final bool isLoading;
 
   const _InboxPanel({
@@ -1593,9 +2274,13 @@ class _InboxPanel extends StatelessWidget {
     required this.onFilterSelected,
     required this.onConversationSelected,
     required this.searchQuery,
-    required this.onSearchChanged,
+    required this.onSearchTap,
+    required this.onNotificationsTap,
+    required this.unreadNotificationCount,
     required this.pinnedChats,
+    required this.manuallyUnreadChats,
     required this.onPinToggled,
+    required this.onConversationLongPress,
     this.isLoading = false,
   });
 
@@ -1635,28 +2320,89 @@ class _InboxPanel extends StatelessWidget {
                     ),
                   ),
                   _HeaderIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    onTap: () {},
+                    icon: searchQuery.isEmpty
+                        ? Icons.search_rounded
+                        : Icons.search_off_rounded,
+                    onTap: onSearchTap,
                     filled: true,
+                    compact: true,
+                  ),
+                  const SizedBox(width: 8),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      _HeaderIconButton(
+                        icon: Icons.notifications_none_rounded,
+                        onTap: () {
+                          onNotificationsTap();
+                        },
+                        filled: true,
+                        compact: true,
+                      ),
+                      if (unreadNotificationCount > 0)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE53935),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Text(
+                              unreadNotificationCount > 99
+                                  ? '99+'
+                                  : unreadNotificationCount.toString(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18.0),
-              child: TextField(
-                onChanged: onSearchChanged,
-                decoration: InputDecoration(
-                  hintText: 'Search chats...',
-                  prefixIcon: Icon(Icons.search_rounded),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+            if (searchQuery.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18.0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEDE6FF),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Searching: $searchQuery',
+                      style: const TextStyle(
+                        color: Color(0xFF5D3FC2),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                  filled: true,
-                  fillColor: Colors.white,
                 ),
               ),
-            ),
             const SizedBox(height: 10),
             TabBar(
               onTap: onFilterSelected,
@@ -1685,16 +2431,16 @@ class _InboxPanel extends StatelessWidget {
                           const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final conversation = conversations[index];
-                        final isPinned =
-                            pinnedChats.contains(conversation.id) ||
-                            conversation.id == -1;
-                        final hasUnread = conversation.messages.any(
-                          (m) => !m.isMine && m.readAt == null,
-                        );
+                        final isPinned = pinnedChats.contains(conversation.id);
+                        final hasUnread =
+                            conversation.messages.any(
+                              (m) => !m.isMine && m.readAt == null,
+                            ) ||
+                            manuallyUnreadChats.contains(conversation.id);
+                        final showUnreadDot = hasUnread && index != selectedIndex;
                         return GestureDetector(
-                          onLongPress: conversation.id == -1
-                              ? null
-                              : () => onPinToggled(conversation.id),
+                          onLongPress: () =>
+                              onConversationLongPress(conversation),
                           child: Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
                             decoration: BoxDecoration(
@@ -1813,6 +2559,36 @@ class _InboxPanel extends StatelessWidget {
                                               fontWeight: FontWeight.w500,
                                             ),
                                           ),
+                                          if (conversation.item != null) ...[
+                                            const SizedBox(height: 7),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 9,
+                                                    vertical: 5,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFF5F0FF),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: const Color(
+                                                    0xFFE1D2FF,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                'Item: ${conversation.item!.title}',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: Color(0xFF6A49C9),
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),
@@ -1821,7 +2597,7 @@ class _InboxPanel extends StatelessWidget {
                                       children: [
                                         if (conversation.item != null)
                                           _ItemThumb(item: conversation.item!),
-                                        if (hasUnread) ...[
+                                        if (showUnreadDot) ...[
                                           const SizedBox(height: 10),
                                           Container(
                                             width: 16,
@@ -1859,8 +2635,10 @@ class _ChatPanel extends StatefulWidget {
   final bool isSending;
   final _Message? replyingTo;
   final List<_Message> pinnedMessages;
+  final bool isAiConversation;
   final VoidCallback onDismissReply;
   final ValueChanged<_Message> onLongPressMessage;
+  final ValueChanged<_Message> onUnpinPinnedMessage;
   final VoidCallback onPickPhoto;
   final VoidCallback onOpenCamera;
   final VoidCallback onShareLocation;
@@ -1868,6 +2646,9 @@ class _ChatPanel extends StatefulWidget {
   final VoidCallback onVoiceRecordStart;
   final VoidCallback onVoiceRecordStop;
   final bool isRecordingVoice;
+  final bool isConversationPinned;
+  final VoidCallback onOpenConversationMenu;
+  final VoidCallback onOpenItemDetails;
 
   const _ChatPanel({
     required this.conversation,
@@ -1877,8 +2658,10 @@ class _ChatPanel extends StatefulWidget {
     required this.isSending,
     required this.replyingTo,
     required this.pinnedMessages,
+    required this.isAiConversation,
     required this.onDismissReply,
     required this.onLongPressMessage,
+    required this.onUnpinPinnedMessage,
     required this.onPickPhoto,
     required this.onOpenCamera,
     required this.onShareLocation,
@@ -1886,6 +2669,9 @@ class _ChatPanel extends StatefulWidget {
     required this.onVoiceRecordStart,
     required this.onVoiceRecordStop,
     required this.isRecordingVoice,
+    required this.isConversationPinned,
+    required this.onOpenConversationMenu,
+    required this.onOpenItemDetails,
   });
 
   @override
@@ -1973,6 +2759,16 @@ class _ChatPanelState extends State<_ChatPanel> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(msg.time),
+                trailing: IconButton(
+                  tooltip: widget.isAiConversation
+                      ? 'Unpin message'
+                      : 'Unpin for both users',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onUnpinPinnedMessage(msg);
+                  },
+                ),
               );
             },
           ),
@@ -1983,6 +2779,11 @@ class _ChatPanelState extends State<_ChatPanel> {
 
   void _scrollToLatest({bool animated = false}) {
     if (!_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _scrollToLatest(animated: animated);
+        }
+      });
       return;
     }
     final target = _scrollController.position.maxScrollExtent;
@@ -1995,6 +2796,102 @@ class _ChatPanelState extends State<_ChatPanel> {
       return;
     }
     _scrollController.jumpTo(target);
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _dayLabel(DateTime date) {
+    final local = date.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDay = DateTime(local.year, local.month, local.day);
+    final dayDiff = today.difference(messageDay).inDays;
+
+    if (dayDiff == 0) {
+      return 'TODAY';
+    }
+    if (dayDiff == 1) {
+      return 'YESTERDAY';
+    }
+
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    return '${months[local.month - 1]} ${local.day}, ${local.year}';
+  }
+
+  List<Widget> _buildTimelineWidgets() {
+    final widgets = <Widget>[];
+    DateTime? lastDay;
+
+    for (var index = 0; index < widget.conversation.messages.length; index++) {
+      final message = widget.conversation.messages[index];
+      final messageDay = message.createdAt.toLocal();
+
+      if (lastDay == null || !_isSameDay(lastDay, messageDay)) {
+        widgets.add(
+          Text(
+            _dayLabel(messageDay),
+            style: const TextStyle(
+              color: Color(0xFFC18EFF),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+        );
+        widgets.add(const SizedBox(height: 22));
+        lastDay = messageDay;
+      }
+
+      final showOffer =
+          widget.conversation.offer != null &&
+          index == 1 &&
+          widget.conversation.id != -1;
+
+      widgets.add(
+        _MessageBubble(
+          message: message,
+          onLongPress: () => widget.onLongPressMessage(message),
+        ),
+      );
+
+      if (showOffer) {
+        widgets.add(const SizedBox(height: 18));
+        widgets.add(_OfferCard(offer: widget.conversation.offer!));
+        widgets.add(const SizedBox(height: 18));
+      }
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(
+        const Text(
+          'TODAY',
+          style: TextStyle(
+            color: Color(0xFFC18EFF),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(height: 22));
+    }
+
+    return widgets;
   }
 
   @override
@@ -2040,43 +2937,46 @@ class _ChatPanelState extends State<_ChatPanel> {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Container(
-                            width: 9,
-                            height: 9,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF32C965),
-                              shape: BoxShape.circle,
-                            ),
+                      if (widget.conversation.item != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Item: ${widget.conversation.item!.title}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF66509D),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            widget.conversation.status,
-                            style: const TextStyle(
-                              color: Color(0xFF925AFF),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 if (widget.conversation.item != null)
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8F4FF),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE6D9FF)),
-                    ),
-                    child: _ItemThumb(
-                      item: widget.conversation.item!,
-                      size: 48,
+                  InkWell(
+                    onTap: widget.onOpenItemDetails,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8F4FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6D9FF)),
+                      ),
+                      child: _ItemThumb(
+                        item: widget.conversation.item!,
+                        size: 48,
+                      ),
                     ),
                   ),
+                const SizedBox(width: 8),
+                _HeaderIconButton(
+                  icon: Icons.more_vert_rounded,
+                  onTap: widget.onOpenConversationMenu,
+                  filled: true,
+                  compact: true,
+                ),
               ],
             ),
           ),
@@ -2129,39 +3029,7 @@ class _ChatPanelState extends State<_ChatPanel> {
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
               child: Column(
-                children: [
-                  const Text(
-                    'TODAY',
-                    style: TextStyle(
-                      color: Color(0xFFC18EFF),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  ...widget.conversation.messages.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final message = entry.value;
-                    final showOffer =
-                        widget.conversation.offer != null &&
-                        index == 1 &&
-                        widget.conversation.id != -1;
-                    return Column(
-                      children: [
-                        _MessageBubble(
-                          message: message,
-                          onLongPress: () => widget.onLongPressMessage(message),
-                        ),
-                        if (showOffer) ...[
-                          const SizedBox(height: 18),
-                          _OfferCard(offer: widget.conversation.offer!),
-                          const SizedBox(height: 18),
-                        ],
-                      ],
-                    );
-                  }),
-                ],
+                children: _buildTimelineWidgets(),
               ),
             ),
           ),
@@ -2526,6 +3394,216 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
     } catch (_) {}
   }
+  
+  Future<void> _openMediaItemDetails(_MessageMedia media) async {
+    final itemId = media.itemId;
+    if (itemId == null) {
+      return;
+    }
+  
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
+  Future<void> _openRagItemDetails(_AiRagItem ragItem) async {
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(ragItem.id);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
+  String _formatPrice(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Price unavailable';
+    }
+
+    final normalized = value.trim().replaceAll(',', '');
+    final parsed = double.tryParse(normalized);
+    if (parsed == null) {
+      return 'RM $value';
+    }
+
+    final hasFraction = parsed % 1 != 0;
+    return hasFraction
+        ? 'RM ${parsed.toStringAsFixed(2)}'
+        : 'RM ${parsed.toStringAsFixed(0)}';
+  }
+
+  String _formatListingType(String? raw) {
+    final value = (raw ?? '').trim().toLowerCase();
+    switch (value) {
+      case 'sell':
+        return 'Sell';
+      case 'trade':
+        return 'Trade';
+      case 'both':
+        return 'Both';
+      default:
+        return value.isEmpty ? '' : value[0].toUpperCase() + value.substring(1);
+    }
+  }
+
+  Widget _buildTag(String label) {
+    if (label.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEDE5FF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF6F45FF),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRagItemCard(_AiRagItem ragItem) {
+    final listingType = _formatListingType(ragItem.listingType);
+    final condition = (ragItem.condition ?? '').trim();
+    final shortDescription = condition.isNotEmpty
+        ? 'Condition: $condition'
+        : (ragItem.category ?? '').trim();
+
+    return Card(
+      elevation: 2.5,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
+      child: InkWell(
+        onTap: () => _openRagItemDetails(ragItem),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      ragItem.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2740),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Icon(
+                    Icons.open_in_new_rounded,
+                    size: 18,
+                    color: Color(0xFF7A54FF),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _formatPrice(ragItem.price),
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: Color(0xFF7A54FF),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (shortDescription.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  shortDescription,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF5C6B89),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (listingType.isNotEmpty) _buildTag(listingType),
+                  if (listingType.isNotEmpty && condition.isNotEmpty)
+                    const SizedBox(width: 6),
+                  if (condition.isNotEmpty) _buildTag(condition),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF7A54FF),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      'View Listing',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -2536,27 +3614,47 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
   @override
   Widget build(BuildContext context) {
+    final isImageOnly = message.media?.type == _MessageMediaType.image;
     final bubble = InkWell(
       onLongPress: widget.onLongPress,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: isImageOnly
+            ? const EdgeInsets.all(8)
+            : const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         decoration: BoxDecoration(
-          color: message.isMine ? null : Colors.white,
-          gradient: message.isMine
-              ? const LinearGradient(
-                  colors: [Color(0xFF9B68FF), Color(0xFF7D41FF)],
-                )
+          color: isImageOnly
+              ? (message.isMine
+                    ? const Color(0xFFF0E7FF)
+                    : const Color(0xFFFAF8FF))
+              : (message.isMine ? null : Colors.white),
+          gradient: isImageOnly
+              ? null
+              : (message.isMine
+                    ? const LinearGradient(
+                        colors: [Color(0xFF9B68FF), Color(0xFF7D41FF)],
+                      )
+                    : null),
+          border: isImageOnly
+              ? Border.all(color: const Color(0xFFC4A1FF), width: 1.4)
               : null,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF161A2B).withValues(alpha: 0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
+          boxShadow: isImageOnly
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF7A54FF).withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: const Color(0xFF161A2B).withValues(alpha: 0.05),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2601,18 +3699,50 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
+            if (message.media == null && message.ragItems.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Column(
+                children: message.ragItems
+                    .map<Widget>((ragItem) => _buildRagItemCard(ragItem))
+                    .toList(),
+              ),
+            ],
             if (message.media?.caption != null) ...[
               const SizedBox(height: 10),
-              Text(
-                message.media!.caption!,
-                style: TextStyle(
-                  color: message.isMine
-                      ? Colors.white
-                      : const Color(0xFF24314D),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: isImageOnly
+                      ? const Color(0xFFEFE5FF)
+                      : (message.isMine
+                            ? Colors.white.withValues(alpha: 0.16)
+                            : const Color(0xFFF4EEFF)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: isImageOnly
+                      ? Border.all(color: const Color(0xFFCCB0FF))
+                      : null,
+                ),
+                child: Text(
+                  message.media!.caption!,
+                  style: TextStyle(
+                    color: isImageOnly
+                        ? const Color(0xFF42206E)
+                        : (message.isMine
+                              ? Colors.white
+                              : const Color(0xFF24314D)),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+            ],
+            if (isImageOnly && message.media?.itemId != null) ...[
+              const SizedBox(height: 10),
+              _buildItemActionButtons(),
             ],
           ],
         ),
@@ -2663,16 +3793,61 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Widget _buildMediaWidget(_MessageMedia media) {
     switch (media.type) {
       case _MessageMediaType.image:
-        return ClipRRect(
+        return InkWell(
+          onTap: media.itemId == null ? null : () => _openMediaItemDetails(media),
           borderRadius: BorderRadius.circular(14),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 280, maxHeight: 280),
-            child: Image.network(
-              media.url,
-              fit: BoxFit.cover,
-              errorBuilder: (_, error, stackTrace) =>
-                  _mediaErrorCard('Photo unavailable'),
-            ),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 280,
+                    maxHeight: 280,
+                  ),
+                  child: Image.network(
+                    media.url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, error, stackTrace) =>
+                        _mediaErrorCard('Photo unavailable'),
+                  ),
+                ),
+              ),
+              if (media.itemId != null)
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.65),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.open_in_new_rounded,
+                          color: Colors.white,
+                          size: 12,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'View item',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       case _MessageMediaType.voice:
@@ -2719,6 +3894,54 @@ class _MessageBubbleState extends State<_MessageBubble> {
       case _MessageMediaType.document:
         return _mediaErrorCard('Document attachment');
     }
+  }
+
+  Widget _buildItemActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF6F45FF),
+              side: const BorderSide(color: Color(0xFFB895FF), width: 1.4),
+              backgroundColor: const Color(0xFFF8F3FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: () {
+              // impleement ethan transactiom for those button action
+            },
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFF7A54FF),
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _mediaErrorCard(String text) {
@@ -2974,19 +4197,39 @@ class _ItemThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final imageUrl = item.imageUrl;
+    final hasNetworkImage = imageUrl != null && imageUrl.trim().isNotEmpty;
+
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: item.colors,
-        ),
+        gradient: hasNetworkImage
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: item.colors,
+              ),
         border: Border.all(color: const Color(0xFFE7E2F5)),
       ),
-      child: Icon(item.icon, color: Colors.white, size: size * 0.52),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: hasNetworkImage
+            ? Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) {
+                  return Icon(
+                    item.icon,
+                    color: Colors.white,
+                    size: size * 0.52,
+                  );
+                },
+              )
+            : Icon(item.icon, color: Colors.white, size: size * 0.52),
+      ),
     );
   }
 }
@@ -3043,10 +4286,17 @@ class _Conversation {
 }
 
 class _ItemPreview {
+  final String title;
+  final String? imageUrl;
   final IconData icon;
   final List<Color> colors;
 
-  const _ItemPreview({required this.icon, required this.colors});
+  const _ItemPreview({
+    required this.title,
+    this.imageUrl,
+    required this.icon,
+    required this.colors,
+  });
 }
 
 class _ParsedMessageBody {
@@ -3103,6 +4353,7 @@ class _MessageMedia {
   final String? fileName;
   final int? durationSeconds;
   final String? caption;
+  final int? itemId;
 
   const _MessageMedia({
     required this.type,
@@ -3110,6 +4361,7 @@ class _MessageMedia {
     this.fileName,
     this.durationSeconds,
     this.caption,
+    this.itemId,
   });
 
   String get defaultLabel {
@@ -3144,6 +4396,7 @@ class _Message {
   final DateTime? deletedAt;
   final int? replyToMessageId;
   final String? replyToText;
+  final List<_AiRagItem> ragItems;
 
   const _Message({
     required this.id,
@@ -3158,9 +4411,28 @@ class _Message {
     this.deletedAt,
     this.replyToMessageId,
     this.replyToText,
+    this.ragItems = const [],
   });
 
   bool get isLocal => id < 0;
+}
+
+class _AiRagItem {
+  final int id;
+  final String title;
+  final String? price;
+  final String? listingType;
+  final String? condition;
+  final String? category;
+
+  const _AiRagItem({
+    required this.id,
+    required this.title,
+    this.price,
+    this.listingType,
+    this.condition,
+    this.category,
+  });
 }
 
 class _OfferCardData {
@@ -3173,4 +4445,23 @@ class _OfferCardData {
     required this.amount,
     required this.status,
   });
+}
+
+class _SearchMatch {
+  final int conversationId;
+  final String conversationName;
+  final String snippet;
+
+  const _SearchMatch({
+    required this.conversationId,
+    required this.conversationName,
+    required this.snippet,
+  });
+}
+
+class _SearchDialogResult {
+  final String query;
+  final int? conversationId;
+
+  const _SearchDialogResult({required this.query, this.conversationId});
 }

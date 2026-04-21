@@ -63,3 +63,9 @@ supabase/.temp/
 
 # VS Code workspace settings (optional: comment out if team shares settings)
 .vscode/
+
+# Local Stripe backend
+# - Commit the source in `stripe-api/`
+# - Ignore dependencies and local config
+stripe-api/node_modules/
+stripe-api/.env

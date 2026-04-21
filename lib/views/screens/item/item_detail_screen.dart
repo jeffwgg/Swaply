@@ -1,15 +1,24 @@
 import 'dart:developer';
+import 'dart:io';
+import 'dart:convert';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import '../../../models/app_user.dart';
+import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
+import '../../../models/meetup_address_option.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../services/follow_service.dart';
+import '../../../services/chat_service.dart';
+import '../../../services/item_service.dart';
+import '../../../services/notification_service.dart';
 import '../auth/login_screen.dart';
+import '../checkout/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../../services/supabase_service.dart';
@@ -26,13 +35,15 @@ class ItemDetailsScreen extends StatefulWidget {
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? user;
   String _ownerName = '';
+  String? _ownerAuthUserId;
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
   bool _isFollowing = false;
   bool _isLoadingFollow = false;
   bool _isFavourite = false;
-  int _favCount = 0;
+  int? _favCount;
+  final ChatService _chatService = ChatService();
 
   @override
   void initState() {
@@ -72,9 +83,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   Future<void> _fetchOwner() async {
     final user = await UsersRepository().getById(widget.item.ownerId);
+    log('here $widget.item.ownerId');
+    log(user.toString());
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
+        _ownerAuthUserId = user?.id;
       });
     }
   }
@@ -97,11 +111,81 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _fetchFavouriteCount() async {
-    final count = await FavouriteRepository().getFavouriteCount(widget.item.id);
-    if (mounted) {
-      setState(() {
-        _favCount = count;
-      });
+    try {
+      final count = await FavouriteRepository().getFavouriteCount(widget.item.id);
+      if (mounted) {
+        setState(() {
+          _favCount = count;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _favCount = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _openPurchaseCheckout() async {
+    if (user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+    if (user!.id == widget.item.ownerId) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You cannot buy your own listing.')),
+      );
+      return;
+    }
+    if (widget.item.price == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This listing has no purchase price.')),
+      );
+      return;
+    }
+
+    final meetups = MeetupAddressOption.fromSellerItem(widget.item);
+    final sellerName = _ownerName.trim().isEmpty ? 'Seller' : _ownerName;
+    final sellerId = _ownerAuthUserId;
+    if (sellerId == null || sellerId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seller account id not found.')),
+      );
+      return;
+    }
+
+    final completed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckoutScreen(
+          flowKind: CheckoutFlowKind.purchase,
+          primaryItem: widget.item,
+          sellerDisplayName: sellerName,
+          sellerId: sellerId,
+          buyerId: user!.id,
+          sellerMeetupOptions: meetups,
+        ),
+      ),
+    );
+
+    if (completed == true) {
+      if (!mounted) {
+        return;
+      }
+      Navigator.pop(context, true);
     }
   }
 
@@ -121,8 +205,18 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             const Icon(Icons.broken_image, size: 50),
       );
     }
-    return Image.asset(
-      url,
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.file(
+      File(url),
       width: width,
       height: height,
       fit: fit,
@@ -140,17 +234,37 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       return;
     }
 
+    final previousState = _isFavourite;
+    final previousCount = _favCount;
+
+    setState(() {
+      _isFavourite = !previousState;
+      widget.item.isFavorite = _isFavourite;
+      if (previousCount != null) {
+        _favCount = _isFavourite ? previousCount + 1 : previousCount - 1;
+      }
+    });
+
     try {
-      final newState = await FavouriteRepository().toggleFavourite(
-        widget.user!.id,
+      final newState = await ItemService().toggleFavourite(
         widget.item.id,
+        widget.user!.id,
       );
+      if (!mounted) return;
       setState(() {
-        widget.item.isFavorite = newState;
         _isFavourite = newState;
-        _isFavourite ? _favCount++ : _favCount--;
+        widget.item.isFavorite = newState;
+        if (previousCount != null) {
+          _favCount = newState ? previousCount + 1 : previousCount - 1;
+        }
       });
     } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isFavourite = previousState;
+        widget.item.isFavorite = previousState;
+        _favCount = previousCount;
+      });
       log("Favourite error: $e");
     }
   }
@@ -177,6 +291,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     if (confirm == true) {
       await ItemsRepository().dropListing(widget.item.id);
+
+      for(var r in _replies){
+        if(r.status == 'pending'){
+          await ItemsRepository().updateStatus('rejected', r.id);
+        }
+      }
+
       if (mounted) {
         Navigator.pop(context, true);
       }
@@ -224,18 +345,378 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _acceptReply(int replyId) async {
+    final actingOwner = widget.user;
+    if (actingOwner == null) {
+      return;
+    }
+
+    ItemListing? acceptedReply;
     for (var r in _replies) {
       if (r.id == replyId) {
+        acceptedReply = r;
         await ItemsRepository().updateStatus('accepted', r.id);
       } else if (r.status != 'dropped') {
         await ItemsRepository().updateStatus('rejected', r.id);
       }
     }
     await ItemsRepository().updateStatus('reserved', widget.item.id);
+
+    if (acceptedReply != null) {
+      final ownerName = actingOwner.username.trim().isNotEmpty
+          ? actingOwner.username.trim()
+          : (_ownerName.trim().isNotEmpty ? _ownerName.trim() : 'Item owner');
+      final offerImage = acceptedReply.imageUrls.isNotEmpty
+          ? acceptedReply.imageUrls.first
+          : null;
+
+      try {
+        final chat = await _chatService.createOrGetItemChat(
+          otherUserId: acceptedReply.ownerId,
+          itemId: widget.item.id,
+        );
+        final caption = StringBuffer()
+          ..writeln(
+            'I accepted your trade offer for "${widget.item.name}".',
+          )
+          ..writeln('Offered item: "${acceptedReply.name}"');
+        final autoMessagePayload = <String, dynamic>{
+          'type': 'image',
+          'url': offerImage ?? '',
+          'caption': caption.toString().trim(),
+          'item_id': widget.item.id,
+          'offered_item_id': acceptedReply.id,
+        };
+        final autoMessage = offerImage == null
+            ? caption.toString().trim()
+            : '[[media]]${jsonEncode(autoMessagePayload)}';
+
+        await _chatService.sendMessage(
+          chatId: chat.id,
+          content: autoMessage,
+        );
+
+        await NotificationService.instance.sendNotificationToUser(
+          recipientId: acceptedReply.ownerId,
+          title: 'Trade Offer Accepted',
+          body: '$ownerName accepted your trade offer on "${widget.item.name}".',
+          type: 'trade',
+          data: {
+            'action': 'open_item',
+            'item_id': widget.item.id,
+            'offered_item_id': acceptedReply.id,
+            'chat_id': chat.id,
+          },
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Offer accepted, but follow-up notification/chat failed: $e',
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    await _fetchReplies();
   }
 
   Future<void> _rejectReply(int replyId) async {
+    ItemListing? rejectedReply;
+    for (final reply in _replies) {
+      if (reply.id == replyId) {
+        rejectedReply = reply;
+        break;
+      }
+    }
+
     await ItemsRepository().updateStatus('rejected', replyId);
+
+    if (rejectedReply != null && widget.user != null) {
+      final ownerName = widget.user!.username.trim().isNotEmpty
+          ? widget.user!.username.trim()
+          : (_ownerName.trim().isNotEmpty ? _ownerName.trim() : 'Item owner');
+      try {
+        await NotificationService.instance.sendNotificationToUser(
+          recipientId: rejectedReply.ownerId,
+          title: 'Trade Offer Rejected',
+          body: '$ownerName rejected your trade offer on "${widget.item.name}".',
+          type: 'trade',
+          data: {
+            'action': 'open_item',
+            'item_id': widget.item.id,
+            'offered_item_id': rejectedReply.id,
+          },
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Offer rejected, but notification failed to send: $e',
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    await _fetchReplies();
+  }
+
+  Future<void> _composeAndStartItemConversation() async {
+    final currentUser = widget.user;
+
+    if (currentUser == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    if (currentUser.id == widget.item.ownerId) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You cannot start chat on your own item.'),
+        ),
+      );
+      return;
+    }
+
+    final ownerName = _ownerName.trim().isEmpty ? 'there' : _ownerName.trim();
+    final initialMessage =
+        'Hi $ownerName, I\'m interested in your "${widget.item.name}". Is it still available?';
+    var draftMessage = initialMessage;
+
+    final shouldSend =
+        await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: StatefulBuilder(
+                builder: (context, setSheetState) {
+                  final canSend = draftMessage.trim().isNotEmpty;
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFE9D8FF)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Start conversation',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF5B21B6),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7F1FF),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE3D2FF)),
+                          ),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: widget.item.imageUrls.isNotEmpty
+                                      ? _buildImage(
+                                          widget.item.imageUrls.first,
+                                          width: 56,
+                                          height: 56,
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Container(
+                                          color: const Color(0xFFE9D8FF),
+                                          child: const Icon(
+                                            Icons.inventory_2_rounded,
+                                            color: Color(0xFF6F45FF),
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      widget.item.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF3F267A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'To: ${_ownerName.isEmpty ? 'Item owner' : _ownerName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF7868A8),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      widget.item.listingType.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF9060FF),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          initialValue: draftMessage,
+                          maxLines: 4,
+                          minLines: 3,
+                          autofocus: true,
+                          onChanged: (value) {
+                            draftMessage = value;
+                            setSheetState(() {});
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Write your first message...',
+                            filled: true,
+                            fillColor: const Color(0xFFFCFAFF),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFDCC9FF),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFDCC9FF),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF8B5DFF),
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: canSend
+                                    ? () => Navigator.of(context).pop(true)
+                                    : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6F45FF),
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text('Send'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ) ??
+        false;
+
+    final message = draftMessage.trim();
+
+    if (!shouldSend || message.isEmpty) {
+      return;
+    }
+
+    try {
+      final chat = await _chatService.createOrGetItemChat(
+        otherUserId: widget.item.ownerId,
+        itemId: widget.item.id,
+      );
+      await _chatService.sendMessage(chatId: chat.id, content: message);
+      await NotificationService.instance.sendSystemNotification(
+        title: 'Message Sent',
+        body:
+            'Your message to ${_ownerName.isEmpty ? 'the owner' : _ownerName} has been delivered.',
+        type: 'chat',
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Message sent to ${_ownerName.isEmpty ? 'owner' : _ownerName}. Open Inbox to continue chatting.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      final errorText = e.toString();
+      String message =
+          'Unable to start conversation right now. Please try again.';
+      if (errorText.contains('23505')) {
+        message =
+            'Conversation already exists with this user. Please open Inbox to continue chatting.';
+      } else if (errorText.contains('PGRST202')) {
+        message = 'Chat service is syncing. Please try again in a moment.';
+      } else if (errorText.contains('22P02')) {
+        message =
+            'Item information is not ready yet. Please refresh and try again.';
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   @override
@@ -390,9 +871,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.share, color: Color(0xFF5B21B6)),
-            onPressed: () {
-              // todo: share functionality
-            },
+            onPressed: _composeAndStartItemConversation,
           ),
         ],
       ),
@@ -523,15 +1002,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$_favCount',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF5B21B6),
+                      if (_favCount != null) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          '$_favCount',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF5B21B6),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ],
@@ -753,20 +1234,41 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: GoogleMap(
-                          initialCameraPosition: CameraPosition(
-                            target: LatLng(item.latitude!, item.longitude!),
-                            zoom: 15,
-                          ),
-                          markers: {
-                            Marker(
-                              markerId: const MarkerId("item_location"),
-                              position: LatLng(item.latitude!, item.longitude!),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            initialCenter: LatLng(
+                              item.latitude!,
+                              item.longitude!,
                             ),
-                          },
-                          zoomControlsEnabled: false,
-                          myLocationButtonEnabled: false,
-                          liteModeEnabled: true, // ✅ smoother in scroll view
+                            initialZoom: 15,
+                            interactionOptions: const InteractionOptions(
+                              flags: InteractiveFlag.none,
+                            ),
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate:
+                                  "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                              userAgentPackageName: "com.example.swaply",
+                            ),
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: LatLng(
+                                    item.latitude!,
+                                    item.longitude!,
+                                  ),
+                                  width: 40,
+                                  height: 40,
+                                  child: const Icon(
+                                    Icons.location_pin,
+                                    color: Colors.red,
+                                    size: 40,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -776,7 +1278,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     if (item.address != null)
                       Row(
                         children: [
-                          const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                          const Icon(
+                            Icons.location_on,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
@@ -826,6 +1332,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ),
               const SizedBox(height: 10),
               ..._replies.map((reply) {
+                if (reply.status == 'dropped' && reply.ownerId != user?.id) {
+                  return Container();
+                }
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   decoration: BoxDecoration(
@@ -874,25 +1383,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               reply.name.toUpperCase(),
                                               style: const TextStyle(
-                                                fontSize: 20,
+                                                fontSize: 18,
                                                 color: Color(0xFF5B21B6),
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                           ),
                                         ),
-                                        if (user != null &&
-                                            user.id == reply.ownerId)
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.red,
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            onPressed: () =>
-                                                _dropReply(reply.id),
-                                          ),
                                       ],
                                     ),
                                     GestureDetector(
@@ -926,7 +1423,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                             child: Text(
                                               _replyOwnerNames[reply.id]!,
                                               style: const TextStyle(
-                                                fontSize: 18,
+                                                fontSize: 16,
                                                 color: Color(0xFF7C3AED),
                                                 fontWeight: FontWeight.w600,
                                               ),
@@ -1037,85 +1534,42 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         right: 8,
                         child: _StatusBadge(status: reply.status),
                       ),
+                      if (user != null && user.id == reply.ownerId && item.status == 'available')
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _dropReply(reply.id),
+                          ),
+                        ),
                     ],
                   ),
                 );
               }).toList(),
               const SizedBox(height: 14),
-              if (user != null && user.id == item.ownerId)
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () async {
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  CreateItemScreen(user: user, item: item),
-                            ),
-                          );
-                          if (result == true && mounted) {
-                            Navigator.pop(context, true);
-                          }
-                        },
-                        style: TextButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text(
-                          'Edit Listing',
-                          style: TextStyle(fontSize: 16, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextButton(
-                        onPressed: _dropListing,
-                        style: TextButton.styleFrom(
-                          backgroundColor: accentSoft,
-                          shape: RoundedRectangleBorder(
-                            side: const BorderSide(
-                              color: Color(0xFF7C3AED),
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text(
-                          'Drop Listing',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF7C3AED),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else ...[
-                if (item.listingType == 'both')
+              if (item.status == 'available') ...[
+                if (user != null && user.id == item.ownerId)
                   Row(
                     children: [
                       Expanded(
                         child: TextButton(
-                          onPressed: () {
-                            if (user == null) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginScreen(),
-                                ),
-                              );
-                              return;
+                          onPressed: () async {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    CreateItemScreen(user: user, item: item),
+                              ),
+                            );
+                            if (result == true && mounted) {
+                              Navigator.pop(context, true);
                             }
-                            //todo: link to transaction page
                           },
                           style: TextButton.styleFrom(
                             backgroundColor: accent,
@@ -1126,7 +1580,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
-                            'Buy Now',
+                            'Edit Listing',
                             style: TextStyle(fontSize: 16, color: Colors.white),
                           ),
                         ),
@@ -1134,27 +1588,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextButton(
-                          onPressed: () async {
-                            if (user == null) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginScreen(),
-                                ),
-                              );
-                              return;
-                            }
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CreateItemScreen(
-                                  user: user,
-                                  repliedTo: item.id,
-                                ),
-                              ),
-                            );
-                            if (result == true) _fetchReplies();
-                          },
+                          onPressed: _dropListing,
                           style: TextButton.styleFrom(
                             backgroundColor: accentSoft,
                             shape: RoundedRectangleBorder(
@@ -1167,7 +1601,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text(
-                            'Offer Trade',
+                            'Drop Listing',
                             style: TextStyle(
                               fontSize: 16,
                               color: Color(0xFF7C3AED),
@@ -1177,81 +1611,163 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ),
                     ],
                   )
-                else if (item.listingType == 'sell')
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () {
-                        if (user == null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const LoginScreen(),
+                else ...[
+                  if (item.listingType == 'both')
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () {
+                              if (user == null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const LoginScreen(),
+                                  ),
+                                );
+                                return;
+                              }
+                              //todo: link to transaction page
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                          );
-                          return;
-                        }
-                        //todo: link to transaction page
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: accent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text(
-                        'Buy Now',
-                        style: TextStyle(fontSize: 16, color: Colors.white),
-                      ),
-                    ),
-                  )
-                else if (item.listingType == 'trade')
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () async {
-                        if (user == null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const LoginScreen(),
-                            ),
-                          );
-                          return;
-                        }
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => CreateItemScreen(
-                              user: user,
-                              repliedTo: item.id,
+                            child: const Text(
+                              'Buy Now',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                        );
-                        if (result == true) _fetchReplies();
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: accentSoft,
-                        shape: RoundedRectangleBorder(
-                          side: const BorderSide(
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () async {
+                              if (user == null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const LoginScreen(),
+                                  ),
+                                );
+                                return;
+                              }
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CreateItemScreen(
+                                    user: user,
+                                    repliedTo: item.id,
+                                  ),
+                                ),
+                              );
+                              if (result == true) _fetchReplies();
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: accentSoft,
+                              shape: RoundedRectangleBorder(
+                                side: const BorderSide(
+                                  color: Color(0xFF7C3AED),
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            child: const Text(
+                              'Offer Trade',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF7C3AED),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (item.listingType == 'sell')
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () {
+                          if (user == null) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            );
+                            return;
+                          }
+                          //todo: link to transaction page
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text(
+                          'Buy Now',
+                          style: TextStyle(fontSize: 16, color: Colors.white),
+                        ),
+                      ),
+                    )
+                  else if (item.listingType == 'trade')
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () async {
+                          if (user == null) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            );
+                            return;
+                          }
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreateItemScreen(
+                                user: user,
+                                repliedTo: item.id,
+                              ),
+                            ),
+                          );
+                          if (result == true) _fetchReplies();
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: accentSoft,
+                          shape: RoundedRectangleBorder(
+                            side: const BorderSide(
+                              color: Color(0xFF7C3AED),
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text(
+                          'Offer Trade',
+                          style: TextStyle(
+                            fontSize: 16,
                             color: Color(0xFF7C3AED),
-                            width: 2,
                           ),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text(
-                        'Offer Trade',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF7C3AED),
                         ),
                       ),
                     ),
-                  ),
+                ],
               ],
             ],
           ),
@@ -1269,19 +1785,24 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     Color color;
     switch (status.toLowerCase()) {
-      case 'available': color = Colors.green; break;
-      case 'dropped': color = Colors.red; break;
-      case 'reserved': color = Colors.orange; break;
+      case 'available':
       case 'accepted':
+        color = Colors.green;
+        break;
+      case 'dropped':
+      case 'rejected':
+        color = Colors.red;
+        break;
+      case 'reserved':
       case 'pending':
-      default: color = Colors.blue;
+        color = Colors.orange;
+        break;
+      default:
+        color = Colors.blue;
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 4,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(6),

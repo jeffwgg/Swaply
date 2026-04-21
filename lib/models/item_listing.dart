@@ -54,7 +54,10 @@ class ItemListing {
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
       imageUrls: List<String>.from(map['image_urls'] ?? []),
-      preference: parseString(map['preference'], fieldName: 'items.preference'),
+      preference: parseNullableString(
+        map['preference'],
+        fieldName: 'items.preference',
+      ),
       repliedTo: parseNullableInt(map['replied_to'], fieldName: 'items.replied_to'),
       createdAt: parseDateTime(
         map['created_at'],
