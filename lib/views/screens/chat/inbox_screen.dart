@@ -38,6 +38,7 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> {
   static const _mediaPrefix = '[[media]]';
+  static const _ragItemsPrefix = '[[rag_items_json]]';
   static const _chatMediaBucket = 'chat-media';
 
   int _selectedFilter = 0;
@@ -1038,16 +1039,17 @@ class _InboxScreenState extends State<InboxScreen> {
     required Map<int, AiMessage> messageById,
   }) {
     final parsed = _parseReplyMetadata(message.content);
-    final body = _parseMessageBody(parsed.messageText);
+    final ragParsed = _parseAiRagItems(parsed.messageText);
+    final body = _parseMessageBody(ragParsed.visibleText);
     final replied = parsed.repliedMessageId == null
         ? null
         : messageById[parsed.repliedMessageId!];
 
     final replyText = replied == null
         ? null
-        : _parseMessageBody(
+        : _parseMessageBody(_parseAiRagItems(
             _parseReplyMetadata(replied.content).messageText,
-          ).previewText;
+          ).visibleText).previewText;
 
     final local = message.createdAt.toLocal();
     final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
@@ -1067,7 +1069,74 @@ class _InboxScreenState extends State<InboxScreen> {
       deletedAt: null,
       replyToMessageId: parsed.repliedMessageId,
       replyToText: replyText,
+      ragItems: ragParsed.items,
     );
+  }
+
+  ({String visibleText, List<_AiRagItem> items}) _parseAiRagItems(
+    String content,
+  ) {
+    final markerIndex = content.indexOf(_ragItemsPrefix);
+    if (markerIndex == -1) {
+      return (visibleText: content.trim(), items: const []);
+    }
+
+    final visibleText = content.substring(0, markerIndex).trimRight();
+    final rawPayload = content
+        .substring(markerIndex + _ragItemsPrefix.length)
+        .trim();
+
+    if (rawPayload.isEmpty) {
+      return (visibleText: visibleText, items: const []);
+    }
+
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is! List) {
+        return (visibleText: visibleText, items: const []);
+      }
+
+      final ragItems = <_AiRagItem>[];
+      for (final entry in decoded) {
+        if (entry is! Map) {
+          continue;
+        }
+
+        final map = entry.map<String, dynamic>(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+
+        final itemIdRaw = map['id'];
+        final itemId = itemIdRaw is num
+            ? itemIdRaw.toInt()
+            : int.tryParse(itemIdRaw?.toString() ?? '');
+        final title = map['title']?.toString().trim() ?? '';
+
+        if (itemId == null || title.isEmpty) {
+          continue;
+        }
+
+        final priceValue = map['price'];
+        final price = (priceValue == null || priceValue.toString().trim().isEmpty)
+            ? null
+            : priceValue.toString();
+
+        ragItems.add(
+          _AiRagItem(
+            id: itemId,
+            title: title,
+            price: price,
+            listingType: map['listing_type']?.toString(),
+            condition: map['condition']?.toString(),
+            category: map['category']?.toString(),
+          ),
+        );
+      }
+
+      return (visibleText: visibleText, items: ragItems);
+    } catch (_) {
+      return (visibleText: visibleText, items: const []);
+    }
   }
 
   void _applyAiMessages(List<AiMessage> aiMessages) {
@@ -2871,7 +2940,7 @@ class _ChatPanelState extends State<_ChatPanel> {
                       if (widget.conversation.item != null) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'About: ${widget.conversation.item!.title}',
+                          'Item: ${widget.conversation.item!.title}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -3357,6 +3426,185 @@ class _MessageBubbleState extends State<_MessageBubble> {
     }
   }
 
+  Future<void> _openRagItemDetails(_AiRagItem ragItem) async {
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(ragItem.id);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
+  String _formatPrice(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Price unavailable';
+    }
+
+    final normalized = value.trim().replaceAll(',', '');
+    final parsed = double.tryParse(normalized);
+    if (parsed == null) {
+      return 'RM $value';
+    }
+
+    final hasFraction = parsed % 1 != 0;
+    return hasFraction
+        ? 'RM ${parsed.toStringAsFixed(2)}'
+        : 'RM ${parsed.toStringAsFixed(0)}';
+  }
+
+  String _formatListingType(String? raw) {
+    final value = (raw ?? '').trim().toLowerCase();
+    switch (value) {
+      case 'sell':
+        return 'Sell';
+      case 'trade':
+        return 'Trade';
+      case 'both':
+        return 'Both';
+      default:
+        return value.isEmpty ? '' : value[0].toUpperCase() + value.substring(1);
+    }
+  }
+
+  Widget _buildTag(String label) {
+    if (label.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEDE5FF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF6F45FF),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRagItemCard(_AiRagItem ragItem) {
+    final listingType = _formatListingType(ragItem.listingType);
+    final condition = (ragItem.condition ?? '').trim();
+    final shortDescription = condition.isNotEmpty
+        ? 'Condition: $condition'
+        : (ragItem.category ?? '').trim();
+
+    return Card(
+      elevation: 2.5,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
+      child: InkWell(
+        onTap: () => _openRagItemDetails(ragItem),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      ragItem.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2740),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Icon(
+                    Icons.open_in_new_rounded,
+                    size: 18,
+                    color: Color(0xFF7A54FF),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _formatPrice(ragItem.price),
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: Color(0xFF7A54FF),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (shortDescription.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  shortDescription,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF5C6B89),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (listingType.isNotEmpty) _buildTag(listingType),
+                  if (listingType.isNotEmpty && condition.isNotEmpty)
+                    const SizedBox(width: 6),
+                  if (condition.isNotEmpty) _buildTag(condition),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF7A54FF),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      'View Listing',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _playerStateSub?.cancel();
@@ -3451,6 +3699,14 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
+            if (message.media == null && message.ragItems.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Column(
+                children: message.ragItems
+                    .map<Widget>((ragItem) => _buildRagItemCard(ragItem))
+                    .toList(),
+              ),
+            ],
             if (message.media?.caption != null) ...[
               const SizedBox(height: 10),
               Container(
@@ -4140,6 +4396,7 @@ class _Message {
   final DateTime? deletedAt;
   final int? replyToMessageId;
   final String? replyToText;
+  final List<_AiRagItem> ragItems;
 
   const _Message({
     required this.id,
@@ -4154,9 +4411,28 @@ class _Message {
     this.deletedAt,
     this.replyToMessageId,
     this.replyToText,
+    this.ragItems = const [],
   });
 
   bool get isLocal => id < 0;
+}
+
+class _AiRagItem {
+  final int id;
+  final String title;
+  final String? price;
+  final String? listingType;
+  final String? condition;
+  final String? category;
+
+  const _AiRagItem({
+    required this.id,
+    required this.title,
+    this.price,
+    this.listingType,
+    this.condition,
+    this.category,
+  });
 }
 
 class _OfferCardData {
