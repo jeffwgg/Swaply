@@ -6,6 +6,7 @@ import '../models/app_user.dart';
 import '../repositories/users_repository.dart';
 
 class ProfileService {
+  static final _repo = UsersRepository();
   static const String _storageBucket = 'profile';
   static final ImagePicker _imagePicker = ImagePicker();
 
@@ -87,4 +88,123 @@ class ProfileService {
     return UsersRepository().getById(userId);
   }
 
+  //validation
+  static bool isValidPhoneNumber(String phone) {
+    phone = phone.replaceAll(RegExp(r'\s'), '');
+
+    if (!RegExp(r'^\d+$').hasMatch(phone)) {
+      return false;
+    }
+
+    return phone.length >= 11 && phone.length <= 12;
+  }
+
+  // ✅ Check duplicate phone
+  static Future<bool> isPhoneDuplicate(String phone, String userId) async {
+    try {
+      final response = await SupabaseService.client
+          .from('users')
+          .select('id')
+          .eq('phone', phone)
+          .neq('id', userId)
+          .maybeSingle();
+
+      return response != null;
+    } catch (e) {
+      print("Error checking phone duplicate: $e");
+      return false;
+    }
+  }
+
+  static Future<String?> updateProfile({
+    required String userId,
+    required Map<String, dynamic> updates,
+    required String? originalUsername,
+    required String currentUsername,
+    required bool isUsernameLocked,
+  }) async {
+    try {
+      final repo = UsersRepository();
+
+      // 🔍 username duplicate
+      if (originalUsername != null && currentUsername != originalUsername) {
+        final taken = await repo.isUsernameTaken(currentUsername, userId);
+        if (taken) return "USERNAME_TAKEN";
+      }
+
+      // 🔄 username flag
+      if (originalUsername != null &&
+          currentUsername != originalUsername &&
+          !isUsernameLocked) {
+        await repo.updateUsernameFlag();
+      }
+
+      // 💾 update user
+      await repo.updateUser(userId, updates);
+
+      return null;
+    } catch (e) {
+      print("Service error: $e");
+      return e.toString();
+    }
+  }
+  
+  static Future<String?> changePassword({
+    required String email,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      await _repo.changePassword(
+        email: email,
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+   static Future<String?> createProfile({
+    required String userId,
+    required String email,
+    required String username,
+    required String fullName,
+    required String bio,
+    required String phone,
+    required String gender,
+    required DateTime? birthdate,
+  }) async {
+    // 🔍 validation
+    if (fullName.isEmpty) return "Full name required";
+    if (username.length < 3) return "Username too short";
+    if (!isValidPhoneNumber(phone)) return "Invalid phone";
+
+    if (birthdate == null) {
+      return "Please select birthdate";
+    }
+
+    final age = DateTime.now().year - birthdate.year;
+    if (age < 13) return "Must be 13+";
+
+    // 🔍 duplicate
+    final phoneTaken = await _repo.isPhoneTakenForCreate(phone);
+    if (phoneTaken) return "PHONE_TAKEN";
+
+    // 💾 insert
+    await _repo.insertUser({
+      'id': userId,
+      'email': email,
+      'username': username,
+      'full_name': fullName,
+      'bio': bio,
+      'phone': phone,
+      'gender': gender,
+      'birthdate': birthdate.toIso8601String().split('T')[0],
+      'created_at': DateTime.now().toIso8601String(),
+    });
+
+    return null;
+  }
 }

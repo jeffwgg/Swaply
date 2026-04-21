@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '/services/supabase_service.dart';
+import '/services/profile_service.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -23,7 +24,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool isUsernameLocked = false;
   bool isGenderLocked = false;
   bool isBirthdateLocked = false;
-  bool phoneVerified = false;
   bool isSaving = false;
   bool isLoading = true;
   String? loadError;
@@ -46,67 +46,60 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   /// 📋 Load current user profile
   Future<void> _loadUserProfile() async {
+  setState(() {
+    isLoading = true;
+    loadError = null;
+  });
+
+  try {
+    final user = SupabaseService.client.auth.currentUser;
+    if (user == null) throw Exception("User session not found");
+
+    final profile = await ProfileService.getProfile(user.id);
+
+    if (!mounted) return;
+
+    if (profile == null) {
+      throw Exception("Profile not found");
+    }
+
+    print("📝 Loading profile for User ID: ${user.id}");
+
+    final metadata = user.userMetadata ?? <String, dynamic>{};
+    final usernameChangedFlag =
+        metadata['username_changed'] == true ||
+        metadata['username_changed'] == 'true';
+
     setState(() {
-      isLoading = true;
-      loadError = null;
-    });
+      fullNameController.text = profile.fullName ?? '';
+      usernameController.text = profile.username ?? '';
+      originalUsername = profile.username ?? '';
+      bioController.text = profile.bio ?? '';
+      phoneController.text = profile.phone ?? '';
+      originalPhone = profile.phone ?? '';
+      emailController.text = profile.email ?? '';
+      gender = profile.gender ?? 'Male';
 
-    try {
-      final user = SupabaseService.client.auth.currentUser;
-      if (user == null) throw Exception("User session not found");
+      isGenderLocked = profile.gender != null;
+      isBirthdateLocked = profile.birthdate != null;
+      isUsernameLocked = usernameChangedFlag;
 
-      print("📝 Loading profile for User ID: ${user.id}");
-
-      final profileResponse = await SupabaseService.client
-          .from('users')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      if (profileResponse == null) {
-        throw Exception("Profile not found");
+      if (profile.birthdate != null) {
+        selectedDate = profile.birthdate;
       }
 
-      // Pre-fill all fields
-      final metadata = user.userMetadata ?? <String, dynamic>{};
-      final usernameChangedFlag = metadata['username_changed'] == true ||
-          metadata['username_changed'] == 'true';
-
+      isLoading = false;
+    });
+  } catch (e) {
+    print("❌ Error loading profile: $e");
+    if (mounted) {
       setState(() {
-        fullNameController.text = profileResponse['full_name'] ?? '';
-        usernameController.text = profileResponse['username'] ?? '';
-        originalUsername = profileResponse['username'] ?? '';
-        bioController.text = profileResponse['bio'] ?? '';
-        phoneController.text = profileResponse['phone'] ?? '';
-        originalPhone = profileResponse['phone'] ?? '';
-        emailController.text = profileResponse['email'] ?? '';
-        gender = profileResponse['gender'] ?? 'Male';
-        isGenderLocked = profileResponse['gender'] != null;
-        isBirthdateLocked = profileResponse['birthdate'] != null;
-        phoneVerified = profileResponse['phone_verified'] == true ||
-            profileResponse['phone_verified'] == 't';
-        isUsernameLocked = usernameChangedFlag;
-
-        if (profileResponse['birthdate'] != null) {
-          selectedDate = DateTime.parse(profileResponse['birthdate']);
-        }
-
+        loadError = "Error: $e";
         isLoading = false;
       });
-
-      print("✅ Profile loaded successfully");
-    } catch (e) {
-      print("❌ Error loading profile: $e");
-      if (mounted) {
-        setState(() {
-          loadError = "Error: $e";
-          isLoading = false;
-        });
-      }
     }
   }
+}
 
   void _showError(String message) {
     if (!mounted) return;
@@ -202,8 +195,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    if (phone.length < 7) {
-      _showError("Please enter a valid phone number");
+    if (!ProfileService.isValidPhoneNumber(phone)) {
+      _showError("Phone number must be 11-12 digits and contain only numbers");
       return false;
     }
 
@@ -222,7 +215,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return true;
   }
 
-  /// 💾 Save profile updates to Supabase
   Future<void> _saveProfile() async {
     if (!_validateInput()) return;
 
@@ -233,21 +225,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (user == null) throw Exception("User session not found");
 
       final currentUsername = usernameController.text.trim();
-      if (originalUsername != null && currentUsername != originalUsername) {
-        final duplicateCheck = await SupabaseService.client
-            .from('users')
-            .select('id')
-            .eq('username', currentUsername)
-            .neq('id', user.id)
-            .maybeSingle();
 
-        if (duplicateCheck != null) {
-          _showError("This username is already taken. Please choose another one.");
+      // ✅ Phone duplicate still here (you already moved to service)
+      final currentPhone = phoneController.text.trim();
+      if (originalPhone != null && currentPhone != originalPhone) {
+        final isPhoneDuplicated = await ProfileService.isPhoneDuplicate(
+          currentPhone,
+          user.id,
+        );
+
+        if (isPhoneDuplicated) {
+          _showError("This phone number is already registered to another account");
           return;
         }
       }
-
-      print("📝 Updating profile for User ID: ${user.id}");
 
       final updates = {
         'full_name': fullNameController.text.trim(),
@@ -259,57 +250,35 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      print("📦 Updating data: $updates");
+      // 🔥 CALL SERVICE HERE
+      final error = await ProfileService.updateProfile(
+        userId: user.id,
+        updates: updates,
+        originalUsername: originalUsername,
+        currentUsername: currentUsername,
+        isUsernameLocked: isUsernameLocked,
+      );
 
-      if (originalUsername != null && currentUsername != originalUsername && !isUsernameLocked) {
-        await SupabaseService.client.auth.updateUser(
-          UserAttributes(
-            data: {'username_changed': true},
-          ),
-        );
-      }
-
-      if (originalPhone != null && phoneController.text.trim() != originalPhone) {
-        try {
-          await SupabaseService.client.auth.updateUser(
-            UserAttributes(
-              phone: phoneController.text.trim(),
-            ),
-          );
-          phoneVerified = false;
-        } catch (e) {
-          print('Phone verification update failed: $e');
+      if (error != null) {
+        if (error == "USERNAME_TAKEN") {
+          _showError("This username is already taken. Please choose another one.");
+        } else {
+          _showError("Error updating profile");
         }
+        return;
       }
-
-      await SupabaseService.client
-          .from('users')
-          .update(updates)
-          .eq('id', user.id);
 
       if (!mounted) return;
 
       _showSuccess("✅ Profile updated successfully!");
 
-      // 💡 Delay slightly before popping to show success message
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
         Navigator.pop(context);
       }
     } catch (e) {
-      print("❌ SAVE ERROR: $e");
-      String errorMsg = "Error: ${e.toString()}";
-
-      if (e.toString().contains("permission denied")) {
-        errorMsg = "Permission denied. Please check your account settings.";
-      } else if (e.toString().contains("connection")) {
-        errorMsg = "Network error. Please check your connection and try again.";
-      } else if (e.toString().contains("duplicate")) {
-        errorMsg = "This username is already taken. Please try another one.";
-      }
-
-      _showError(errorMsg);
+      _showError("Error updating profile");
     } finally {
       if (mounted) {
         setState(() => isSaving = false);
@@ -427,11 +396,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 hint: "Enter your phone number",
               ),
               const SizedBox(height: 8),
-              Text(
-                phoneVerified
-                    ? "Phone number is verified."
-                    : "Your phone number will be verified via Supabase OTP if configured.",
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              const Text(
+                "Phone number must be 11-12 digits",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 20),
 
