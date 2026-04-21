@@ -5,6 +5,7 @@ class ChatMessage {
   final int chatId;
   final String senderId;
   final String content;
+  final String? cachedMediaPath;
   final DateTime? readAt;
   final DateTime? editedAt;
   final DateTime? deletedAt;
@@ -16,6 +17,7 @@ class ChatMessage {
     required this.chatId,
     required this.senderId,
     required this.content,
+    this.cachedMediaPath,
     this.readAt,
     this.editedAt,
     this.deletedAt,
@@ -33,6 +35,10 @@ class ChatMessage {
       chatId: parseInt(map['chat_id'], fieldName: 'messages.chat_id'),
       senderId: parseString(map['sender_id'], fieldName: 'messages.sender_id'),
       content: parseString(map['content'], fieldName: 'messages.content'),
+      cachedMediaPath: parseNullableString(
+        map['cached_media_path'],
+        fieldName: 'messages.cached_media_path',
+      ),
       readAt: parseNullableDateTime(
         map['read_at'],
         fieldName: 'messages.read_at',
@@ -74,6 +80,7 @@ class ChatMessage {
       'chat_id': chatId,
       'sender_id': senderId,
       'content': content,
+      'cached_media_path': cachedMediaPath,
       'read_at': readAt?.toIso8601String(),
       'edited_at': editedAt?.toIso8601String(),
       'deleted_at': deletedAt?.toIso8601String(),

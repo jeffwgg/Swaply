@@ -78,8 +78,7 @@ class FavouriteRepository {
       
       return response.count;
     } catch (e) {
-      debugPrint('Error getting favourite count: $e');
-      return 0;
+      throw Exception('Failed to get favourite count: $e');
     }
   }
 
