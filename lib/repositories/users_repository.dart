@@ -97,6 +97,15 @@ class UsersRepository {
 
     return res != null;
   }
+  Future<bool> isPhoneTakenForCreate(String phone) async {
+    final res = await _client
+        .from(_table)
+        .select('id')
+        .eq('phone', phone)
+        .maybeSingle();
+
+    return res != null;
+  }
 
   Future<void> updateUser(String userId, Map<String, dynamic> data) async {
     await _client
