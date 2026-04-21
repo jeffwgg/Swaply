@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'register_step1_screen.dart';
 import '/services/supabase_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -36,14 +37,10 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
 
               // 🖼 Image (placeholder)
-              Container(
+              SvgPicture.asset(
+                'assets/Swaplylogin.svg',
                 height: 250,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Icon(Icons.image, size: 80),
+                fit: BoxFit.contain,
               ),
 
               const SizedBox(height: 24),
@@ -144,31 +141,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 30),
 
-              // ➖ Divider
-              Row(
-                children: const [
-                  Expanded(child: Divider()),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text("Or continue with"),
-                  ),
-                  Expanded(child: Divider()),
-                ],
-              ),
-
-              const SizedBox(height: 20),
-
-              // 🔘 Social buttons
-              Row(
-                children: [
-                  Expanded(child: _SocialButton("Google")),
-                  const SizedBox(width: 10),
-                  Expanded(child: _SocialButton("Apple")),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
               // 🔗 SIGN UP
               Center(
                 child: GestureDetector(
@@ -194,7 +166,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              const SizedBox(height: 300),
+              const SizedBox(height: 200),
             ],
           ),
         ),
@@ -333,8 +305,6 @@ class _LoginScreenState extends State<LoginScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          // 💡 关键：登录成功后关闭当前页面返回 MainShell
-          // AuthGate 会自动处理剩余的状态展示
           Navigator.pop(context);
         }
       }

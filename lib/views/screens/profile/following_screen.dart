@@ -33,32 +33,48 @@ class _FollowingScreenState extends State<FollowingScreen> {
     try {
       final followingData = await FollowService.getFollowing(widget.userId);
       final users = <AppUser>[];
-      
+
       for (var followData in followingData) {
         final followeeObj = followData['followee'] as Map<String, dynamic>?;
         if (followeeObj != null) {
           try {
+            // Parse created_at - use now() as fallback if not available
+            DateTime createdAt = DateTime.now();
+            if (followeeObj['created_at'] != null) {
+              try {
+                createdAt = DateTime.parse(followeeObj['created_at'] as String);
+              } catch (e) {
+                print('Error parsing created_at: $e');
+              }
+            }
+
             final user = AppUser(
-              id: followeeObj['id'] as String,
+              id: followeeObj['id'] as String? ?? '',
               username: followeeObj['username'] as String? ?? 'Unknown',
-              email: '',
+              email: followeeObj['email'] as String? ?? '',
               profileImage: followeeObj['profile_image'] as String?,
-              createdAt: DateTime.now(),
+              createdAt: createdAt,
             );
-            users.add(user);
-            
-            // Check if current user is following this person
-            final currentUser = SupabaseService.client.auth.currentUser;
-            if (currentUser != null) {
-              final isFollowing = await FollowService.isFollowing(currentUser.id, user.id);
-              setState(() => _followingState[user.id] = isFollowing);
+
+            // Only add if ID is not empty
+            if (user.id.isNotEmpty) {
+              users.add(user);
+
+              // Check if current user is following this person
+              final currentUser = SupabaseService.client.auth.currentUser;
+              if (currentUser != null) {
+                final isFollowing = await FollowService.isFollowing(currentUser.id, user.id);
+                if (mounted) {
+                  setState(() => _followingState[user.id] = isFollowing);
+                }
+              }
             }
           } catch (e) {
             print('Error parsing following user: $e');
           }
         }
       }
-      
+
       return users;
     } catch (e) {
       print('Error loading following: $e');
@@ -173,7 +189,7 @@ class _FollowingScreenState extends State<FollowingScreen> {
                 leading: CircleAvatar(
                   backgroundColor: Colors.purple,
                   backgroundImage: followingUser.profileImage != null
-                      ? NetworkImage(followingUser.profileImage!)
+                      ? NetworkImage('${followingUser.profileImage!}?t=${DateTime.now().millisecondsSinceEpoch}')
                       : null,
                   child: followingUser.profileImage == null
                       ? Text(

@@ -96,7 +96,23 @@ class ProfileService {
       return false;
     }
 
-    return phone.length >= 11 && phone.length <= 12;
+    return phone.length >= 10 && phone.length <= 12;
+  }
+
+  /// Validate full name - must contain only alphabetic characters and spaces
+  static bool isValidFullName(String fullName) {
+    fullName = fullName.trim();
+    // Only allow letters (a-z, A-Z) and spaces
+    return RegExp(r'^[a-zA-Z\s]+$').hasMatch(fullName);
+  }
+
+  /// Validate username - max 10 characters
+  static bool isValidUsername(String username) {
+    if (username.isEmpty) return false;
+    if (username.length < 3) return false;
+    if (username.length > 10) return false;
+    // Allow letters, numbers, and underscores
+    return RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(username);
   }
 
   // ✅ Check duplicate phone

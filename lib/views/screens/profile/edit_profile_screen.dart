@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/services.dart';
 import '/services/supabase_service.dart';
 import '/services/profile_service.dart';
 
@@ -165,6 +165,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
+    // ✅ NEW: Full name must not contain numbers
+    if (!ProfileService.isValidFullName(fullName)) {
+      _showError("Full name must contain only letters and spaces (no numbers)");
+      return false;
+    }
+
     if (username.isEmpty) {
       _showError("Username is required");
       return false;
@@ -175,8 +181,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    if (username.length > 20) {
-      _showError("Username must be at most 20 characters");
+    // ✅ UPDATED: Username max 10 characters (was 20)
+    if (username.length > 10) {
+      _showError("Username must be at most 10 characters");
       return false;
     }
 
@@ -195,8 +202,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
+    // ✅ UPDATED: Phone validation 10-12 digits (was 11-12)
     if (!ProfileService.isValidPhoneNumber(phone)) {
-      _showError("Phone number must be 11-12 digits and contain only numbers");
+      _showError("Phone number must be 10-12 digits and contain only numbers (e.g. 0123456789 or 012345678901)");
       return false;
     }
 
@@ -275,7 +283,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
-        Navigator.pop(context);
+        // ✅ Return true to indicate successful update
+        Navigator.pop(context, true);
       }
     } catch (e) {
       _showError("Error updating profile");
@@ -353,6 +362,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 controller: fullNameController,
                 icon: Icons.person,
                 hint: "Enter your full name",
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]')),
+                ],
               ),
               const SizedBox(height: 20),
 
@@ -363,6 +375,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 icon: Icons.account_circle,
                 hint: "Enter your username",
                 readOnly: isUsernameLocked,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(10),
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_]')),
+                ],
               ),
               const SizedBox(height: 8),
               Text(
@@ -394,10 +410,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 controller: phoneController,
                 icon: Icons.phone,
                 hint: "Enter your phone number",
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(12),
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
               ),
               const SizedBox(height: 8),
               const Text(
-                "Phone number must be 11-12 digits",
+                "Phone number must be 10-12 digits (e.g. 0123456789 or 012345678901)",
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 20),
@@ -575,12 +595,14 @@ class _InputField extends StatelessWidget {
   final IconData icon;
   final String hint;
   final bool readOnly;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _InputField({
     required this.controller,
     required this.icon,
     required this.hint,
     this.readOnly = false,
+    this.inputFormatters,
   });
 
   @override
@@ -588,6 +610,7 @@ class _InputField extends StatelessWidget {
     return TextField(
       controller: controller,
       readOnly: readOnly,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         prefixIcon: Icon(icon),
         hintText: hint,

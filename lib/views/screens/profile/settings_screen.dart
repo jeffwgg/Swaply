@@ -5,7 +5,7 @@ import 'change_password_screen.dart';
 import 'help_center_screen.dart';
 import 'about_app_screen.dart';
 
-
+// logout put where
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -34,11 +34,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // 👤 ACCOUNT
           _SectionTitle("Account"),
-          _Tile(Icons.person, "Edit Profile", onTap: () {
-            Navigator.push(
+          _Tile(Icons.person, "Edit Profile", onTap: () async {
+            // Listen for profile update and pop with result
+            final result = await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const EditProfileScreen()),
             );
+            
+            // If profile was updated, pass the result back to ProfileScreen
+            if (result == true && mounted) {
+              Navigator.pop(context, true);
+            }
           }),
           _Tile(Icons.lock, "Change Password", onTap: () {
             Navigator.push(

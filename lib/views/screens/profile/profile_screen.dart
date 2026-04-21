@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/views/screens/profile/profile_tabs.dart';
 import '/services/supabase_service.dart';
 import '/services/profile_service.dart';
+import '/services/stats_notifier.dart';
 import '/services/follow_service.dart';
 import '/services/saved_items_service.dart';
 import '../auth/login_screen.dart';
@@ -14,11 +15,6 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'followers_screen.dart';
 import 'following_screen.dart';
-
-bool isValidImage(File file) {
-  final ext = path.extension(file.path).toLowerCase();
-  return ['.jpg', '.jpeg', '.png'].contains(ext);
-}
 
 class ProfileScreen extends StatefulWidget {
   final String? viewingUserId; // If null, show current user's profile
@@ -32,11 +28,36 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isFollowing = false;
   bool _isLoadingFollow = false;
+  Future<Map<String, int>>? _statsFuture;
+  String? _profileUserId;
 
   @override
   void initState() {
     super.initState();
+    final user = SupabaseService.client.auth.currentUser;
+      _profileUserId = widget.viewingUserId ?? user?.id;
+      if (_profileUserId != null) {
+        _statsFuture = _loadStatistics(_profileUserId!);
+      }
     _checkFollowStatus();
+    StatsNotifier.refreshTrigger.addListener(_onStatsRefresh);
+  }
+  
+  void _onStatsRefresh() {
+    _refreshStats();
+  }
+
+  void _refreshStats() {
+    if (_profileUserId == null) return;
+    setState(() {
+      _statsFuture = _loadStatistics(_profileUserId!);
+    });
+  }
+
+  @override
+  void dispose() {
+    StatsNotifier.refreshTrigger.removeListener(_onStatsRefresh); 
+    super.dispose();
   }
 
   Future<void> _checkFollowStatus() async {
@@ -327,7 +348,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             radius: 45,
                             backgroundColor: Colors.purple,
                             backgroundImage: profile.profileImage != null
-                                ? NetworkImage(profile.profileImage!)
+                                ? NetworkImage('${profile.profileImage!}?t=${DateTime.now().millisecondsSinceEpoch}')
                                 : null,
                             child: profile.profileImage == null
                                 ? Text(
@@ -386,7 +407,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   // 📊 STATISTICS ROW (Following, Followers, Saved Items)
                   FutureBuilder<Map<String, int>>(
-                    future: _loadStatistics(profileUserId),
+                     future: _statsFuture,
                     builder: (context, statsSnapshot) {
                       if (!statsSnapshot.hasData) {
                         return const SizedBox(height: 80);
@@ -418,13 +439,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               onTap: () {
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(
+                                  MaterialPageRoute(  
                                     builder: (_) => FollowingScreen(
                                       userId: profileUserId,
                                       userName: fullName,
                                     ),
                                   ),
-                                );
+                                ).then((_) => _refreshStats());                
                               },
                             ),
                             Container(width: 1, height: 40, color: Colors.grey[300]),
@@ -440,7 +461,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       userName: fullName,
                                     ),
                                   ),
-                                );
+                                ).then((_) => _refreshStats());  
                               },
                             ),
                             Container(width: 1, height: 40, color: Colors.grey[300]),
@@ -494,33 +515,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
-
-                  const SizedBox(height: 16),
-
-                  // ℹ️ INFO SECTION
-                  // Container(
-                  //   margin: const EdgeInsets.symmetric(horizontal: 16),
-                  //   padding: const EdgeInsets.all(16),
-                  //   decoration: BoxDecoration(
-                  //     color: Colors.white,
-                  //     borderRadius: BorderRadius.circular(16),
-                  //     border: Border.all(color: Colors.grey.withOpacity(0.2)),
-                  //   ),
-                  //   child: Column(
-                  //     crossAxisAlignment: CrossAxisAlignment.start,
-                  //     children: [
-                  //       const Text(
-                  //         "Contact Information",
-                  //         style: TextStyle(fontWeight: FontWeight.bold),
-                  //       ),
-                  //       const SizedBox(height: 12),
-                  //       _buildInfoRow(Icons.email, "Email", email),
-                  //       const SizedBox(height: 12),
-                  //       _buildInfoRow(Icons.phone, "Phone", phone.isEmpty ? "Not set" : phone),
-                  //     ],
-                  //   ),
-                  // ),
-
                   const SizedBox(height: 20),
 
                   //tabs
@@ -528,7 +522,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     height: 400,
                     child: ProfileTabs(
                       userId: profileUserId,
-                      // isOwnProfile: isOwnProfile,
+                      isOwnProfile: isOwnProfile,
                     ),
                   ),
 
@@ -649,6 +643,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
       print('IMAGE URL: $url');
       if (url != null && mounted) {
+ 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile picture updated!'),
@@ -687,6 +682,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (_isFollowing) {
         await FollowService.unfollowUser(currentUser.id, widget.viewingUserId!);
         setState(() => _isFollowing = false);
+        _refreshStats(); 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Unfollowed!')),
@@ -695,6 +691,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       } else {
         await FollowService.followUser(currentUser.id, widget.viewingUserId!);
         setState(() => _isFollowing = true);
+         _refreshStats(); // ✅ 加这行
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(

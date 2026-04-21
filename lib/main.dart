@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'services/supabase_service.dart';
 import 'views/screens/main_shell.dart';
@@ -5,13 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'views/screens/auth/profile_setup_screen.dart';
 import 'views/screens/auth/reset_password_screen.dart';
 import 'package:swaply/services/local_db_service.dart';
-import 'services/supabase_service.dart';
 import 'services/stripe_payment_service.dart';
 import 'services/notification_service.dart';
-import 'views/screens/main_shell.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'views/screens/auth/profile_setup_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,9 +26,32 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<AuthState>? _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for auth state changes to handle navigation for specific events
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        print("🔄 Password recovery event detected - clearing navigation stack");
+        // Clear navigation stack to ensure ResetPasswordScreen (shown by AuthGate) is visible
+        _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Swaply',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -64,9 +83,16 @@ class AuthGate extends StatelessWidget {
         final event = snapshot.data?.event;
 
         // ✅ Password Recovery Flow - Show ResetPasswordScreen
-        if (event == AuthChangeEvent.passwordRecovery) {
+        // Only show if user is not fully authenticated (no active session with proper auth level)
+        if (event == AuthChangeEvent.passwordRecovery && session != null) {
           print("🔑 Password recovery flow detected");
           return const ResetPasswordScreen();
+        }
+
+        // ✅ If password was just reset, session might be updated - check if we should show home
+        if (event == AuthChangeEvent.userUpdated && user != null && user.emailConfirmedAt != null) {
+          print("✅ User was updated - likely password reset successful");
+          // Continue to normal flow below
         }
 
         // ✅ No user - Show MainShell (guest mode)

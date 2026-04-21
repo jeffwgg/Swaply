@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../main_shell.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -76,13 +75,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
       _showMessage('Password updated successfully!', color: Colors.green);
 
-      await Future.delayed(const Duration(milliseconds: 500));
+      // ✅ Wait a moment for auth state to update
+      await Future.delayed(const Duration(milliseconds: 1500));
+      
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainShell()),
-        (route) => false,
-      );
+      // ✅ Let the AuthGate handle the navigation naturally
+      // The auth state should now be updated and show the appropriate screen
+      // If we're still on ResetPasswordScreen, pop back
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
     } catch (e) {
       print('Reset password error: $e');
       var errorMsg = 'Failed to update password. Please try again.';
@@ -103,10 +106,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F3F8),
       appBar: AppBar(
-        title: const Text('Reset Password'),
-        backgroundColor: Colors.transparent,
+        title: const Text(
+          'Reset Password',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFFF4F3F8),
         elevation: 0,
         foregroundColor: Colors.black,
+        leading: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: const Icon(Icons.arrow_back_ios_new),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(

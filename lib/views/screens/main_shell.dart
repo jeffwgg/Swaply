@@ -4,6 +4,7 @@ import '../../models/app_user.dart';
 import '../../repositories/users_repository.dart';
 import '../widgets/common/bottom_nav_bar.dart';
 import '../screens/home/home_screen.dart';
+
 import '../screens/explore/discover_screen.dart';
 import '../screens/chat/inbox_screen.dart';
 import '../screens/profile/profile_screen.dart';
@@ -120,7 +121,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      const HomeScreen(),
+      SwipeHomeScreen(user: _user),
       DiscoverScreen(
         user: _user
       ),
