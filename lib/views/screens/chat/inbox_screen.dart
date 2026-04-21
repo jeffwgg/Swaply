@@ -303,6 +303,37 @@ class _InboxScreenState extends State<InboxScreen> {
     await _refreshUnreadNotificationCount();
   }
 
+  Future<void> _openConversationItemDetails(_Conversation conversation) async {
+    final itemId = conversation.chatThread?.itemId;
+    if (itemId == null) {
+      return;
+    }
+
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
+  }
+
   Future<void> _refreshUnreadNotificationCount() async {
     try {
       final count = await NotificationService.instance.unreadCount();
@@ -573,6 +604,22 @@ class _InboxScreenState extends State<InboxScreen> {
                                 final h = history[index];
                                 return InkWell(
                                   onTap: () {
+                                    final historyMatches = _buildSearchMatches(
+                                      h,
+                                    );
+                                    if (historyMatches.isNotEmpty) {
+                                      Navigator.pop(
+                                        context,
+                                        _SearchDialogResult(
+                                          query: h,
+                                          conversationId:
+                                              historyMatches.first
+                                                  .conversationId,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
                                     controller.text = h;
                                     controller.selection =
                                         TextSelection.fromPosition(
@@ -742,7 +789,7 @@ class _InboxScreenState extends State<InboxScreen> {
     if (result.conversationId != null) {
       _selectConversationById(
         result.conversationId!,
-        openMobile: focusConversationId != null,
+        openMobile: true,
       );
     } else if (focusConversationId != null) {
       _selectConversationById(focusConversationId, openMobile: true);
@@ -2058,6 +2105,8 @@ class _InboxScreenState extends State<InboxScreen> {
                             ),
                             onOpenConversationMenu: () =>
                                 _showConversationActions(selected),
+                            onOpenItemDetails: () =>
+                              _openConversationItemDetails(selected),
                           )
                         : const Center(
                             child: Text(
@@ -2102,6 +2151,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 isConversationPinned: _pinnedChats.contains(selected.id),
                 onOpenConversationMenu: () =>
                     _showConversationActions(selected),
+                onOpenItemDetails: () => _openConversationItemDetails(selected),
               );
             }
 
@@ -2318,6 +2368,7 @@ class _InboxPanel extends StatelessWidget {
                               (m) => !m.isMine && m.readAt == null,
                             ) ||
                             manuallyUnreadChats.contains(conversation.id);
+                        final showUnreadDot = hasUnread && index != selectedIndex;
                         return GestureDetector(
                           onLongPress: () =>
                               onConversationLongPress(conversation),
@@ -2477,7 +2528,7 @@ class _InboxPanel extends StatelessWidget {
                                       children: [
                                         if (conversation.item != null)
                                           _ItemThumb(item: conversation.item!),
-                                        if (hasUnread) ...[
+                                        if (showUnreadDot) ...[
                                           const SizedBox(height: 10),
                                           Container(
                                             width: 16,
@@ -2528,6 +2579,7 @@ class _ChatPanel extends StatefulWidget {
   final bool isRecordingVoice;
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
+  final VoidCallback onOpenItemDetails;
 
   const _ChatPanel({
     required this.conversation,
@@ -2550,6 +2602,7 @@ class _ChatPanel extends StatefulWidget {
     required this.isRecordingVoice,
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
+    required this.onOpenItemDetails,
   });
 
   @override
@@ -2676,6 +2729,102 @@ class _ChatPanelState extends State<_ChatPanel> {
     _scrollController.jumpTo(target);
   }
 
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _dayLabel(DateTime date) {
+    final local = date.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDay = DateTime(local.year, local.month, local.day);
+    final dayDiff = today.difference(messageDay).inDays;
+
+    if (dayDiff == 0) {
+      return 'TODAY';
+    }
+    if (dayDiff == 1) {
+      return 'YESTERDAY';
+    }
+
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    return '${months[local.month - 1]} ${local.day}, ${local.year}';
+  }
+
+  List<Widget> _buildTimelineWidgets() {
+    final widgets = <Widget>[];
+    DateTime? lastDay;
+
+    for (var index = 0; index < widget.conversation.messages.length; index++) {
+      final message = widget.conversation.messages[index];
+      final messageDay = message.createdAt.toLocal();
+
+      if (lastDay == null || !_isSameDay(lastDay, messageDay)) {
+        widgets.add(
+          Text(
+            _dayLabel(messageDay),
+            style: const TextStyle(
+              color: Color(0xFFC18EFF),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+        );
+        widgets.add(const SizedBox(height: 22));
+        lastDay = messageDay;
+      }
+
+      final showOffer =
+          widget.conversation.offer != null &&
+          index == 1 &&
+          widget.conversation.id != -1;
+
+      widgets.add(
+        _MessageBubble(
+          message: message,
+          onLongPress: () => widget.onLongPressMessage(message),
+        ),
+      );
+
+      if (showOffer) {
+        widgets.add(const SizedBox(height: 18));
+        widgets.add(_OfferCard(offer: widget.conversation.offer!));
+        widgets.add(const SizedBox(height: 18));
+      }
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(
+        const Text(
+          'TODAY',
+          style: TextStyle(
+            color: Color(0xFFC18EFF),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(height: 22));
+    }
+
+    return widgets;
+  }
+
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
@@ -2719,27 +2868,6 @@ class _ChatPanelState extends State<_ChatPanel> {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Container(
-                            width: 9,
-                            height: 9,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF32C965),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            widget.conversation.status,
-                            style: const TextStyle(
-                              color: Color(0xFF925AFF),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
                       if (widget.conversation.item != null) ...[
                         const SizedBox(height: 6),
                         Text(
@@ -2757,16 +2885,20 @@ class _ChatPanelState extends State<_ChatPanel> {
                   ),
                 ),
                 if (widget.conversation.item != null)
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8F4FF),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE6D9FF)),
-                    ),
-                    child: _ItemThumb(
-                      item: widget.conversation.item!,
-                      size: 48,
+                  InkWell(
+                    onTap: widget.onOpenItemDetails,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8F4FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6D9FF)),
+                      ),
+                      child: _ItemThumb(
+                        item: widget.conversation.item!,
+                        size: 48,
+                      ),
                     ),
                   ),
                 const SizedBox(width: 8),
@@ -2828,39 +2960,7 @@ class _ChatPanelState extends State<_ChatPanel> {
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
               child: Column(
-                children: [
-                  const Text(
-                    'TODAY',
-                    style: TextStyle(
-                      color: Color(0xFFC18EFF),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  ...widget.conversation.messages.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final message = entry.value;
-                    final showOffer =
-                        widget.conversation.offer != null &&
-                        index == 1 &&
-                        widget.conversation.id != -1;
-                    return Column(
-                      children: [
-                        _MessageBubble(
-                          message: message,
-                          onLongPress: () => widget.onLongPressMessage(message),
-                        ),
-                        if (showOffer) ...[
-                          const SizedBox(height: 18),
-                          _OfferCard(offer: widget.conversation.offer!),
-                          const SizedBox(height: 18),
-                        ],
-                      ],
-                    );
-                  }),
-                ],
+                children: _buildTimelineWidgets(),
               ),
             ),
           ),

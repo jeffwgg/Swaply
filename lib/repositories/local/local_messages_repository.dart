@@ -208,6 +208,19 @@ class LocalMessagesRepository {
     await _emit(messages.first.chatId);
   }
 
+  Future<void> updateCachedMediaPath({
+    required int messageId,
+    required String cachedPath,
+  }) async {
+    final db = await _localDbService.database;
+    await db.update(
+      'chat_messages_cache',
+      {'cached_media_path': cachedPath},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
   Future<void> markChatReadLocally({
     required int chatId,
     required String viewerId,
@@ -327,6 +340,7 @@ class LocalMessagesRepository {
     ChatMessage message, {
     required String syncedAt,
     String? clientGeneratedId,
+    String? cachedMediaPath,
   }) {
     return {
       'id': message.id,
@@ -334,6 +348,7 @@ class LocalMessagesRepository {
       'chat_id': message.chatId,
       'sender_id': message.senderId,
       'content': message.content,
+      'cached_media_path': cachedMediaPath,
       'read_at': message.readAt?.toUtc().toIso8601String(),
       'edited_at': message.editedAt?.toUtc().toIso8601String(),
       'deleted_at': message.deletedAt?.toUtc().toIso8601String(),
