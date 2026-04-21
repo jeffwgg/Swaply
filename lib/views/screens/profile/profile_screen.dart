@@ -11,6 +11,14 @@ import '../auth/login_screen.dart';
 import 'settings_screen.dart';
 import '../../../models/app_user.dart';
 import 'dart:io';
+import 'package:path/path.dart' as path;
+import 'followers_screen.dart';
+import 'following_screen.dart';
+
+bool isValidImage(File file) {
+  final ext = path.extension(file.path).toLowerCase();
+  return ['.jpg', '.jpeg', '.png'].contains(ext);
+}
 
 class ProfileScreen extends StatefulWidget {
   final String? viewingUserId; // If null, show current user's profile
@@ -261,8 +269,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final fullName = profile.fullName ?? 'User';
         final username = profile.username ?? 'user';
         final bio = profile.bio ?? 'No bio yet';
-        final email = profile.email ?? '';
-        final phone = profile.phone ?? '';
 
           return Scaffold(
           backgroundColor: const Color(0xFFF4F3F8),
@@ -276,10 +282,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        GestureDetector(
-                          onTap: () => Navigator.pop(context),
-                          child: const Icon(Icons.arrow_back_ios_new),
-                        ),
+                        // Show back button only when viewing another user's profile
+                        if (!isOwnProfile)
+                          GestureDetector(
+                            onTap: () {
+                              if (Navigator.canPop(context)) {
+                                Navigator.pop(context);
+                              }
+                            },
+                            child: const Icon(Icons.arrow_back_ios_new),
+                          )
+                        else
+                          const SizedBox(width: 40),
                         Text(
                           fullName,
                           style: const TextStyle(fontWeight: FontWeight.bold),
@@ -355,46 +369,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            "@$username",
-                            style: const TextStyle(color: Colors.grey, fontSize: 14),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFFFFD700), Color(0xFFFFA500)],
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.yellow.withOpacity(0.3),
-                                  blurRadius: 6,
-                                  spreadRadius: 1,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              children: const [
-                                Icon(Icons.star, size: 12, color: Colors.white),
-                                SizedBox(width: 2),
-                                Text(
-                                  '4.5/5',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                      Text(
+                        "@$username",
+                        style: const TextStyle(color: Colors.grey, fontSize: 14),
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -438,11 +415,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             _StatColumn(
                               value: stats['following'].toString(),
                               label: 'Following',
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => FollowingScreen(
+                                      userId: profileUserId,
+                                      userName: fullName,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                             Container(width: 1, height: 40, color: Colors.grey[300]),
                             _StatColumn(
                               value: stats['followers'].toString(),
                               label: 'Followers',
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => FollowersScreen(
+                                      userId: profileUserId,
+                                      userName: fullName,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                             Container(width: 1, height: 40, color: Colors.grey[300]),
                             _StatColumn(
@@ -525,7 +524,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 20),
 
                   //tabs
-                  SizedBox(height: 400, child: ProfileTabs(userId: user.id)),
+                  SizedBox(
+                    height: 400,
+                    child: ProfileTabs(
+                      userId: profileUserId,
+                      isOwnProfile: isOwnProfile,
+                    ),
+                  ),
 
                   const SizedBox(height: 20),
                 ],
@@ -558,8 +563,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final following = await FollowService.getFollowingCount(userId);
     final followers = await FollowService.getFollowerCount(userId);
     final saved = await SavedItemsService.getTotalSavedCount(userId);
-
-    
 
     return {
       'following': following,
@@ -606,6 +609,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  bool isValidImage(File file) {
+    final ext = path.extension(file.path).toLowerCase();
+    return ['.jpg', '.jpeg', '.png'].contains(ext);
+  }
+
   Future<void> _uploadProfilePicture({required bool isCamera}) async {
     try {
       final File? imageFile = isCamera
@@ -613,18 +621,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
           : await ProfileService.pickImageFromGallery();
 
       if (imageFile == null) return;
-
+      if (imageFile.lengthSync() > 2 * 1024 * 1024) {
+        // 2MB limit
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Image must be less than 2MB'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
       final user = SupabaseService.client.auth.currentUser;
       if (user == null) return;
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading profile picture...')),
-        );
+      if (!isValidImage(imageFile)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Only JPG, JPEG, PNG images are allowed'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
       }
 
       final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
-
+      print('IMAGE URL: $url');
       if (url != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -702,15 +725,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _StatColumn extends StatelessWidget {
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
   const _StatColumn({
     required this.value,
     required this.label,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final content = Column(
       children: [
         Text(
           value,
@@ -729,6 +754,15 @@ class _StatColumn extends StatelessWidget {
           ),
         ),
       ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: content,
     );
   }
 }

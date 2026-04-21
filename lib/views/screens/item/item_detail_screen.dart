@@ -260,6 +260,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => ProfileScreen(
+                      viewingUserId: widget.item.ownerId,
                     ),
                   ),
                 );
@@ -900,7 +901,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (context) => ProfileScreen(
-                                            
+                                              viewingUserId: reply.ownerId,
                                             ),
                                           ),
                                         );

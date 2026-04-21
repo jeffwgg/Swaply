@@ -6,7 +6,7 @@ import '../models/app_user.dart';
 import '../repositories/users_repository.dart';
 
 class ProfileService {
-  static const String _storageBucket = 'avatars';
+  static const String _storageBucket = 'profile';
   static final ImagePicker _imagePicker = ImagePicker();
 
   /// Pick an image from camera
@@ -40,14 +40,14 @@ class ProfileService {
   /// Upload image to Supabase Storage and update user profile
   static Future<String?> uploadProfilePicture(File imageFile, String userId) async {
     try {
-      final fileName = 'avatar_$userId.jpg';
+      final filePath = '$userId/profile.jpg';
       final fileBytes = await imageFile.readAsBytes();
 
       // Upload to storage
       await SupabaseService.client.storage
           .from(_storageBucket)
           .uploadBinary(
-            fileName,
+            filePath,
             fileBytes,
             fileOptions: const FileOptions(
               cacheControl: '3600',
@@ -58,7 +58,7 @@ class ProfileService {
       // Get public URL
       final publicUrl = SupabaseService.client.storage
           .from(_storageBucket)
-          .getPublicUrl(fileName);
+          .getPublicUrl(filePath);
 
       // Update user profile in database
       await SupabaseService.client
@@ -76,8 +76,8 @@ class ProfileService {
   /// Delete old avatar if exists
   static Future<void> deleteOldAvatar(String userId) async {
     try {
-      final fileName = 'avatar_$userId.jpg';
-      await SupabaseService.client.storage.from(_storageBucket).remove([fileName]);
+      final filePath = '$userId/profile.jpg';
+      await SupabaseService.client.storage.from(_storageBucket).remove([filePath]);
     } catch (e) {
       print('Note: Could not delete old avatar: $e');
     }

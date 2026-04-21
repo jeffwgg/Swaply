@@ -99,7 +99,7 @@ class FollowService {
     try {
       final result = await SupabaseService.client
           .from('follows')
-          .select('follower_id, users!inner(id, username, avatar_url)')
+          .select('follower_id, follower:follower_id(id, username, profile_image)')
           .eq('followee_id', userId);
       return List<Map<String, dynamic>>.from(result);
     } catch (e) {
@@ -113,7 +113,7 @@ class FollowService {
     try {
       final result = await SupabaseService.client
           .from('follows')
-          .select('followee_id, users!inner(id, username, avatar_url)')
+          .select('followee_id, followee:followee_id(id, username, profile_image)')
           .eq('follower_id', userId);
       return List<Map<String, dynamic>>.from(result);
     } catch (e) {

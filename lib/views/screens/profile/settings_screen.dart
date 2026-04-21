@@ -107,58 +107,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               if (confirm == true && mounted) {
                 try {
-                  // Show loading
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (_) => const Dialog(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text("Logging out..."),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-
-                  // Perform logout
+                  // Perform logout immediately
                   print("🔐 Signing out from Supabase...");
                   await SupabaseService.logout();
 
                   print("✅ Logout successful!");
 
-                  // Close loading dialog
-                  if (mounted) Navigator.pop(context);
-
-                  // Show success message
+                  // Clear all routes and navigate to login
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("✅ You've been logged out successfully"),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 2),
-                      ),
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      '/',
+                      (route) => false,
                     );
                   }
-
-                  // AuthGate will automatically handle the navigation back to guest mode
-                  // No need to manually navigate - the auth stream will trigger a rebuild
                 } catch (e) {
                   print("❌ Logout error: $e");
 
-                  // Close loading dialog if still open
-                  if (mounted) {
-                    try {
-                      Navigator.pop(context);
-                    } catch (_) {}
-                  }
-
-                  // Show error
+                  // Show error message
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
