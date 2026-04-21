@@ -13,6 +13,7 @@ Future<void> main() async {
   await SupabaseService.initialize();
   await LocalDbService.instance.initialize();
   await NotificationService.instance.initialize();
+  await StripePaymentService.ensureStripeConfigured();
   runApp(const MyApp());
 }
 
