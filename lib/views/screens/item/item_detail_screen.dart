@@ -57,13 +57,19 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _fetchOwner() async {
-    final user = await UsersRepository().getById(widget.item.ownerId);
-    log('here $widget.item.ownerId');
-    log(user.toString());
+    AppUser? owner;
+    try {
+      owner = await UsersRepository().getById(widget.item.ownerId);
+    } catch (e) {
+      log('Owner lookup fallback used: $e');
+    }
+
+    final fallbackName = (widget.item.ownerUsername ?? '').trim();
+    final resolvedName = (owner?.username ?? fallbackName).trim();
     if (mounted) {
       setState(() {
-        _ownerName = user?.username ?? 'Unknown';
-        _ownerAuthUserId = user?.id;
+        _ownerName = resolvedName.isEmpty ? 'Unknown' : resolvedName;
+        _ownerAuthUserId = owner?.id;
       });
     }
   }
@@ -72,8 +78,15 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     try {
       final replies = await ItemsRepository().getReplyList(widget.item.id);
       for (var r in replies) {
-        final user = await UsersRepository().getById(r.ownerId);
-        _replyOwnerNames[r.id] = user?.username ?? 'Unknown';
+        final fallbackName = (r.ownerUsername ?? '').trim();
+        try {
+          final user = await UsersRepository().getById(r.ownerId);
+          final resolved = (user?.username ?? fallbackName).trim();
+          _replyOwnerNames[r.id] = resolved.isEmpty ? 'Unknown' : resolved;
+        } catch (_) {
+          _replyOwnerNames[r.id] =
+              fallbackName.isEmpty ? 'Unknown' : fallbackName;
+        }
       }
       if (mounted) {
         setState(() {

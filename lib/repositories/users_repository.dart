@@ -48,10 +48,11 @@ class UsersRepository {
         .eq('id', id)
         .maybeSingle();
 
-    log('log $response');
     if (response == null) {
       return null;
     }
+
+    log('log $response');
 
     return AppUser.fromMap(_requireMap(response, operation: 'getById'));
   }
