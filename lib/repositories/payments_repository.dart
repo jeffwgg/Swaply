@@ -58,5 +58,24 @@ class PaymentsRepository {
         _requireListOfMaps(response, operation: 'listForTransaction');
     return rows.map<Payment>(Payment.fromMap).toList();
   }
+
+  Future<void> updateStatusForTransaction({
+    required int transactionId,
+    required String paymentStatus,
+  }) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .update({'payment_status': paymentStatus})
+        .eq('transaction_id', transactionId)
+        .select('payment_id');
+
+    final rows =
+        _requireListOfMaps(response, operation: 'updateStatusForTransaction');
+    if (rows.isEmpty) {
+      throw StateError(
+        'No payment updated. This is usually caused by RLS/permissions.',
+      );
+    }
+  }
 }
 

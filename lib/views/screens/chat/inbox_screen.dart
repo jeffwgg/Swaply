@@ -19,12 +19,19 @@ import '../../../models/chat_pinned_message.dart';
 import '../../../models/chat_thread.dart';
 import '../../../models/ai_message.dart';
 import '../../../models/ai_pinned_message.dart';
+import '../../../models/transaction.dart';
 import '../../../repositories/items_repository.dart';
+import '../../../repositories/payments_repository.dart';
+import '../../../repositories/transactions_repository.dart';
 import '../../../repositories/users_repository.dart';
 import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
+import '../../../models/checkout_flow_kind.dart';
+import '../../../models/meetup_address_option.dart';
+import '../../../views/screens/checkout/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
+import '../../../views/screens/profile/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -1173,6 +1180,16 @@ class _InboxScreenState extends State<InboxScreen> {
       final itemId = itemIdRaw is num
           ? itemIdRaw.toInt()
           : int.tryParse(itemIdRaw?.toString() ?? '');
+      final offeredItemIdRaw = map['offered_item_id'];
+      final offeredItemId = offeredItemIdRaw is num
+          ? offeredItemIdRaw.toInt()
+          : int.tryParse(offeredItemIdRaw?.toString() ?? '');
+      final transactionIdRaw = map['transaction_id'];
+      final transactionId = transactionIdRaw is num
+          ? transactionIdRaw.toInt()
+          : int.tryParse(transactionIdRaw?.toString() ?? '');
+      final buyerId = map['buyer_id']?.toString().trim();
+      final sellerId = map['seller_id']?.toString().trim();
       final media = _MessageMedia(
         type: type,
         url: urlValue,
@@ -1180,6 +1197,10 @@ class _InboxScreenState extends State<InboxScreen> {
         durationSeconds: durationSeconds,
         caption: caption == null || caption.isEmpty ? null : caption,
         itemId: itemId,
+        offeredItemId: offeredItemId,
+        transactionId: transactionId,
+        buyerId: buyerId == null || buyerId.isEmpty ? null : buyerId,
+        sellerId: sellerId == null || sellerId.isEmpty ? null : sellerId,
       );
       return _ParsedMessageBody.media(media);
     } catch (_) {
@@ -1196,6 +1217,10 @@ class _InboxScreenState extends State<InboxScreen> {
         'duration_seconds': media.durationSeconds,
       if (media.caption != null) 'caption': media.caption,
       if (media.itemId != null) 'item_id': media.itemId,
+      if (media.offeredItemId != null) 'offered_item_id': media.offeredItemId,
+      if (media.transactionId != null) 'transaction_id': media.transactionId,
+      if (media.buyerId != null) 'buyer_id': media.buyerId,
+      if (media.sellerId != null) 'seller_id': media.sellerId,
     };
     return '$_mediaPrefix${jsonEncode(payload)}';
   }
@@ -3357,6 +3382,53 @@ class _MessageBubbleState extends State<_MessageBubble> {
     }
   }
 
+  Future<void> _openTransactionDetails(_MessageMedia media) async {
+    final txId = media.transactionId;
+    if (txId == null) return;
+
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      if (authUser == null) return;
+
+      final viewer = await UsersRepository().getById(authUser.id);
+      if (viewer == null || !mounted) return;
+
+      final tx = await TransactionsRepository().getById(txId);
+      if (tx == null || !mounted) return;
+
+      final itemsRepo = ItemsRepository();
+      final item = await itemsRepo.getById(tx.itemId);
+      final tradedItem = tx.tradedItemId == null
+          ? null
+          : await itemsRepo.getById(tx.tradedItemId!);
+
+      final seller = await UsersRepository().getById(tx.sellerId);
+      final payments = await PaymentsRepository().listForTransaction(tx.transactionId);
+      final latestPayment = payments.isNotEmpty ? payments.first : null;
+
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TransactionDetailScreen(
+            viewer: viewer,
+            tx: tx,
+            item: item,
+            tradedItem: tradedItem,
+            seller: seller,
+            payment: latestPayment,
+            isBuyer: tx.buyerId == viewer.id,
+            onChanged: () {},
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open transaction details.')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _playerStateSub?.cancel();
@@ -3486,7 +3558,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
             ],
             if (isImageOnly && message.media?.itemId != null) ...[
               const SizedBox(height: 10),
-              _buildItemActionButtons(),
+              _buildItemActionButtons(message.media!),
             ],
           ],
         ),
@@ -3640,51 +3712,168 @@ class _MessageBubbleState extends State<_MessageBubble> {
     }
   }
 
-  Widget _buildItemActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: () {
-              // impleement ethan transactiom for those button action
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF6F45FF),
-              side: const BorderSide(color: Color(0xFFB895FF), width: 1.4),
-              backgroundColor: const Color(0xFFF8F3FF),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+  Widget _buildItemActionButtons(_MessageMedia media) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    final isBuyer = currentUserId != null && media.buyerId == currentUserId;
+    final canAct = isBuyer &&
+        media.transactionId != null &&
+        media.itemId != null &&
+        media.offeredItemId != null &&
+        media.sellerId != null;
+
+    final txId = media.transactionId;
+    if (txId == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<Transaction?>(
+      future: TransactionsRepository().getById(txId),
+      builder: (context, snap) {
+        final status = snap.data?.transactionStatus ?? 'pending';
+        final showViewDetails = status != 'pending';
+
+        if (showViewDetails) {
+          return SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => _openTransactionDetails(media),
+              style: ElevatedButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: const Color(0xFF7A54FF),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'View details',
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: ElevatedButton(
-            onPressed: () {
-              // impleement ethan transactiom for those button action
-            },
-            style: ElevatedButton.styleFrom(
-              foregroundColor: Colors.white,
-              backgroundColor: const Color(0xFF7A54FF),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: !canAct
+                    ? null
+                    : () async {
+                        try {
+                          await ItemsRepository().updateStatus(
+                            'available',
+                            media.itemId!,
+                          );
+                          await ItemsRepository().updateStatus(
+                            'available',
+                            media.offeredItemId!,
+                          );
+                          await TransactionsRepository().updateStatus(
+                            transactionId: media.transactionId!,
+                            transactionStatus: 'cancelled',
+                          );
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Offer cancelled.')),
+                          );
+                          setState(() {});
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Cancel failed: $e')),
+                          );
+                        }
+                      },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF6F45FF),
+                  side: const BorderSide(
+                    color: Color(0xFFB895FF),
+                    width: 1.4,
+                  ),
+                  backgroundColor: const Color(0xFFF8F3FF),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
-            child: const Text(
-              'Proceed',
-              style: TextStyle(fontWeight: FontWeight.w700),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: !canAct
+                    ? null
+                    : () async {
+                        try {
+                          final item =
+                              await ItemsRepository().getById(media.itemId!);
+                          if (item == null) {
+                            throw StateError('Item not found.');
+                          }
+                          final offered = await ItemsRepository().getById(
+                            media.offeredItemId!,
+                          );
+                          if (offered == null) {
+                            throw StateError('Offered item not found.');
+                          }
+                          final seller = await UsersRepository().getById(
+                            media.sellerId!,
+                          );
+                          final meetups = MeetupAddressOption.fromSellerItem(item);
+
+                          if (!mounted) return;
+                          await Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CheckoutScreen(
+                                flowKind: CheckoutFlowKind.swap,
+                                primaryItem: item,
+                                swapItem: offered,
+                                sellerDisplayName:
+                                    seller?.username ?? 'Seller',
+                                sellerId: media.sellerId!,
+                                buyerId: currentUserId!,
+                                sellerMeetupOptions: meetups,
+                                // trade: meet-up only, no payment
+                                tradeTransactionId: media.transactionId!,
+                                meetUpOnly: true,
+                                hidePaymentSection: true,
+                              ),
+                            ),
+                          );
+                          if (!mounted) return;
+                          setState(() {});
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Proceed failed: $e')),
+                          );
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFF7A54FF),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Proceed',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -4098,6 +4287,10 @@ class _MessageMedia {
   final int? durationSeconds;
   final String? caption;
   final int? itemId;
+  final int? offeredItemId;
+  final int? transactionId;
+  final String? buyerId;
+  final String? sellerId;
 
   const _MessageMedia({
     required this.type,
@@ -4106,6 +4299,10 @@ class _MessageMedia {
     this.durationSeconds,
     this.caption,
     this.itemId,
+    this.offeredItemId,
+    this.transactionId,
+    this.buyerId,
+    this.sellerId,
   });
 
   String get defaultLabel {

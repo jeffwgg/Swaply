@@ -9,6 +9,8 @@ import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
+import 'package:swaply/views/screens/profile/seller_profile_screen.dart';
+import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
@@ -98,7 +100,7 @@ class TransactionTab extends StatefulWidget {
 }
 
 class _TransactionTabState extends State<TransactionTab> {
-  late final Future<List<_TransactionRow>> _future;
+  late Future<List<_TransactionRow>> _future;
 
   @override
   void initState() {
@@ -106,10 +108,17 @@ class _TransactionTabState extends State<TransactionTab> {
     _future = _loadRows();
   }
 
+  void _reload() {
+    setState(() {
+      _future = _loadRows();
+    });
+  }
+
   Future<List<_TransactionRow>> _loadRows() async {
     final repo = TransactionsRepository();
     final paymentsRepo = PaymentsRepository();
     final itemsRepo = ItemsRepository();
+    final usersRepo = UsersRepository();
 
     final buyerTxs = await repo.listForBuyer(widget.user.id);
     final sellerTxs = await repo.listForSeller(widget.user.id);
@@ -131,9 +140,21 @@ class _TransactionTabState extends State<TransactionTab> {
     final rows = <_TransactionRow>[];
     for (final tx in unique) {
       final item = await itemsRepo.getById(tx.itemId);
+      final tradedItem = tx.tradedItemId == null
+          ? null
+          : await itemsRepo.getById(tx.tradedItemId!);
       final payments = await paymentsRepo.listForTransaction(tx.transactionId);
       final latestPayment = payments.isNotEmpty ? payments.first : null;
-      rows.add(_TransactionRow(tx: tx, item: item, payment: latestPayment));
+      final seller = await usersRepo.getById(tx.sellerId);
+      rows.add(
+        _TransactionRow(
+          tx: tx,
+          item: item,
+          tradedItem: tradedItem,
+          payment: latestPayment,
+          seller: seller,
+        ),
+      );
     }
     return rows;
   }
@@ -158,8 +179,10 @@ class _TransactionTabState extends State<TransactionTab> {
           return _buildEmptyState(Icons.receipt_long_outlined, "No transactions yet");
         }
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(12),
+        return SafeArea(
+          top: false,
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
           itemCount: rows.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
@@ -167,6 +190,8 @@ class _TransactionTabState extends State<TransactionTab> {
             final tx = row.tx;
             final item = row.item;
             final title = item?.name ?? 'Item #${tx.itemId}';
+            final sellerName = row.seller?.username ?? 'Seller';
+            final isBuyer = tx.buyerId == widget.user.id;
 
             final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
             final amountLabel = amount > 0 ? 'RM ${amount.toStringAsFixed(2)}' : 'RM 0.00';
@@ -174,9 +199,89 @@ class _TransactionTabState extends State<TransactionTab> {
             final status = tx.transactionStatus ?? 'unknown';
             final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
 
-            final paymentLine = row.payment == null
-                ? null
-                : '${row.payment!.paymentMethod} • ${row.payment!.paymentStatus}';
+            Future<void> onReceived() async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Confirm received'),
+                  content: const Text(
+                    'Confirm you have received the product? This will complete the transaction.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Back'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Confirm'),
+                    ),
+                  ],
+                ),
+              );
+              if (ok != true) return;
+              try {
+                await ItemsRepository().updateStatus('completed', tx.itemId);
+                await TransactionsRepository().updateStatus(
+                  transactionId: tx.transactionId,
+                  transactionStatus: 'completed',
+                );
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Marked as received.')),
+                );
+                _reload();
+              } catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to mark received: $e')),
+                );
+              }
+            }
+
+            Future<void> onCancel() async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Cancel transaction'),
+                  content: const Text('Cancel this transaction?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Back'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Cancel transaction'),
+                    ),
+                  ],
+                ),
+              );
+              if (ok != true) return;
+              try {
+                await ItemsRepository().updateStatus('available', tx.itemId);
+                await TransactionsRepository().updateStatus(
+                  transactionId: tx.transactionId,
+                  transactionStatus: 'cancelled',
+                );
+                await PaymentsRepository().updateStatusForTransaction(
+                  transactionId: tx.transactionId,
+                  paymentStatus: 'refunded',
+                );
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Cancelled. Refund will be issued in 3 working days.'),
+                  ),
+                );
+                _reload();
+              } catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to cancel: $e')),
+                );
+              }
+            }
 
             return Container(
               decoration: BoxDecoration(
@@ -191,59 +296,120 @@ class _TransactionTabState extends State<TransactionTab> {
                   ),
                 ],
               ),
-              child: ListTile(
-                onTap: item == null
-                    ? null
-                    : () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ItemDetailsScreen(
-                              user: widget.user,
-                              item: item,
-                            ),
-                          ),
-                        );
-                      },
-                title: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () async {
+                  await Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TransactionDetailScreen(
+                        viewer: widget.user,
+                        tx: tx,
+                        item: item,
+                        tradedItem: row.tradedItem,
+                        seller: row.seller,
+                        payment: row.payment,
+                        isBuyer: isBuyer,
+                        onChanged: _reload,
+                      ),
+                    ),
+                  );
+                  _reload();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(dateLabel),
-                      const SizedBox(height: 4),
-                      Text('Status: $status'),
-                      if (paymentLine != null) ...[
-                        const SizedBox(height: 4),
-                        Text('Payment: $paymentLine'),
-                      ],
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: _TxnThumb(url: item?.imageUrls.isNotEmpty == true ? item!.imageUrls.first : null),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w900),
+                                ),
+                                const SizedBox(height: 6),
+                                GestureDetector(
+                                  onTap: () {
+                                    if (row.seller == null) return;
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => SellerProfileScreen(
+                                          viewer: widget.user,
+                                          sellerId: row.seller!.id,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    sellerName,
+                                    style: const TextStyle(
+                                      color: Color(0xFF7C3AED),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(dateLabel, style: const TextStyle(color: Colors.grey)),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                amountLabel,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF5B21B6),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              _StatusBadge(status: status, mini: true),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (status == 'pending')
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: onCancel,
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            if (isBuyer) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onReceived,
+                                  child: const Text('Received'),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                     ],
                   ),
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      amountLabel,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF5B21B6),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    _StatusBadge(status: status, mini: true),
-                  ],
                 ),
               ),
             );
           },
+          ),
         );
       },
     );
@@ -253,9 +419,61 @@ class _TransactionTabState extends State<TransactionTab> {
 class _TransactionRow {
   final Transaction tx;
   final ItemListing? item;
+  final ItemListing? tradedItem;
   final Payment? payment;
+  final AppUser? seller;
 
-  const _TransactionRow({required this.tx, required this.item, required this.payment});
+  const _TransactionRow({
+    required this.tx,
+    required this.item,
+    required this.tradedItem,
+    required this.payment,
+    required this.seller,
+  });
+}
+
+class _TxnThumb extends StatelessWidget {
+  const _TxnThumb({required this.url});
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 72.0;
+    if (url == null || url!.isEmpty) {
+      return Image.asset(
+        'assets/sample.jpeg',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      );
+    }
+    if (url!.startsWith('http')) {
+      return Image.network(
+        url!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Image.asset(
+          'assets/sample.jpeg',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    return Image.asset(
+      url!,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Image.asset(
+        'assets/sample.jpeg',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
 }
 
 class FavouriteTab extends StatelessWidget {
@@ -563,12 +781,17 @@ class _StatusBadge extends StatelessWidget {
       case 'accepted':
         color = Colors.green;
         break;
+      case 'pending':
+        color = Colors.green;
+        break;
+      case 'cancelled':
+        color = Colors.amber;
+        break;
       case 'dropped':
       case 'rejected':
         color = Colors.red;
         break;
       case 'reserved':
-      case 'pending':
         color = Colors.orange;
         break;
       default:

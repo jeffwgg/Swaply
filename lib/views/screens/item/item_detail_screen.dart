@@ -11,8 +11,10 @@ import '../../../models/app_user.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
 import '../../../models/meetup_address_option.dart';
+import '../../../models/transaction.dart';
 import '../../../repositories/favourite_repository.dart';
 import '../../../repositories/items_repository.dart';
+import '../../../repositories/transactions_repository.dart';
 import '../../../services/chat_service.dart';
 import '../../../services/item_service.dart';
 import '../../../services/notification_service.dart';
@@ -139,6 +141,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       );
       return;
     }
+
+    log(
+      '[BuyNow -> Checkout] itemId=${widget.item.id}, price=${widget.item.price}, '
+      'listingType=${widget.item.listingType}, '
+      'buyerId=${user!.id}, sellerId=$sellerId, '
+      'meetupOptions=${meetups.length}, sellerAddress=${widget.item.address}',
+    );
 
     final completed = await Navigator.push<bool>(
       context,
@@ -335,6 +344,33 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     await ItemsRepository().updateStatus('reserved', widget.item.id);
 
     if (acceptedReply != null) {
+      Transaction? createdTx;
+      try {
+        createdTx = await TransactionsRepository().create(
+          Transaction(
+            transactionId: 0,
+            buyerId: acceptedReply.ownerId,
+            sellerId: widget.item.ownerId,
+            itemId: widget.item.id,
+            tradedItemId: acceptedReply.id,
+            transactionType: 'trade',
+            transactionStatus: 'pending',
+            itemPrice: null,
+            shippingFee: 0,
+            totalAmount: 0,
+            fulfillmentMethod: 'meetup',
+            address: null,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+          ),
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Offer accepted but creating transaction failed: $e')),
+          );
+        }
+      }
+
       final ownerName = actingOwner.username.trim().isNotEmpty
           ? actingOwner.username.trim()
           : (_ownerName.trim().isNotEmpty ? _ownerName.trim() : 'Item owner');
@@ -358,6 +394,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           'caption': caption.toString().trim(),
           'item_id': widget.item.id,
           'offered_item_id': acceptedReply.id,
+          if (createdTx != null) 'transaction_id': createdTx.transactionId,
+          'buyer_id': acceptedReply.ownerId,
+          'seller_id': widget.item.ownerId,
         };
         final autoMessage = offerImage == null
             ? caption.toString().trim()
@@ -378,6 +417,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             'item_id': widget.item.id,
             'offered_item_id': acceptedReply.id,
             'chat_id': chat.id,
+            if (createdTx != null) 'transaction_id': createdTx.transactionId,
           },
         );
       } catch (e) {
@@ -1532,8 +1572,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   ),
                                 );
                                 return;
+                              }else{
+                                 _openPurchaseCheckout();
                               }
-                              //todo: link to transaction page
                             },
                             style: TextButton.styleFrom(
                               backgroundColor: accent,
@@ -1611,8 +1652,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               ),
                             );
                             return;
-                          }
-                          //todo: link to transaction page
+                          }else{
+                                 _openPurchaseCheckout();
+                              }
                         },
                         style: TextButton.styleFrom(
                           backgroundColor: accent,

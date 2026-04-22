@@ -48,14 +48,56 @@ class TransactionsRepository {
     return Transaction.fromMap(map);
   }
 
+  Future<Transaction?> getById(int transactionId) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .select()
+        .eq('transaction_id', transactionId)
+        .maybeSingle();
+    if (response == null) return null;
+    final map = _requireMap(response, operation: 'getById');
+    return Transaction.fromMap(map);
+  }
+
   Future<void> updateStatus({
     required int transactionId,
     required String transactionStatus,
   }) async {
-    await SupabaseService.client
+    final response = await SupabaseService.client
         .from(_table)
         .update({'transaction_status': transactionStatus})
-        .eq('transaction_id', transactionId);
+        .eq('transaction_id', transactionId)
+        .select('transaction_id');
+
+    final rows = _requireListOfMaps(response, operation: 'updateStatus');
+    if (rows.isEmpty) {
+      throw StateError(
+        'No transaction updated. This is usually caused by RLS/permissions.',
+      );
+    }
+  }
+
+  Future<void> updateMeetupAndStatus({
+    required int transactionId,
+    required String transactionStatus,
+    required String address,
+  }) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .update({
+          'transaction_status': transactionStatus,
+          'fulfillment_method': 'meetup',
+          'address': address,
+        })
+        .eq('transaction_id', transactionId)
+        .select('transaction_id');
+
+    final rows = _requireListOfMaps(response, operation: 'updateMeetupAndStatus');
+    if (rows.isEmpty) {
+      throw StateError(
+        'No transaction updated. This is usually caused by RLS/permissions.',
+      );
+    }
   }
 
   Future<List<Transaction>> listForBuyer(String buyerId) async {

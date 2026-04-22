@@ -6,6 +6,7 @@ import '../../../models/item_listing.dart';
 import '../../../models/meetup_address_option.dart';
 import '../../../models/payment.dart';
 import '../../../models/transaction.dart';
+import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
 import '../../../services/location_address_service.dart';
@@ -26,6 +27,9 @@ class CheckoutScreen extends StatefulWidget {
     this.swapItem,
     required this.sellerMeetupOptions,
     this.shippingFeeMyr = 10,
+    this.meetUpOnly = false,
+    this.hidePaymentSection = false,
+    this.tradeTransactionId,
   });
 
   final CheckoutFlowKind flowKind;
@@ -36,6 +40,9 @@ class CheckoutScreen extends StatefulWidget {
   final String buyerId;
   final List<MeetupAddressOption> sellerMeetupOptions;
   final double shippingFeeMyr;
+  final bool meetUpOnly;
+  final bool hidePaymentSection;
+  final int? tradeTransactionId;
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -48,6 +55,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final StripePaymentService _stripe = StripePaymentService();
   final TransactionsRepository _transactions = TransactionsRepository();
   final PaymentsRepository _payments = PaymentsRepository();
+  final ItemsRepository _items = ItemsRepository();
 
   _UiPaymentMethod _paymentMethod = _UiPaymentMethod.card;
   bool _agreedToTerms = false;
@@ -58,7 +66,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.sellerMeetupOptions.isEmpty) {
+    debugPrint(
+      '[CheckoutScreen init] flowKind=${widget.flowKind}, '
+      'itemId=${widget.primaryItem.id}, price=${widget.primaryItem.price}, '
+      'buyerId=${widget.buyerId}, sellerId=${widget.sellerId}, '
+      'meetupOptions=${widget.sellerMeetupOptions.length}, shippingFee=${widget.shippingFeeMyr}',
+    );
+    if (widget.meetUpOnly) {
+      _fulfillment = _Fulfillment.meetup;
+      _selectedMeetupId =
+          widget.sellerMeetupOptions.isEmpty ? null : widget.sellerMeetupOptions.first.id;
+    } else if (widget.sellerMeetupOptions.isEmpty) {
       _fulfillment = _Fulfillment.shipping;
     } else {
       _fulfillment = _Fulfillment.meetup;
@@ -151,6 +169,38 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     setState(() => _busy = true);
     try {
+      if (widget.meetUpOnly && widget.tradeTransactionId != null) {
+        try {
+          final address = widget.sellerMeetupOptions
+              .firstWhere((o) => o.id == _selectedMeetupId)
+              .fullAddress;
+          await _transactions.updateMeetupAndStatus(
+            transactionId: widget.tradeTransactionId!,
+            transactionStatus: 'confirmed',
+            address: address,
+          );
+
+          await _items.updateStatus('reserved', widget.primaryItem.id);
+          if (widget.swapItem != null) {
+            await _items.updateStatus('reserved', widget.swapItem!.id);
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Confirm trade failed: $e')),
+            );
+          }
+          return;
+        }
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Trade confirmed.')),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
+
       StripePaymentResult? paymentResult;
       if (_requiresPayment) {
         paymentResult = await _stripe.payCheckoutTotal(
@@ -173,7 +223,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       // Create transaction row
       final txType = widget.flowKind == CheckoutFlowKind.swap ? 'trade' : 'purchase';
-      final txStatus = _requiresPayment ? 'paid' : 'confirmed';
+      // After successful checkout we start the "received product process"
+      // so the transaction enters the pending state.
+      final txStatus = 'pending';
       final itemPrice = widget.flowKind == CheckoutFlowKind.purchase
           ? widget.primaryItem.price
           : null;
@@ -259,6 +311,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }
       }
 
+      // Update item status to pending after successful checkout + DB inserts.
+      try {
+        await _items.updateStatus('pending', widget.primaryItem.id);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Order saved, but updating item status failed: $e')),
+          );
+        }
+        return;
+      }
+
       if (!mounted) {
         return;
       }
@@ -292,11 +356,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _FulfillmentToggle(
-                    value: _fulfillment,
-                    meetupEnabled: widget.sellerMeetupOptions.isNotEmpty,
-                    onChanged: (v) => setState(() => _fulfillment = v),
-                  ),
+                  if (!widget.meetUpOnly)
+                    _FulfillmentToggle(
+                      value: _fulfillment,
+                      meetupEnabled: widget.sellerMeetupOptions.isNotEmpty,
+                      onChanged: (v) => setState(() => _fulfillment = v),
+                    ),
                   const SizedBox(height: 12),
                   if (_fulfillment == _Fulfillment.meetup)
                     _MeetupSection(
@@ -304,7 +369,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       selectedId: _selectedMeetupId,
                       onSelect: (id) => setState(() => _selectedMeetupId = id),
                     )
-                  else
+                  else if (!widget.meetUpOnly)
                     _ShippingSection(
                       controller: _shippingAddressController,
                       onChanged: () => setState(() {}),
@@ -333,20 +398,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     grandTotal: _grandTotal,
                     formatRm: _formatRm,
                   ),
-                  if (_requiresPayment) ...[
-                    const SizedBox(height: 12),
-                    _PaymentMethodsCard(
-                      value: _paymentMethod,
-                      onChanged: (m) => setState(() => _paymentMethod = m),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 12),
-                    _InfoNote(
-                      text: _isSwap
-                          ? 'Swap trades do not charge the other item’s price. For meet-up there is no shipping fee, so there is nothing to pay with a card here.'
-                          : 'There is nothing to pay online for this checkout total.',
-                    ),
-                  ],
+                  if (!widget.hidePaymentSection)
+                    if (_requiresPayment) ...[
+                      const SizedBox(height: 12),
+                      _PaymentMethodsCard(
+                        value: _paymentMethod,
+                        onChanged: (m) => setState(() => _paymentMethod = m),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      _InfoNote(
+                        text: widget.meetUpOnly
+                            ? 'Meet up with the seller to exchange items. No shipping and no payment is needed here.'
+                            : (_isSwap
+                                  ? 'Swap trades do not charge the other item’s price. For meet-up there is no shipping fee, so there is nothing to pay with a card here.'
+                                  : 'There is nothing to pay online for this checkout total.'),
+                      ),
+                    ],
                   const SizedBox(height: 16),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -393,7 +461,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           _BottomBar(
             busy: _busy,
             totalLabel: _formatRm(_grandTotal),
-            buttonLabel: _requiresPayment ? 'Check Out' : 'Confirm',
+            buttonLabel: widget.meetUpOnly ? 'Confirm' : (_requiresPayment ? 'Check Out' : 'Confirm'),
             onPressed: _busy ? null : _onCheckoutPressed,
           ),
         ],
