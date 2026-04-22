@@ -9,7 +9,7 @@ import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
 
-class TransactionDetailScreen extends StatelessWidget {
+class TransactionDetailScreen extends StatefulWidget {
   const TransactionDetailScreen({
     super.key,
     required this.viewer,
@@ -31,15 +31,62 @@ class TransactionDetailScreen extends StatelessWidget {
   final bool isBuyer;
   final VoidCallback onChanged;
 
+  @override
+  State<TransactionDetailScreen> createState() => _TransactionDetailScreenState();
+}
+
+class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
+  final TransactionsRepository _txRepo = TransactionsRepository();
+  final ItemsRepository _itemsRepo = ItemsRepository();
+
+  late Future<_TxDetailData> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<_TxDetailData> _load() async {
+    final latestTx =
+        await _txRepo.getById(widget.tx.transactionId) ?? widget.tx;
+    final item = await _itemsRepo.getById(latestTx.itemId);
+    final traded = latestTx.tradedItemId == null
+        ? null
+        : await _itemsRepo.getById(latestTx.tradedItemId!);
+    return _TxDetailData(
+      tx: latestTx,
+      item: item ?? widget.item,
+      tradedItem: traded ?? widget.tradedItem,
+    );
+  }
+
+  void _reload() {
+    setState(() {
+      _future = _load();
+    });
+  }
+
   String _formatRm(double value) => 'RM ${value.toStringAsFixed(2)}';
 
-  Future<void> _confirmReceived(BuildContext context) async {
+  Future<void> _confirmReceived({
+    required BuildContext context,
+    required Transaction tx,
+  }) async {
+    final isTrade = tx.tradedItemId != null;
+    final viewerIsBuyer = widget.viewer.id == tx.buyerId;
+    final viewerIsSeller = widget.viewer.id == tx.sellerId;
+    final roleLabel = viewerIsBuyer ? 'buyer' : (viewerIsSeller ? 'seller' : 'user');
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Confirm received'),
-        content: const Text(
-          'Confirm you have received the product? This will complete the transaction.',
+        content: Text(
+          isTrade
+              ? 'As the $roleLabel, confirm you have met up and received the item? '
+                  'This will mark your counterparty’s item as completed.'
+              : 'Confirm you have completed this transaction?',
         ),
         actions: [
           TextButton(
@@ -55,23 +102,47 @@ class TransactionDetailScreen extends StatelessWidget {
     );
     if (ok != true) return;
 
-    final itemsRepo = ItemsRepository();
-    final txRepo = TransactionsRepository();
     try {
-      await itemsRepo.updateStatus('completed', tx.itemId);
-      if (tx.tradedItemId != null) {
-        await itemsRepo.updateStatus('completed', tx.tradedItemId!);
+      if (isTrade) {
+        // Buyer confirms seller's item. Seller confirms buyer's offered item.
+        if (viewerIsBuyer) {
+          await _itemsRepo.updateStatus('completed', tx.itemId);
+        } else if (viewerIsSeller && tx.tradedItemId != null) {
+          await _itemsRepo.updateStatus('completed', tx.tradedItemId!);
+        }
+      } else {
+        // Purchase: either party can mark as completed for the single item.
+        await _itemsRepo.updateStatus('completed', tx.itemId);
       }
-      await txRepo.updateStatus(
-        transactionId: tx.transactionId,
-        transactionStatus: 'completed',
-      );
-      onChanged();
+
+      // Only mark transaction completed when BOTH items are completed (trade),
+      // or the single item is completed (purchase).
+      final primary = await _itemsRepo.getById(tx.itemId);
+      final traded = tx.tradedItemId == null
+          ? null
+          : await _itemsRepo.getById(tx.tradedItemId!);
+      final primaryDone = primary?.status == 'completed';
+      final tradedDone = tx.tradedItemId == null ? true : (traded?.status == 'completed');
+
+      if (primaryDone && tradedDone) {
+        await _txRepo.updateStatus(
+          transactionId: tx.transactionId,
+          transactionStatus: 'completed',
+        );
+      }
+
+      widget.onChanged();
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Marked as received.')),
+        SnackBar(
+          content: Text(
+            (primaryDone && tradedDone)
+                ? 'Transaction completed.'
+                : 'Marked as received. Waiting for the other party.',
+          ),
+        ),
       );
-      Navigator.pop(context);
+      _reload();
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -80,7 +151,11 @@ class TransactionDetailScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _confirmCancel(BuildContext context) async {
+  Future<void> _confirmCancel({
+    required BuildContext context,
+    required Transaction tx,
+    required Payment? payment,
+  }) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -100,15 +175,13 @@ class TransactionDetailScreen extends StatelessWidget {
     );
     if (ok != true) return;
 
-    final itemsRepo = ItemsRepository();
-    final txRepo = TransactionsRepository();
     final paymentsRepo = PaymentsRepository();
     try {
-      await itemsRepo.updateStatus('available', tx.itemId);
+      await _itemsRepo.updateStatus('available', tx.itemId);
       if (tx.tradedItemId != null) {
-        await itemsRepo.updateStatus('available', tx.tradedItemId!);
+        await _itemsRepo.updateStatus('available', tx.tradedItemId!);
       }
-      await txRepo.updateStatus(
+      await _txRepo.updateStatus(
         transactionId: tx.transactionId,
         transactionStatus: 'cancelled',
       );
@@ -119,7 +192,7 @@ class TransactionDetailScreen extends StatelessWidget {
         );
       }
 
-      onChanged();
+      widget.onChanged();
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -137,17 +210,6 @@ class TransactionDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = item?.name ?? 'Item #${tx.itemId}';
-    final image = (item != null && item!.imageUrls.isNotEmpty)
-        ? item!.imageUrls.first
-        : null;
-    final status = tx.transactionStatus ?? 'pending';
-    final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
-    final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
-    final isTrade = tx.tradedItemId != null;
-    final showReceived = isBuyer && (isTrade ? status == 'confirmed' : status == 'pending');
-    final showCancel = status == 'pending';
-
     return Scaffold(
       backgroundColor: const Color(0xFFF4F3F8),
       appBar: AppBar(
@@ -157,11 +219,46 @@ class TransactionDetailScreen extends StatelessWidget {
         foregroundColor: const Color(0xFF1B1340),
         surfaceTintColor: Colors.transparent,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: FutureBuilder<_TxDetailData>(
+        future: _future,
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          final tx = data?.tx ?? widget.tx;
+          final item = data?.item ?? widget.item;
+          final tradedItem = data?.tradedItem ?? widget.tradedItem;
+
+          final title = item?.name ?? 'Item #${tx.itemId}';
+          final image = (item != null && item.imageUrls.isNotEmpty)
+              ? item.imageUrls.first
+              : null;
+          final status = tx.transactionStatus ?? 'pending';
+          final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
+          final dateLabel =
+              DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
+          final isTrade = tx.tradedItemId != null;
+
+          final viewerIsParticipant =
+              widget.viewer.id == tx.buyerId || widget.viewer.id == tx.sellerId;
+
+          // Trade receipt state:
+          // - buyer click -> completes seller item (tx.itemId)
+          // - seller click -> completes buyer offered item (tx.tradedItemId)
+          final buyerReceived = item?.status == 'completed';
+          final sellerReceived = tradedItem?.status == 'completed';
+          final viewerAlreadyReceived = widget.viewer.id == tx.buyerId
+              ? buyerReceived
+              : (widget.viewer.id == tx.sellerId ? sellerReceived : false);
+
+          final showReceived = viewerIsParticipant &&
+              !viewerAlreadyReceived &&
+              (isTrade ? status == 'confirmed' : status == 'pending');
+          final showCancel = status == 'pending';
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             if (!isTrade) ...[
               Container(
                 padding: const EdgeInsets.all(14),
@@ -260,6 +357,13 @@ class TransactionDetailScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
             ],
+            if (isTrade) ...[
+              _ReceivedStatusCard(
+                buyerReceived: buyerReceived,
+                sellerReceived: sellerReceived,
+              ),
+              const SizedBox(height: 12),
+            ],
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -275,7 +379,7 @@ class TransactionDetailScreen extends StatelessWidget {
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 6),
-                  Text(seller?.username ?? tx.sellerId),
+                  Text(widget.seller?.username ?? tx.sellerId),
                 ],
               ),
             ),
@@ -322,12 +426,12 @@ class TransactionDetailScreen extends StatelessWidget {
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 6),
-                  if (payment == null)
+                  if (widget.payment == null)
                     const Text('No payment record.')
                   else ...[
-                    Text('Method: ${payment!.paymentMethod}'),
-                    Text('Status: ${payment!.paymentStatus}'),
-                    Text('Amount: ${_formatRm(payment!.paymentAmount)}'),
+                    Text('Method: ${widget.payment!.paymentMethod}'),
+                    Text('Status: ${widget.payment!.paymentStatus}'),
+                    Text('Amount: ${_formatRm(widget.payment!.paymentAmount)}'),
                   ],
                 ],
               ),
@@ -350,18 +454,97 @@ class TransactionDetailScreen extends StatelessWidget {
             const SizedBox(height: 16),
             if (showReceived)
               FilledButton(
-                onPressed: () => _confirmReceived(context),
+                onPressed: () => _confirmReceived(context: context, tx: tx),
                 child: const Text('Received'),
               ),
             if (showCancel) ...[
               const SizedBox(height: 10),
               OutlinedButton(
-                onPressed: () => _confirmCancel(context),
+                onPressed: () => _confirmCancel(
+                  context: context,
+                  tx: tx,
+                  payment: widget.payment,
+                ),
                 child: const Text('Cancel'),
               ),
             ],
-          ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TxDetailData {
+  final Transaction tx;
+  final ItemListing? item;
+  final ItemListing? tradedItem;
+
+  const _TxDetailData({
+    required this.tx,
+    required this.item,
+    required this.tradedItem,
+  });
+}
+
+class _ReceivedStatusCard extends StatelessWidget {
+  const _ReceivedStatusCard({
+    required this.buyerReceived,
+    required this.sellerReceived,
+  });
+
+  final bool buyerReceived;
+  final bool sellerReceived;
+
+  Widget _row(String label, bool done) {
+    return Row(
+      children: [
+        Icon(
+          done ? Icons.check_circle : Icons.radio_button_unchecked,
+          color: done ? const Color(0xFF16A34A) : const Color(0xFF94A3B8),
+          size: 18,
         ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        Text(
+          done ? 'Received' : 'Pending',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: done ? const Color(0xFF16A34A) : const Color(0xFF64748B),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE9D5FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Meet-up confirmation',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 10),
+          _row('Buyer received', buyerReceived),
+          const SizedBox(height: 10),
+          _row('Seller received', sellerReceived),
+        ],
       ),
     );
   }

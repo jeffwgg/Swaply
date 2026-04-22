@@ -3564,7 +3564,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
       child: InkWell(
-        onTap: () => _openRagItemDetails(ragItem),
+     //   onTap: () => _openRagItemDetails(ragItem),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),
