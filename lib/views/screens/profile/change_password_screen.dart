@@ -48,7 +48,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     );
   }
 
-  /// ✅ Validate inputs
   bool _validateInputs() {
     String currentPassword = currentPasswordController.text.trim();
     String newPassword = newPasswordController.text.trim();
@@ -117,12 +116,10 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
       _showSuccess("✅ Password updated successfully!");
 
-      // Clear form
       currentPasswordController.clear();
       newPasswordController.clear();
       confirmPasswordController.clear();
 
-      // Navigate back after a short delay
       await Future.delayed(const Duration(milliseconds: 500));
       if (mounted) {
         Navigator.pop(context);

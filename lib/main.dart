@@ -1,12 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:swaply/services/local_db_service.dart';
 import 'services/supabase_service.dart';
-import 'services/stripe_payment_service.dart';
-import 'services/notification_service.dart';
 import 'views/screens/main_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'views/screens/auth/profile_setup_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'views/screens/auth/reset_password_screen.dart';
+import 'package:swaply/services/local_db_service.dart';
+import 'services/stripe_payment_service.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,144 +26,115 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  bool isDarkMode = false;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadThemePreference();
+    // Listen for auth state changes to handle navigation for specific events
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        print("🔄 Password recovery event detected - clearing navigation stack");
+        // Clear navigation stack to ensure ResetPasswordScreen (shown by AuthGate) is visible
+        _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      }
+    });
   }
 
-  /// 📱 Load theme preference from SharedPreferences
-  Future<void> _loadThemePreference() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        isDarkMode = prefs.getBool('isDarkMode') ?? false;
-      });
-      print("✅ Theme preference loaded: isDarkMode = $isDarkMode");
-    } catch (e) {
-      print("⚠️ Error loading theme preference: $e");
-    }
-  }
-
-  /// 💾 Save theme preference to SharedPreferences
-  Future<void> _saveThemePreference(bool value) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isDarkMode', value);
-      print("✅ Theme preference saved: isDarkMode = $value");
-    } catch (e) {
-      print("❌ Error saving theme preference: $e");
-    }
-  }
-
-  void toggleTheme(bool value) async {
-    setState(() => isDarkMode = value);
-    await _saveThemePreference(value);
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Swaply',
       debugShowCheckedModeBanner: false,
-
       theme: ThemeData(
         brightness: Brightness.light,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3D2B9F)),
       ),
-
-      darkTheme: ThemeData(brightness: Brightness.dark),
-
-      themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
-
-      home: AuthGate(isDarkMode: isDarkMode, onThemeChanged: toggleTheme),
+      themeMode: ThemeMode.light,
+      home: const AuthGate(),
     );
   }
 }
 
 class AuthGate extends StatelessWidget {
-  final bool isDarkMode;
-  final Function(bool) onThemeChanged;
-
-  const AuthGate({
-    super.key,
-    required this.isDarkMode,
-    required this.onThemeChanged,
-  });
+  const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // 使用 StreamBuilder 监听登录状态变化，但不再根据 user == null 返回不同的 Page
-    // 这样当用户在 Profile 页面点击登录成功后，Stream 会触发 UI 自动刷新
     return StreamBuilder<AuthState>(
       stream: SupabaseService.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
         final session = snapshot.data?.session;
         final user = session?.user ?? SupabaseService.client.auth.currentUser;
+        final event = snapshot.data?.event;
 
-        // ❌ 用户未登录：显示带身份验证守卫的 MainShell（Guest 模式在 ProfileScreen 处理）
+        // ✅ Password Recovery Flow - Show ResetPasswordScreen
+        // Only show if user is not fully authenticated (no active session with proper auth level)
+        if (event == AuthChangeEvent.passwordRecovery && session != null) {
+          print("🔑 Password recovery flow detected");
+          return const ResetPasswordScreen();
+        }
+
+        // ✅ If password was just reset, session might be updated - check if we should show home
+        if (event == AuthChangeEvent.userUpdated && user != null && user.emailConfirmedAt != null) {
+          print("✅ User was updated - likely password reset successful");
+          // Continue to normal flow below
+        }
+
+        // ✅ No user - Show MainShell (guest mode)
         if (user == null) {
           print("👤 User is null - Guest mode");
-          return MainShell(
-            isDarkMode: isDarkMode,
-            onThemeChanged: onThemeChanged,
-          );
+          return const MainShell();
         }
 
-        // ⏳ 用户已登录但邮件未验证
+        // ✅ Email not verified - Show MainShell with unverified UI
         if (user.emailConfirmedAt == null) {
           print("⏳ Email not confirmed yet for ${user.email}");
-          // 用户可以游览应用，但 Profile 页面会提示验证邮件
-          return MainShell(
-            isDarkMode: isDarkMode,
-            onThemeChanged: onThemeChanged,
-          );
+          return const MainShell();
         }
 
-        // ✅ 用户已登录且邮件已验证：检查是否有 profile
+        // ✅ Email verified - Check profile
         print("✅ Email confirmed for ${user.email}. Checking profile...");
         return FutureBuilder(
-          // users.id maps directly to auth.users.id (UUID)
           future: SupabaseService.client
               .from('users')
               .select()
               .eq('id', user.id)
               .maybeSingle(),
           builder: (context, profileSnapshot) {
-            // ⏳ 加载中，显示一个菊花图，防止白屏
             if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
             }
 
-            // ❌ 查询出错
             if (profileSnapshot.hasError) {
               print("❌ Profile query error: ${profileSnapshot.error}");
-              // 即使查询失败，也让用户进入应用，Profile 页面会显示错误
-              return MainShell(
-                isDarkMode: isDarkMode,
-                onThemeChanged: onThemeChanged,
-              );
+              return const MainShell();
             }
 
             final profile = profileSnapshot.data;
 
-            // ❌ 没有 profile：显示 ProfileSetupScreen
             if (profile == null) {
-              print(
-                "📝 No profile found for user. Showing ProfileSetupScreen.",
-              );
+              print("📝 No profile found for user. Showing ProfileSetupScreen.");
               return const ProfileSetupScreen();
             }
 
-            // ✅ 有 profile 了，正式进入 App
-            return MainShell(
-              isDarkMode: isDarkMode,
-              onThemeChanged: onThemeChanged,
-            );
+            return const MainShell();
           },
         );
       },

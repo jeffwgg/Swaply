@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'register_step1_screen.dart';
 import '/services/supabase_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -36,14 +37,10 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
 
               // 🖼 Image (placeholder)
-              Container(
+              SvgPicture.asset(
+                'assets/Swaplylogin.svg',
                 height: 250,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Icon(Icons.image, size: 80),
+                fit: BoxFit.contain,
               ),
 
               const SizedBox(height: 24),
@@ -82,11 +79,14 @@ class _LoginScreenState extends State<LoginScreen> {
               // 🔒 PASSWORD + FORGOT
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
-                  Text("Password"),
-                  Text(
-                    "Forgot Password?",
-                    style: TextStyle(color: Colors.purple),
+                children: [
+                  const Text("Password"),
+                  GestureDetector(
+                    onTap: _showForgotPasswordDialog,
+                    child: const Text(
+                      "Forgot Password?",
+                      style: TextStyle(color: Colors.purple),
+                    ),
                   )
                 ],
               ),
@@ -141,31 +141,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 30),
 
-              // ➖ Divider
-              Row(
-                children: const [
-                  Expanded(child: Divider()),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text("Or continue with"),
-                  ),
-                  Expanded(child: Divider()),
-                ],
-              ),
-
-              const SizedBox(height: 20),
-
-              // 🔘 Social buttons
-              Row(
-                children: [
-                  Expanded(child: _SocialButton("Google")),
-                  const SizedBox(width: 10),
-                  Expanded(child: _SocialButton("Apple")),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
               // 🔗 SIGN UP
               Center(
                 child: GestureDetector(
@@ -191,7 +166,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              const SizedBox(height: 300),
+              const SizedBox(height: 200),
             ],
           ),
         ),
@@ -202,6 +177,91 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
+    );
+  }
+
+  void _showForgotPasswordDialog() {
+    final forgotEmailController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text("Reset Password"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Enter your email address to receive a password reset link.",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: forgotEmailController,
+                decoration: InputDecoration(
+                  hintText: "Enter your email",
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final email = forgotEmailController.text.trim();
+                if (email.isEmpty) {
+                  _showError("Email is required");
+                  return;
+                }
+                if (!email.contains("@")) {
+                  _showError("Invalid email format");
+                  return;
+                }
+
+                try {
+                  await SupabaseService.client.auth
+                      .resetPasswordForEmail(
+                    email,
+                    redirectTo: 'swaply://login-callback',
+                  );
+                  if (mounted) {
+                    Navigator.pop(dialogContext);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          "Password reset email sent! Check your inbox.",
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  print("Error sending reset email: $e");
+                  _showError("Failed to send reset email. Please try again.");
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5A2CA0),
+              ),
+              child: const Text(
+                "Send Reset Link",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -245,8 +305,6 @@ class _LoginScreenState extends State<LoginScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          // 💡 关键：登录成功后关闭当前页面返回 MainShell
-          // AuthGate 会自动处理剩余的状态展示
           Navigator.pop(context);
         }
       }
