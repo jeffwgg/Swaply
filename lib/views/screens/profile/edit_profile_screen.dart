@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '/services/supabase_service.dart';
+import '/services/profile_service.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -17,6 +19,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   String gender = "Male";
   DateTime? selectedDate;
+  String? originalUsername;
+  String? originalPhone;
+  bool isUsernameLocked = false;
+  bool isGenderLocked = false;
+  bool isBirthdateLocked = false;
   bool isSaving = false;
   bool isLoading = true;
   String? loadError;
@@ -39,56 +46,60 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   /// 📋 Load current user profile
   Future<void> _loadUserProfile() async {
+  setState(() {
+    isLoading = true;
+    loadError = null;
+  });
+
+  try {
+    final user = SupabaseService.client.auth.currentUser;
+    if (user == null) throw Exception("User session not found");
+
+    final profile = await ProfileService.getProfile(user.id);
+
+    if (!mounted) return;
+
+    if (profile == null) {
+      throw Exception("Profile not found");
+    }
+
+    print("📝 Loading profile for User ID: ${user.id}");
+
+    final metadata = user.userMetadata ?? <String, dynamic>{};
+    final usernameChangedFlag =
+        metadata['username_changed'] == true ||
+        metadata['username_changed'] == 'true';
+
     setState(() {
-      isLoading = true;
-      loadError = null;
-    });
+      fullNameController.text = profile.fullName ?? '';
+      usernameController.text = profile.username ?? '';
+      originalUsername = profile.username ?? '';
+      bioController.text = profile.bio ?? '';
+      phoneController.text = profile.phone ?? '';
+      originalPhone = profile.phone ?? '';
+      emailController.text = profile.email ?? '';
+      gender = profile.gender ?? 'Male';
 
-    try {
-      final user = SupabaseService.client.auth.currentUser;
-      if (user == null) throw Exception("User session not found");
+      isGenderLocked = profile.gender != null;
+      isBirthdateLocked = profile.birthdate != null;
+      isUsernameLocked = usernameChangedFlag;
 
-      print("📝 Loading profile for User ID: ${user.id}");
-
-      final profileResponse = await SupabaseService.client
-          .from('users')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      if (profileResponse == null) {
-        throw Exception("Profile not found");
+      if (profile.birthdate != null) {
+        selectedDate = profile.birthdate;
       }
 
-      // Pre-fill all fields
+      isLoading = false;
+    });
+  } catch (e) {
+    print("❌ Error loading profile: $e");
+    if (mounted) {
       setState(() {
-        fullNameController.text = profileResponse['full_name'] ?? '';
-        usernameController.text = profileResponse['username'] ?? '';
-        bioController.text = profileResponse['bio'] ?? '';
-        phoneController.text = profileResponse['phone'] ?? '';
-        emailController.text = profileResponse['email'] ?? '';
-        gender = profileResponse['gender'] ?? 'Male';
-
-        if (profileResponse['birthdate'] != null) {
-          selectedDate = DateTime.parse(profileResponse['birthdate']);
-        }
-
+        loadError = "Error: $e";
         isLoading = false;
       });
-
-      print("✅ Profile loaded successfully");
-    } catch (e) {
-      print("❌ Error loading profile: $e");
-      if (mounted) {
-        setState(() {
-          loadError = "Error: $e";
-          isLoading = false;
-        });
-      }
     }
   }
+}
 
   void _showError(String message) {
     if (!mounted) return;
@@ -113,6 +124,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   /// 📅 Pick date
   void _pickDate(BuildContext context) async {
+    if (isBirthdateLocked) {
+      _showError('Birthdate cannot be changed after initial setup.');
+      return;
+    }
+
     DateTime? picked = await showDatePicker(
       context: context,
       initialDate: selectedDate ?? DateTime(2000),
@@ -149,6 +165,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
+    // ✅ NEW: Full name must not contain numbers
+    if (!ProfileService.isValidFullName(fullName)) {
+      _showError("Full name must contain only letters and spaces (no numbers)");
+      return false;
+    }
+
     if (username.isEmpty) {
       _showError("Username is required");
       return false;
@@ -159,8 +181,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    if (username.length > 20) {
-      _showError("Username must be at most 20 characters");
+    // ✅ UPDATED: Username max 10 characters (was 20)
+    if (username.length > 10) {
+      _showError("Username must be at most 10 characters");
       return false;
     }
 
@@ -169,13 +192,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
+    if (originalUsername != null && isUsernameLocked && username != originalUsername) {
+      _showError("Username can only be changed once.");
+      return false;
+    }
+
     if (phone.isEmpty) {
       _showError("Phone number is required");
       return false;
     }
 
-    if (phone.length < 7) {
-      _showError("Please enter a valid phone number");
+    // ✅ UPDATED: Phone validation 10-12 digits (was 11-12)
+    if (!ProfileService.isValidPhoneNumber(phone)) {
+      _showError("Phone number must be 10-12 digits and contain only numbers (e.g. 0123456789 or 012345678901)");
       return false;
     }
 
@@ -194,7 +223,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return true;
   }
 
-  /// 💾 Save profile updates to Supabase
   Future<void> _saveProfile() async {
     if (!_validateInput()) return;
 
@@ -204,11 +232,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final user = SupabaseService.client.auth.currentUser;
       if (user == null) throw Exception("User session not found");
 
-      print("📝 Updating profile for User ID: ${user.id}");
+      final currentUsername = usernameController.text.trim();
+
+      // ✅ Phone duplicate still here (you already moved to service)
+      final currentPhone = phoneController.text.trim();
+      if (originalPhone != null && currentPhone != originalPhone) {
+        final isPhoneDuplicated = await ProfileService.isPhoneDuplicate(
+          currentPhone,
+          user.id,
+        );
+
+        if (isPhoneDuplicated) {
+          _showError("This phone number is already registered to another account");
+          return;
+        }
+      }
 
       final updates = {
         'full_name': fullNameController.text.trim(),
-        'username': usernameController.text.trim(),
+        'username': currentUsername,
         'bio': bioController.text.trim(),
         'phone': phoneController.text.trim(),
         'gender': gender,
@@ -216,36 +258,36 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      print("📦 Updating data: $updates");
+      // 🔥 CALL SERVICE HERE
+      final error = await ProfileService.updateProfile(
+        userId: user.id,
+        updates: updates,
+        originalUsername: originalUsername,
+        currentUsername: currentUsername,
+        isUsernameLocked: isUsernameLocked,
+      );
 
-      await SupabaseService.client
-          .from('users')
-          .update(updates)
-          .eq('id', user.id);
+      if (error != null) {
+        if (error == "USERNAME_TAKEN") {
+          _showError("This username is already taken. Please choose another one.");
+        } else {
+          _showError("Error updating profile");
+        }
+        return;
+      }
 
       if (!mounted) return;
 
       _showSuccess("✅ Profile updated successfully!");
 
-      // 💡 Delay slightly before popping to show success message
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
-        Navigator.pop(context);
+        // ✅ Return true to indicate successful update
+        Navigator.pop(context, true);
       }
     } catch (e) {
-      print("❌ SAVE ERROR: $e");
-      String errorMsg = "Error: ${e.toString()}";
-
-      if (e.toString().contains("permission denied")) {
-        errorMsg = "Permission denied. Please check your account settings.";
-      } else if (e.toString().contains("connection")) {
-        errorMsg = "Network error. Please check your connection and try again.";
-      } else if (e.toString().contains("duplicate")) {
-        errorMsg = "This username is already taken. Please try another one.";
-      }
-
-      _showError(errorMsg);
+      _showError("Error updating profile");
     } finally {
       if (mounted) {
         setState(() => isSaving = false);
@@ -258,7 +300,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     // 🔄 Loading state
     if (isLoading) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF4F3F8),
         appBar: AppBar(
           title: const Text("Edit Profile"),
           backgroundColor: Colors.transparent,
@@ -320,6 +361,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 controller: fullNameController,
                 icon: Icons.person,
                 hint: "Enter your full name",
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]')),
+                ],
               ),
               const SizedBox(height: 20),
 
@@ -329,6 +373,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 controller: usernameController,
                 icon: Icons.account_circle,
                 hint: "Enter your username",
+                readOnly: isUsernameLocked,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(10),
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_]')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isUsernameLocked
+                    ? "Username can only be changed once and is now locked."
+                    : "You can update your username one time. Choose carefully.",
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 20),
 
@@ -353,6 +409,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 controller: phoneController,
                 icon: Icons.phone,
                 hint: "Enter your phone number",
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(12),
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "Phone number must be 10-12 digits (e.g. 0123456789 or 012345678901)",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 20),
 
@@ -384,6 +449,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              if (isBirthdateLocked)
+                const Text(
+                  "Birthdate cannot be changed after initial setup.",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               const SizedBox(height: 20),
 
               // 🧑‍🤝‍🧑 Gender
@@ -393,16 +464,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   _GenderOption(
                     label: "Male",
                     selected: gender == "Male",
-                    onTap: () => setState(() => gender = "Male"),
+                    onTap: () {
+                      if (isGenderLocked) return;
+                      setState(() => gender = "Male");
+                    },
                   ),
                   const SizedBox(width: 10),
                   _GenderOption(
                     label: "Female",
                     selected: gender == "Female",
-                    onTap: () => setState(() => gender = "Female"),
+                    onTap: () {
+                      if (isGenderLocked) return;
+                      setState(() => gender = "Female");
+                    },
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              if (isGenderLocked)
+                const Text(
+                  "Gender cannot be changed after initial setup.",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               const SizedBox(height: 20),
 
               // 💬 Bio
@@ -511,12 +594,14 @@ class _InputField extends StatelessWidget {
   final IconData icon;
   final String hint;
   final bool readOnly;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _InputField({
     required this.controller,
     required this.icon,
     required this.hint,
     this.readOnly = false,
+    this.inputFormatters,
   });
 
   @override
@@ -524,6 +609,7 @@ class _InputField extends StatelessWidget {
     return TextField(
       controller: controller,
       readOnly: readOnly,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         prefixIcon: Icon(icon),
         hintText: hint,

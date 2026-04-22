@@ -50,8 +50,6 @@ class _RegisterStep1ScreenState extends State<RegisterStep1Screen> {
       final response = await SupabaseService.client.auth.signUp(
         email: email,
         password: password,
-        // 🚀 对于开发环境，可以设置为空或 null
-        // 生产环境中要和 AndroidManifest.xml 里的 android:scheme="swaply" 一致
         emailRedirectTo: 'swaply://login-callback',
       );
 

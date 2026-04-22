@@ -1,0 +1,43 @@
+<svg width="100%" viewBox="0 0 680 340" xmlns="http://www.w3.org/2000/svg">
+  <rect width="680" height="340" fill="#F4F3F8" rx="20"/>
+  <ellipse cx="160" cy="290" rx="55" ry="18" fill="#E2DDFF"/>
+  <rect x="130" y="210" width="60" height="80" rx="14" fill="#7B61FF"/>
+  <ellipse cx="160" cy="205" rx="32" ry="32" fill="#FBBF72"/>
+  <ellipse cx="150" cy="200" rx="4" ry="5" fill="#333"/>
+  <ellipse cx="170" cy="200" rx="4" ry="5" fill="#333"/>
+  <path d="M152 215 Q160 222 168 215" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <ellipse cx="160" cy="178" rx="32" ry="14" fill="#3B2000"/>
+  <rect x="128" y="178" width="8" height="22" rx="4" fill="#3B2000"/>
+  <rect x="100" y="225" width="32" height="14" rx="7" fill="#7B61FF" transform="rotate(-15 100 225)"/>
+  <rect x="188" y="225" width="32" height="14" rx="7" fill="#7B61FF" transform="rotate(15 188 225)"/>
+  <rect x="74" y="180" width="52" height="52" rx="10" fill="#5A2CA0"/>
+  <ellipse cx="520" cy="290" rx="55" ry="18" fill="#E2DDFF"/>
+  <rect x="490" y="210" width="60" height="80" rx="14" fill="#5A2CA0"/>
+  <ellipse cx="520" cy="205" rx="32" ry="32" fill="#F9A880"/>
+  <ellipse cx="510" cy="200" rx="4" ry="5" fill="#333"/>
+  <ellipse cx="530" cy="200" rx="4" ry="5" fill="#333"/>
+  <path d="M512 215 Q520 222 528 215" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <ellipse cx="520" cy="176" rx="32" ry="10" fill="#1a1a1a"/>
+  <path d="M488 185 Q488 165 520 165 Q552 165 552 185" fill="#1a1a1a"/>
+  <rect x="460" y="225" width="32" height="14" rx="7" fill="#5A2CA0" transform="rotate(-15 460 225)"/>
+  <rect x="548" y="225" width="32" height="14" rx="7" fill="#5A2CA0" transform="rotate(15 548 225)"/>
+  <rect x="554" y="180" width="52" height="52" rx="10" fill="#7B61FF"/>
+  <defs>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#7B61FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrowDark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#5A2CA0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <path d="M240 155 Q340 130 440 155" stroke="#7B61FF" stroke-width="3" fill="none" stroke-linecap="round" marker-end="url(#arrowPurple)"/>
+  <path d="M440 185 Q340 210 240 185" stroke="#5A2CA0" stroke-width="3" fill="none" stroke-linecap="round" marker-end="url(#arrowDark)"/>
+  <rect x="300" y="130" width="80" height="80" rx="20" fill="#5A2CA0"/>
+  <text x="340" y="182" text-anchor="middle" font-size="32" fill="white">⇄</text>
+  <text x="340" y="235" text-anchor="middle" font-size="22" font-weight="700" fill="#5A2CA0" font-family="sans-serif">Swaply</text>
+  <text x="340" y="258" text-anchor="middle" font-size="13" fill="#888" font-family="sans-serif">Trade what you have. Get what you want.</text>
+  <rect x="290" y="60" width="36" height="36" rx="10" fill="#E2DDFF"/>
+  <rect x="354" y="52" width="36" height="36" rx="10" fill="#E2DDFF"/>
+  <rect x="170" y="100" width="32" height="32" rx="8" fill="#E2DDFF"/>
+  <rect x="478" y="100" width="32" height="32" rx="8" fill="#E2DDFF"/>
+</svg>

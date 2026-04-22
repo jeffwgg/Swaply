@@ -11,10 +11,13 @@ import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/seller_profile_screen.dart';
 import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
+import 'package:swaply/services/supabase_service.dart';
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
-  const ProfileTabs({super.key, required this.userId});
+  final bool isOwnProfile;
+
+  const ProfileTabs({super.key, required this.userId,this.isOwnProfile = false,});
 
   @override
   State<ProfileTabs> createState() => _ProfileTabsState();
@@ -22,6 +25,7 @@ class ProfileTabs extends StatefulWidget {
 
 class _ProfileTabsState extends State<ProfileTabs> {
   AppUser? user;
+  AppUser? currentUser;
 
   @override
   void initState() {
@@ -31,9 +35,15 @@ class _ProfileTabsState extends State<ProfileTabs> {
 
   Future<void> _loadUser() async {
     final user = await UsersRepository().getById(widget.userId);
+    final authUser = SupabaseService.client.auth.currentUser;
+    AppUser? cu;
+    if (authUser != null) {
+      cu = await UsersRepository().getById(authUser.id);
+    }
     if (mounted) {
       setState(() {
         this.user = user;
+        this.currentUser = cu;
       });
     }
   }
@@ -46,8 +56,40 @@ class _ProfileTabsState extends State<ProfileTabs> {
       );
     }
 
+    if (!widget.isOwnProfile) {
+      return DefaultTabController(
+        length: 1,
+        child: Column(
+          children: [
+            const TabBar(
+              isScrollable: false,
+              tabAlignment: TabAlignment.fill,
+              labelColor: Color(0xFF5B21B6),
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: Color(0xFF5B21B6),
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicatorWeight: 3,
+              tabs: [
+                Tab(text: "Listing"),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  ItemTab(
+                    user: user!,
+                    isOwnProfile: widget.isOwnProfile, // ← 加这行
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return DefaultTabController(
-      length: 4,
+      length: 3,
       child: Column(
         children: [
           const TabBar(
@@ -59,7 +101,6 @@ class _ProfileTabsState extends State<ProfileTabs> {
             indicatorSize: TabBarIndicatorSize.tab,
             indicatorWeight: 3,
             tabs: [
-              Tab(text: "Review"),
               Tab(text: "Favourite"),
               Tab(text: "Your Item"),
               Tab(text: "Transaction"),
@@ -68,7 +109,7 @@ class _ProfileTabsState extends State<ProfileTabs> {
           Expanded(
             child: TabBarView(
               children: [
-                ReviewTab(user: user!),
+
                 FavouriteTab(user: user!),
                 ItemTab(user: user!),
                 TransactionTab(user: user!),
@@ -78,16 +119,6 @@ class _ProfileTabsState extends State<ProfileTabs> {
         ],
       ),
     );
-  }
-}
-
-class ReviewTab extends StatelessWidget {
-  final AppUser user;
-  const ReviewTab({super.key, required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    return _buildEmptyState(Icons.rate_review_outlined, "No reviews yet");
   }
 }
 
@@ -476,14 +507,42 @@ class _TxnThumb extends StatelessWidget {
   }
 }
 
-class FavouriteTab extends StatelessWidget {
+
+class FavouriteTab extends StatefulWidget {
   final AppUser user;
   const FavouriteTab({super.key, required this.user});
 
   @override
+  State<FavouriteTab> createState() => _FavouriteTabState();
+}
+
+class  _FavouriteTabState extends State<FavouriteTab>{
+  List<ItemListing> _items = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load(); // ← 这里调用
+  }
+
+  // ✅ 加在这里
+  Future<void> _load() async {
+    print("🔥 _load called");
+    setState(() => _loading = true);
+    final items = await ItemsRepository().getFavouriteItems(widget.user.id);
+    if (mounted) {
+      setState(() {
+        _items = items;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getFavouriteItems(user.id),
+      future: ItemsRepository().getFavouriteItems(widget.user.id),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -507,17 +566,14 @@ class FavouriteTab extends StatelessWidget {
             final item = items[index];
             return GestureDetector(
               onTap: () async {
-                final result = await Navigator.push(
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(user: user, item: item),
+                    builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
                   ),
                 );
-                if (result == true) {
-                  // Trigger a rebuild to refresh the list if needed
-                  (context as Element).markNeedsBuild();
-                }
-              },
+                _load();
+                },
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
@@ -592,7 +648,9 @@ class FavouriteTab extends StatelessWidget {
 
 class ItemTab extends StatefulWidget {
   final AppUser user;
-  const ItemTab({super.key, required this.user});
+  final bool isOwnProfile;
+
+  const ItemTab({super.key, required this.user, this.isOwnProfile = false,});
 
   @override
   State<ItemTab> createState() => _ItemTabState();
@@ -633,7 +691,7 @@ class _ItemTabState extends State<ItemTab> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.user,
+                      user: widget.isOwnProfile ? widget.user : null,
                       item: repliedItem ?? item,
                     ),
                   ),

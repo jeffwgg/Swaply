@@ -4,6 +4,7 @@ import '../../models/app_user.dart';
 import '../../repositories/users_repository.dart';
 import '../widgets/common/bottom_nav_bar.dart';
 import '../screens/home/home_screen.dart';
+
 import '../screens/explore/discover_screen.dart';
 import '../screens/chat/inbox_screen.dart';
 import '../screens/profile/profile_screen.dart';
@@ -13,14 +14,7 @@ import '../../core/theme/app_colors.dart';
 import '../../../services/supabase_service.dart';
 
 class MainShell extends StatefulWidget {
-  final bool isDarkMode;
-  final Function(bool) onThemeChanged;
-
-  const MainShell({
-    super.key,
-    required this.isDarkMode,
-    required this.onThemeChanged,
-  });
+  const MainShell({super.key});
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -63,13 +57,13 @@ class _MainShellState extends State<MainShell> {
   void _onAddTap() {
     final user = SupabaseService.client.auth.currentUser;
 
-    // ❌ Not logged in
+    // Not logged in
     if (user == null) {
       _showLoginPrompt("Please log in to start swapping items!");
       return;
     }
 
-    // ⏳ Email not verified
+    // ⏳ Email not verified (maybe can be deleted later)
     if (user.emailConfirmedAt == null) {
       showDialog(
         context: context,
@@ -90,7 +84,7 @@ class _MainShellState extends State<MainShell> {
       return;
     }
 
-    // ✅ User is verified, proceed to create item
+    // User is verified, proceed to create item
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => CreateItemScreen(user: _user!)),
@@ -127,7 +121,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      const HomeScreen(),
+      SwipeHomeScreen(user: _user),
       DiscoverScreen(
         user: _user
       ),
@@ -137,18 +131,15 @@ class _MainShellState extends State<MainShell> {
           setState(() => _hideChatNavigation = isConversationOpen);
         },
       ),
-      ProfileScreen(
-        isDarkMode: widget.isDarkMode,
-        onThemeChanged: widget.onThemeChanged,
-      ),
+      const ProfileScreen(),
     ];
 
     final shouldShowShellNav = !(_currentIndex == 2 && _hideChatNavigation);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: widget.isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      value: SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: widget.isDarkMode ? Colors.black : const Color(0xFFF8F7FF),
+        backgroundColor: const Color(0xFFF8F7FF),
         extendBody: true,
         body: IndexedStack(
           index: _currentIndex < screens.length ? _currentIndex : 0,
