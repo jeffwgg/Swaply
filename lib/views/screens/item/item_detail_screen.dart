@@ -38,7 +38,6 @@ class ItemDetailsScreen extends StatefulWidget {
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? user;
   String _ownerName = '';
-  String? _ownerAuthUserId;
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
@@ -53,6 +52,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     super.initState();
     if (widget.user != null) {
       user = widget.user;
+      log(user.toString());
       _isFavourite = widget.item.isFavorite;
     }
     _fetchOwner();
@@ -72,11 +72,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _loadFollowState() async {
-    final currentUser = SupabaseService.client.auth.currentUser;
-    if (currentUser == null || currentUser.id == widget.item.ownerId) return;
-
+    if(user!.id == widget.item.ownerId){
+      return;
+    }
     final following = await FollowService.isFollowing(
-      currentUser.id,
+      user!.id,
       widget.item.ownerId,
     );
 
@@ -86,12 +86,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   Future<void> _fetchOwner() async {
     final user = await UsersRepository().getById(widget.item.ownerId);
-    log('here $widget.item.ownerId');
-    log(user.toString());
     if (mounted) {
       setState(() {
         _ownerName = user?.username ?? 'Unknown';
-        _ownerAuthUserId = user?.id;
       });
     }
   }
@@ -159,7 +156,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     final meetups = MeetupAddressOption.fromSellerItem(widget.item);
     final sellerName = _ownerName.trim().isEmpty ? 'Seller' : _ownerName;
-    final sellerId = _ownerAuthUserId;
+    final sellerId = widget.item.ownerId;
     if (sellerId == null || sellerId.isEmpty) {
       if (!mounted) {
         return;
