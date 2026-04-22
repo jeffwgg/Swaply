@@ -52,7 +52,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     super.initState();
     if (widget.user != null) {
       user = widget.user;
-      log(user.toString());
       _isFavourite = widget.item.isFavorite;
     }
     _fetchOwner();

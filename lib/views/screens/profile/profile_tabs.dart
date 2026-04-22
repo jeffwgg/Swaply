@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:swaply/models/app_user.dart';
@@ -77,7 +79,8 @@ class _ProfileTabsState extends State<ProfileTabs> {
               child: TabBarView(
                 children: [
                   ItemTab(
-                    user: user!,
+                    loginUser: currentUser!,
+                    profileUser: user!,
                     isOwnProfile: widget.isOwnProfile, // ← 加这行
                   ),
                 ],
@@ -109,9 +112,8 @@ class _ProfileTabsState extends State<ProfileTabs> {
           Expanded(
             child: TabBarView(
               children: [
-
                 FavouriteTab(user: user!),
-                ItemTab(user: user!),
+                ItemTab(loginUser: currentUser!, profileUser: currentUser!),
                 TransactionTab(user: user!),
               ],
             ),
@@ -647,10 +649,11 @@ class  _FavouriteTabState extends State<FavouriteTab>{
 }
 
 class ItemTab extends StatefulWidget {
-  final AppUser user;
+  final AppUser loginUser;
+  final AppUser profileUser;
   final bool isOwnProfile;
 
-  const ItemTab({super.key, required this.user, this.isOwnProfile = false,});
+  const ItemTab({super.key, required this.loginUser, required this.profileUser, this.isOwnProfile = false,});
 
   @override
   State<ItemTab> createState() => _ItemTabState();
@@ -660,7 +663,7 @@ class _ItemTabState extends State<ItemTab> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getUserItems(widget.user.id),
+      future: ItemsRepository().getUserItems(widget.profileUser.id),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -691,7 +694,7 @@ class _ItemTabState extends State<ItemTab> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.isOwnProfile ? widget.user : null,
+                      user: widget.loginUser, //widget.user = profile user ！= login user
                       item: repliedItem ?? item,
                     ),
                   ),
