@@ -13,6 +13,12 @@ const OPENROUTER_TIMEOUT_MS = 35000
 const FALLBACK_AI_MESSAGE =
   "I'm sorry, I'm having trouble connecting right now. Please try again in a moment."
 const RAG_ITEMS_MARKER = '[[rag_items_json]]'
+const COMPACT_HISTORY_MAX_MESSAGES = 4
+const COMPACT_HISTORY_MAX_CHARS = 220
+const COMPACT_RAG_MAX_ITEMS = 3
+const TIMEOUT_RISK_HISTORY_THRESHOLD = 5
+const TIMEOUT_RISK_ITEMS_CONTEXT_CHARS = 900
+const TIMEOUT_RISK_USER_MESSAGE_CHARS = 180
 
 const ITEM_SEARCH_STOP_WORDS = new Set([
   'a',
@@ -385,6 +391,51 @@ function sanitizeGuidance(text: string, hasMatches: boolean): string {
     .trim()
 }
 
+function compactContentForModel(input: string, maxChars: number): string {
+  const normalized = input.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxChars) {
+    return normalized
+  }
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`
+}
+
+function compactHistoryForTimeoutRisk(
+  historyMessages: Array<{ role: string; content: string }>
+): Array<{ role: string; content: string }> {
+  return historyMessages
+    .slice(-COMPACT_HISTORY_MAX_MESSAGES)
+    .map((entry) => ({
+      role: entry.role,
+      content: compactContentForModel(entry.content, COMPACT_HISTORY_MAX_CHARS),
+    }))
+}
+
+function buildItemsContext(items: any[], maxItems: number): string {
+  if (items.length === 0) {
+    return 'No matched items found.'
+  }
+
+  return items
+    .slice(0, maxItems)
+    .map((item, index) => {
+      const priceLabel = item.price ?? 'N/A'
+      return `${index + 1}. ${item.title} | price: ${priceLabel} | type: ${item.listing_type ?? 'unknown'} | category: ${item.category ?? 'unknown'}`
+    })
+    .join('\n')
+}
+
+function isHighTimeoutRisk(params: {
+  userMessage: string
+  historyCount: number
+  itemsContextLength: number
+}): boolean {
+  return (
+    params.userMessage.length >= TIMEOUT_RISK_USER_MESSAGE_CHARS ||
+    params.historyCount >= TIMEOUT_RISK_HISTORY_THRESHOLD ||
+    params.itemsContextLength >= TIMEOUT_RISK_ITEMS_CONTEXT_CHARS
+  )
+}
+
 function parsePrice(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -651,16 +702,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const matchedItems = normalizeItemsForPrompt(itemRows)
-    const itemsContext = matchedItems.length > 0
-      ? matchedItems
-          .map((item, index) => {
-            const priceLabel = item.price ?? 'N/A'
-            return `${index + 1}. ${item.title} | price: ${priceLabel} | type: ${item.listing_type ?? 'unknown'} | category: ${item.category ?? 'unknown'}`
-          })
-          .join('\n')
-      : 'No matched items found.'
+    const itemsContext = buildItemsContext(matchedItems, 5)
+    const highTimeoutRisk = isHighTimeoutRisk({
+      userMessage: String(message),
+      historyCount: historyMessages.length,
+      itemsContextLength: itemsContext.length,
+    })
 
-const systemMessage = {
+const fullSystemMessage = {
   role: 'system',
   content: `You are "Swaply Buddy", a friendly and helpful AI assistant for a mobile marketplace app called Swaply.
 
@@ -710,9 +759,27 @@ GOAL
 Help users quickly understand and use Swaply while maintaining a natural and user-friendly interaction.`
 }
 
+    const compactSystemMessage = {
+      role: 'system',
+      content:
+        'You are Swaply Buddy. Be concise and accurate. Use ITEM_RESULTS as source of truth for recommendations. Do not invent item details. If matches exist, provide one short next step. If none, say no matches and ask one short follow-up preference question.',
+    }
+
+    const modelSystemMessage = highTimeoutRisk
+      ? compactSystemMessage
+      : fullSystemMessage
+
+    const modelHistoryMessages = highTimeoutRisk
+      ? compactHistoryForTimeoutRisk(historyMessages)
+      : historyMessages
+
+    const retrievalItemsContext = highTimeoutRisk
+      ? buildItemsContext(matchedItems, COMPACT_RAG_MAX_ITEMS)
+      : itemsContext
+
     const retrievalMessage = {
       role: 'system',
-      content: `ITEM_RESULTS:\n${itemsContext}`,
+      content: `ITEM_RESULTS:\n${retrievalItemsContext}`,
     }
 
     const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')
@@ -737,7 +804,7 @@ Help users quickly understand and use Swaply while maintaining a natural and use
             },
             body: JSON.stringify({
               model: 'nvidia/nemotron-3-super-120b-a12b:free',
-              messages: [systemMessage, retrievalMessage, ...historyMessages]
+              messages: [modelSystemMessage, retrievalMessage, ...modelHistoryMessages]
             }),
             signal: timeoutSignal,
           }
@@ -832,6 +899,7 @@ Help users quickly understand and use Swaply while maintaining a natural and use
         price_constraint_mode: priceConstraint?.mode ?? null,
         price_constraint_value: priceConstraint?.value ?? null,
         primary_subject: primarySubject,
+        high_timeout_risk: highTimeoutRisk,
       },
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

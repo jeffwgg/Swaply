@@ -27,11 +27,16 @@ class NotificationService {
   StreamSubscription<AuthState>? _authSubscription;
   RealtimeChannel? _notificationsChannel;
   String? _subscribedRecipientId;
+  bool _isChatTabActive = false;
 
   bool _isInitialized = false;
 
   Stream<List<SystemNotificationItem>> get notificationsStream =>
       _streamController.stream;
+
+  void setChatTabActive(bool isActive) {
+    _isChatTabActive = isActive;
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) {
@@ -126,8 +131,11 @@ class NotificationService {
     final row = _normalizeMap(rawRow);
     final title = row['title']?.toString().trim() ?? '';
     final body = row['body']?.toString().trim() ?? '';
+    final type = row['type']?.toString().trim().toLowerCase() ?? '';
 
-    if (title.isNotEmpty || body.isNotEmpty) {
+    final shouldSuppressLocal = type == 'chat' && _isChatTabActive;
+
+    if (!shouldSuppressLocal && (title.isNotEmpty || body.isNotEmpty)) {
       await _showLocalNotification(
         title: title.isEmpty ? 'Swaply' : title,
         body: body,

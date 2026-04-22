@@ -383,6 +383,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           otherUserId: acceptedReply.ownerId,
           itemId: widget.item.id,
         );
+        // Send as media message with image (left-aligned bubble with item link)
         final caption = StringBuffer()
           ..writeln(
             'I accepted your trade offer for "${widget.item.name}".',
@@ -398,9 +399,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           'buyer_id': acceptedReply.ownerId,
           'seller_id': widget.item.ownerId,
         };
-        final autoMessage = offerImage == null
-            ? caption.toString().trim()
-            : '[[media]]${jsonEncode(autoMessagePayload)}';
+        final autoMessage = '[[media]]${jsonEncode(autoMessagePayload)}';
 
         await _chatService.sendMessage(
           chatId: chat.id,

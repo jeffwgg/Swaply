@@ -13,6 +13,7 @@ import 'package:path/path.dart' as path_util;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../models/app_user.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/chat_pinned_message.dart';
@@ -26,6 +27,7 @@ import '../../../repositories/transactions_repository.dart';
 import '../../../repositories/users_repository.dart';
 import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
+import '../../../services/chat_media_cache_service.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/meetup_address_option.dart';
 import '../../../views/screens/checkout/checkout_screen.dart';
@@ -33,6 +35,7 @@ import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../views/screens/profile/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
+import '../../../repositories/local/local_messages_repository.dart';
 
 class InboxScreen extends StatefulWidget {
   final ValueChanged<bool>? onConversationViewChanged;
@@ -63,6 +66,9 @@ class _InboxScreenState extends State<InboxScreen> {
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<AiMessage>>? _aiMessagesSubscription;
+  Timer? _inboxSubscriptionRetryTimer;
+  Timer? _inboxRefreshTimer;
+  bool _isLoadingInboxData = false;
   int? _activeChatId;
   final Map<int, List<ChatMessage>> _rawMessagesByChat = {};
   final Map<int, List<_Message>> _messagesByChat = {};
@@ -74,6 +80,9 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _isSending = false;
   bool _isRecordingVoice = false;
   DateTime? _voiceRecordingStartAt;
+  String? _voiceDraftPath;
+  String? _voiceDraftFileName;
+  int? _voiceDraftDurationSeconds;
   bool _hasAttemptedAiConversationInit = false;
   int _unreadNotificationCount = 0;
 
@@ -90,10 +99,13 @@ class _InboxScreenState extends State<InboxScreen> {
     }
     _loadInbox();
     _ensureInboxRealtimeSubscription();
+    _startInboxRefreshFallback();
   }
 
   @override
   void dispose() {
+    _inboxRefreshTimer?.cancel();
+    _inboxSubscriptionRetryTimer?.cancel();
     _authSubscription?.cancel();
     _messagesSubscription?.cancel();
     _aiMessagesSubscription?.cancel();
@@ -107,6 +119,8 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   void _handleUserChanged() {
+    _inboxRefreshTimer?.cancel();
+    _inboxSubscriptionRetryTimer?.cancel();
     if (_inboxSubscription != null) {
       unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
       _inboxSubscription = null;
@@ -132,20 +146,64 @@ class _InboxScreenState extends State<InboxScreen> {
     _composerController.clear();
     _loadInbox();
     _ensureInboxRealtimeSubscription();
+    _startInboxRefreshFallback();
+  }
+
+  void _startInboxRefreshFallback() {
+    _inboxRefreshTimer?.cancel();
+    _inboxRefreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_loadInbox(force: false));
+    });
   }
 
   void _ensureInboxRealtimeSubscription() {
     if (_inboxSubscription != null) {
       return;
     }
+    unawaited(_ensureInboxRealtimeSubscriptionAsync());
+  }
+
+  Future<void> _ensureInboxRealtimeSubscriptionAsync() async {
+    if (_inboxSubscription != null || !mounted) {
+      return;
+    }
+
     try {
+      await _inboxViewModel.refreshCurrentUserId();
+      if (!mounted || _inboxSubscription != null) {
+        return;
+      }
       _inboxSubscription = _inboxViewModel.subscribeInboxChanges(
         onChange: _loadInbox,
       );
-    } catch (_) {}
+      _inboxSubscriptionRetryTimer?.cancel();
+      _inboxSubscriptionRetryTimer = null;
+    } catch (_) {
+      _scheduleInboxSubscriptionRetry();
+    }
   }
 
-  Future<void> _loadInbox() async {
+  void _scheduleInboxSubscriptionRetry() {
+    if (_inboxSubscriptionRetryTimer != null || !mounted) {
+      return;
+    }
+    _inboxSubscriptionRetryTimer = Timer(const Duration(seconds: 2), () {
+      _inboxSubscriptionRetryTimer = null;
+      _ensureInboxRealtimeSubscription();
+    });
+  }
+
+  Future<void> _loadInbox({bool force = true}) async {
+    if (_isLoadingInboxData && !force) {
+      return;
+    }
+    if (_isLoadingInboxData && force) {
+      return;
+    }
+    _isLoadingInboxData = true;
     try {
       final threads = await _inboxViewModel.loadInbox();
       _ensureInboxRealtimeSubscription();
@@ -168,6 +226,9 @@ class _InboxScreenState extends State<InboxScreen> {
           name: currentUserId == null
               ? (t.user2Name ?? t.user1Name ?? 'User')
               : t.otherUserName(currentUserId),
+          avatarUrl: currentUserId == null
+            ? null
+            : t.otherUserProfileImage(currentUserId),
           status: 'Active',
           badge: null,
           timeAgo: _formatTime(t.updatedAt),
@@ -186,6 +247,7 @@ class _InboxScreenState extends State<InboxScreen> {
         id: -1,
         chatThread: null,
         name: 'Swaply Buddy',
+        avatarUrl: null,
         status: 'Online',
         badge: 'AI',
         timeAgo: 'Always',
@@ -214,6 +276,8 @@ class _InboxScreenState extends State<InboxScreen> {
         setState(() => _isLoading = false);
       }
       debugPrint('Error loading inbox: $e');
+    } finally {
+      _isLoadingInboxData = false;
     }
   }
 
@@ -875,6 +939,9 @@ class _InboxScreenState extends State<InboxScreen> {
       _selectedConversation = index;
       _replyingTo = null;
       _manuallyUnreadChats.remove(selected.id);
+      _voiceDraftPath = null;
+      _voiceDraftFileName = null;
+      _voiceDraftDurationSeconds = null;
     });
     unawaited(_saveConversationPrefs());
     if (openMobile) {
@@ -1029,6 +1096,7 @@ class _InboxScreenState extends State<InboxScreen> {
       id: message.id,
       text: body.displayText,
       media: body.media,
+      cachedMediaPath: message.cachedMediaPath,
       time: '$hour:$minute $suffix',
       isMine: message.senderId == _currentUserId,
       senderId: message.senderId,
@@ -1067,6 +1135,7 @@ class _InboxScreenState extends State<InboxScreen> {
       id: message.id,
       text: body.displayText,
       media: body.media,
+      cachedMediaPath: null,
       time: '$hour:$minute $suffix',
       isMine: !message.isAi,
       senderId: message.userId,
@@ -1076,8 +1145,65 @@ class _InboxScreenState extends State<InboxScreen> {
       deletedAt: null,
       replyToMessageId: parsed.repliedMessageId,
       replyToText: replyText,
-      ragItems: ragParsed.items,
+      ragItems: _shouldRenderAiRagItems(
+        visibleText: ragParsed.visibleText,
+        items: ragParsed.items,
+      )
+          ? ragParsed.items
+          : const [],
     );
+  }
+
+  bool _shouldRenderAiRagItems({
+    required String visibleText,
+    required List<_AiRagItem> items,
+  }) {
+    if (items.isEmpty) {
+      return false;
+    }
+
+    final text = visibleText.trim().toLowerCase();
+    if (text.isEmpty) {
+      return false;
+    }
+
+    // Suppress cards for generic small-talk/help replies.
+    const genericPhrases = <String>[
+      'how can i help',
+      'i\'m here to assist',
+      'hello',
+      'hi there',
+      'welcome',
+      'how can i assist',
+      'what can i do for you',
+    ];
+    for (final phrase in genericPhrases) {
+      if (text.contains(phrase)) {
+        return false;
+      }
+    }
+
+    // Show cards when the AI indicates listing search/recommendation context.
+    const listingSignals = <String>[
+      'found',
+      'listing',
+      'listings',
+      'recommend',
+      'recommended',
+      'match',
+      'matches',
+      'available',
+      'priced at',
+      'view this listing',
+      'proceed with it',
+    ];
+    for (final signal in listingSignals) {
+      if (text.contains(signal)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   ({String visibleText, List<_AiRagItem> items}) _parseAiRagItems(
@@ -1630,6 +1756,7 @@ class _InboxScreenState extends State<InboxScreen> {
       id: -now.microsecondsSinceEpoch,
       text: parsedBody.displayText,
       media: parsedBody.media,
+      cachedMediaPath: null,
       time: '$hour:$minute $suffix',
       isMine: true,
       senderId: currentUserId,
@@ -1773,18 +1900,94 @@ class _InboxScreenState extends State<InboxScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: false,
-        withData: false,
+        withData: true,
       );
       if (result == null || result.files.isEmpty) {
         return;
       }
 
-      final file = result.files.first;
-      final name = file.name.trim().isEmpty ? 'Document' : file.name;
-      await _sendQuickMessage(conversation, '[Document] $name');
+      final picked = result.files.first;
+      final localFile = await _materializePickedFile(picked);
+      if (localFile == null) {
+        _showSnack('Unable to read selected document.');
+        return;
+      }
+
+      final name = picked.name.trim().isEmpty ? 'Document' : picked.name;
+      final uploadedUrl = await _uploadAttachment(
+        conversation: conversation,
+        file: localFile,
+        type: _MessageMediaType.document,
+        contentType: _guessDocumentContentType(name),
+        fileName: name,
+      );
+      if (uploadedUrl == null) {
+        _showSnack('Unable to upload document.');
+        return;
+      }
+
+      final mediaMessage = _MessageMedia(
+        type: _MessageMediaType.document,
+        url: uploadedUrl,
+        fileName: name,
+      );
+      await _sendQuickMessage(
+        conversation,
+        _encodeMediaMessage(mediaMessage),
+        promptForAi: '[Document] $name',
+      );
     } catch (e) {
       debugPrint('Error picking document: $e');
       _showSnack('Unable to pick document.');
+    }
+  }
+
+  Future<File?> _materializePickedFile(PlatformFile picked) async {
+    final filePath = picked.path;
+    if (filePath != null && filePath.trim().isNotEmpty) {
+      final existing = File(filePath);
+      if (await existing.exists()) {
+        return existing;
+      }
+    }
+
+    final bytes = picked.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      return null;
+    }
+
+    final ext = path_util.extension(picked.name);
+    final safeExt = ext.isEmpty ? '.bin' : ext;
+    final outPath =
+        '${Directory.systemTemp.path}/swaply_doc_${DateTime.now().millisecondsSinceEpoch}$safeExt';
+    final file = File(outPath);
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  String _guessDocumentContentType(String fileName) {
+    final ext = path_util.extension(fileName).toLowerCase();
+    switch (ext) {
+      case '.pdf':
+        return 'application/pdf';
+      case '.doc':
+        return 'application/msword';
+      case '.docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case '.xls':
+        return 'application/vnd.ms-excel';
+      case '.xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case '.ppt':
+        return 'application/vnd.ms-powerpoint';
+      case '.pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case '.txt':
+        return 'text/plain';
+      case '.csv':
+        return 'text/csv';
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -1934,6 +2137,9 @@ class _InboxScreenState extends State<InboxScreen> {
       setState(() {
         _isRecordingVoice = true;
         _voiceRecordingStartAt = DateTime.now();
+        _voiceDraftPath = null;
+        _voiceDraftFileName = null;
+        _voiceDraftDurationSeconds = null;
       });
     } catch (e) {
       debugPrint('Error starting voice record: $e');
@@ -1941,7 +2147,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
-  Future<void> _stopVoiceRecording(_Conversation conversation) async {
+  Future<void> _stopVoiceRecording() async {
     if (!_isRecordingVoice) {
       return;
     }
@@ -1965,16 +2171,83 @@ class _InboxScreenState extends State<InboxScreen> {
           ? 1
           : DateTime.now().difference(startedAt).inSeconds.clamp(1, 3600);
       final fileName = path_util.basename(recordPath);
+      setState(() {
+        _voiceDraftPath = recordPath;
+        _voiceDraftFileName = fileName;
+        _voiceDraftDurationSeconds = seconds;
+      });
+    } catch (e) {
+      debugPrint('Error stopping voice record: $e');
+      if (mounted) {
+        setState(() {
+          _isRecordingVoice = false;
+          _voiceRecordingStartAt = null;
+          _voiceDraftPath = null;
+          _voiceDraftFileName = null;
+          _voiceDraftDurationSeconds = null;
+        });
+      }
+      _showSnack('Unable to save voice recording.');
+    }
+  }
+
+  Future<void> _toggleVoiceRecording() async {
+    if (_isRecordingVoice) {
+      await _stopVoiceRecording();
+      return;
+    }
+    await _startVoiceRecording();
+  }
+
+  Future<void> _discardVoiceDraft() async {
+    final draftPath = _voiceDraftPath;
+    setState(() {
+      _voiceDraftPath = null;
+      _voiceDraftFileName = null;
+      _voiceDraftDurationSeconds = null;
+    });
+
+    if (draftPath == null || draftPath.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final file = File(draftPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _sendVoiceDraft(_Conversation conversation) async {
+    final draftPath = _voiceDraftPath;
+    if (draftPath == null || draftPath.trim().isEmpty || _isSending) {
+      return;
+    }
+
+    final file = File(draftPath);
+    if (!await file.exists()) {
+      _showSnack('Voice draft is missing. Please record again.');
+      await _discardVoiceDraft();
+      return;
+    }
+
+    final fileName = _voiceDraftFileName ?? path_util.basename(draftPath);
+    final seconds = (_voiceDraftDurationSeconds ?? 1).clamp(1, 3600);
+
+    try {
       final uploadedUrl = await _uploadAttachment(
         conversation: conversation,
-        file: File(recordPath),
+        file: file,
         type: _MessageMediaType.voice,
         contentType: 'audio/mp4',
         fileName: fileName,
       );
       if (uploadedUrl == null) {
+        _showSnack('Unable to upload voice message.');
         return;
       }
+
       final mediaMessage = _MessageMedia(
         type: _MessageMediaType.voice,
         url: uploadedUrl,
@@ -1986,15 +2259,10 @@ class _InboxScreenState extends State<InboxScreen> {
         _encodeMediaMessage(mediaMessage),
         promptForAi: '[Voice] $fileName (${seconds}s)',
       );
+      await _discardVoiceDraft();
     } catch (e) {
-      debugPrint('Error stopping voice record: $e');
-      if (mounted) {
-        setState(() {
-          _isRecordingVoice = false;
-          _voiceRecordingStartAt = null;
-        });
-      }
-      _showSnack('Unable to save voice recording.');
+      debugPrint('Error sending voice draft: $e');
+      _showSnack('Unable to send voice message.');
     }
   }
 
@@ -2021,6 +2289,7 @@ class _InboxScreenState extends State<InboxScreen> {
     final optimistic = _Message(
       id: -now.microsecondsSinceEpoch,
       text: text,
+      cachedMediaPath: null,
       time: '$hour:$minute $suffix',
       isMine: true,
       senderId: currentUserId,
@@ -2108,12 +2377,22 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F4FF),
-      body: SafeArea(
-        bottom: false,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
+    return PopScope(
+      canPop: !_showMobileChat,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          return;
+        }
+        if (_showMobileChat) {
+          _setMobileConversationView(false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF6F4FF),
+        body: SafeArea(
+          bottom: false,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 950;
             final selected = _conversations.isNotEmpty
                 ? _conversations[_selectedConversation < _conversations.length
@@ -2183,10 +2462,12 @@ class _InboxScreenState extends State<InboxScreen> {
                             onOpenCamera: () => _sendCameraPhoto(selected),
                             onShareLocation: () => _sendLocation(selected),
                             onPickDocument: () => _sendDocument(selected),
-                            onVoiceRecordStart: _startVoiceRecording,
-                            onVoiceRecordStop: () =>
-                                _stopVoiceRecording(selected),
+                            onVoiceRecordToggle: _toggleVoiceRecording,
                             isRecordingVoice: _isRecordingVoice,
+                            voiceDraftPath: _voiceDraftPath,
+                            voiceDraftDurationSeconds: _voiceDraftDurationSeconds,
+                            onDeleteVoiceDraft: _discardVoiceDraft,
+                            onSendVoiceDraft: () => _sendVoiceDraft(selected),
                             onUnpinPinnedMessage: (message) {
                               if (selected.id == -1) {
                                 _unpinAiMessage(message);
@@ -2232,9 +2513,12 @@ class _InboxScreenState extends State<InboxScreen> {
                 onOpenCamera: () => _sendCameraPhoto(selected),
                 onShareLocation: () => _sendLocation(selected),
                 onPickDocument: () => _sendDocument(selected),
-                onVoiceRecordStart: _startVoiceRecording,
-                onVoiceRecordStop: () => _stopVoiceRecording(selected),
+                onVoiceRecordToggle: _toggleVoiceRecording,
                 isRecordingVoice: _isRecordingVoice,
+                voiceDraftPath: _voiceDraftPath,
+                voiceDraftDurationSeconds: _voiceDraftDurationSeconds,
+                onDeleteVoiceDraft: _discardVoiceDraft,
+                onSendVoiceDraft: () => _sendVoiceDraft(selected),
                 onUnpinPinnedMessage: (message) {
                   if (selected.id == -1) {
                     _unpinAiMessage(message);
@@ -2267,7 +2551,8 @@ class _InboxScreenState extends State<InboxScreen> {
               onConversationLongPress: _showConversationActions,
               isLoading: _isLoading,
             );
-          },
+            },
+          ),
         ),
       ),
     );
@@ -2456,13 +2741,19 @@ class _InboxPanel extends StatelessWidget {
                           const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final conversation = conversations[index];
+                        final selectedConversationId =
+                          selectedIndex >= 0 &&
+                            selectedIndex < conversations.length
+                          ? conversations[selectedIndex].id
+                          : null;
                         final isPinned = pinnedChats.contains(conversation.id);
                         final hasUnread =
                             conversation.messages.any(
                               (m) => !m.isMine && m.readAt == null,
                             ) ||
                             manuallyUnreadChats.contains(conversation.id);
-                        final showUnreadDot = hasUnread && index != selectedIndex;
+                        final showUnreadDot =
+                          hasUnread && conversation.id != selectedConversationId;
                         return GestureDetector(
                           onLongPress: () =>
                               onConversationLongPress(conversation),
@@ -2499,6 +2790,7 @@ class _InboxPanel extends StatelessWidget {
                                   children: [
                                     _AvatarBubble(
                                       name: conversation.name,
+                                      imageUrl: conversation.avatarUrl,
                                       colors: conversation.avatarColors,
                                     ),
                                     const SizedBox(width: 14),
@@ -2668,9 +2960,12 @@ class _ChatPanel extends StatefulWidget {
   final VoidCallback onOpenCamera;
   final VoidCallback onShareLocation;
   final VoidCallback onPickDocument;
-  final VoidCallback onVoiceRecordStart;
-  final VoidCallback onVoiceRecordStop;
+  final VoidCallback onVoiceRecordToggle;
   final bool isRecordingVoice;
+  final String? voiceDraftPath;
+  final int? voiceDraftDurationSeconds;
+  final VoidCallback onDeleteVoiceDraft;
+  final VoidCallback onSendVoiceDraft;
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
   final VoidCallback onOpenItemDetails;
@@ -2691,9 +2986,12 @@ class _ChatPanel extends StatefulWidget {
     required this.onOpenCamera,
     required this.onShareLocation,
     required this.onPickDocument,
-    required this.onVoiceRecordStart,
-    required this.onVoiceRecordStop,
+    required this.onVoiceRecordToggle,
     required this.isRecordingVoice,
+    required this.voiceDraftPath,
+    required this.voiceDraftDurationSeconds,
+    required this.onDeleteVoiceDraft,
+    required this.onSendVoiceDraft,
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
     required this.onOpenItemDetails,
@@ -2706,6 +3004,10 @@ class _ChatPanel extends StatefulWidget {
 class _ChatPanelState extends State<_ChatPanel> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
+  AudioPlayer? _draftVoicePlayer;
+  StreamSubscription<PlayerState>? _draftVoiceStateSub;
+  bool _isPlayingVoiceDraft = false;
+  String? _loadedVoiceDraftPath;
   bool _showEmojiKeyboard = false;
   bool _showAttachmentOptions = false;
 
@@ -2732,13 +3034,66 @@ class _ChatPanelState extends State<_ChatPanel> {
         _scrollToLatest(animated: !chatChanged);
       });
     }
+
+    if (oldWidget.voiceDraftPath != widget.voiceDraftPath) {
+      if (_isPlayingVoiceDraft) {
+        unawaited(_draftVoicePlayer?.stop());
+      }
+      _isPlayingVoiceDraft = false;
+      _loadedVoiceDraftPath = null;
+    }
   }
 
   @override
   void dispose() {
+    _draftVoiceStateSub?.cancel();
+    unawaited(_draftVoicePlayer?.dispose());
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleVoiceDraftPlayback() async {
+    final draftPath = widget.voiceDraftPath;
+    if (draftPath == null || draftPath.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      _draftVoicePlayer ??= AudioPlayer();
+      _draftVoiceStateSub ??= _draftVoicePlayer!.playerStateStream.listen((
+        state,
+      ) {
+        if (!mounted) {
+          return;
+        }
+        final finished = state.processingState == ProcessingState.completed;
+        setState(() {
+          _isPlayingVoiceDraft = state.playing && !finished;
+        });
+        if (finished) {
+          unawaited(_draftVoicePlayer!.seek(Duration.zero));
+        }
+      });
+
+      if (_loadedVoiceDraftPath != draftPath) {
+        await _draftVoicePlayer!.setFilePath(draftPath);
+        _loadedVoiceDraftPath = draftPath;
+      }
+
+      if (_isPlayingVoiceDraft) {
+        await _draftVoicePlayer!.pause();
+      } else {
+        await _draftVoicePlayer!.play();
+      }
+    } catch (_) {}
+  }
+
+  String _voiceDraftDurationLabel(int? seconds) {
+    final value = (seconds ?? 0).clamp(0, 3600);
+    final min = (value ~/ 60).toString().padLeft(2, '0');
+    final sec = (value % 60).toString().padLeft(2, '0');
+    return '$min:$sec';
   }
 
   void _toggleEmojiKeyboard() {
@@ -2945,6 +3300,7 @@ class _ChatPanelState extends State<_ChatPanel> {
                 ],
                 _AvatarBubble(
                   name: widget.conversation.name,
+                  imageUrl: widget.conversation.avatarUrl,
                   colors: widget.conversation.avatarColors,
                   size: 54,
                 ),
@@ -3186,8 +3542,7 @@ class _ChatPanelState extends State<_ChatPanel> {
                     ),
                     const SizedBox(width: 12),
                     GestureDetector(
-                      onLongPressStart: (_) => widget.onVoiceRecordStart(),
-                      onLongPressEnd: (_) => widget.onVoiceRecordStop(),
+                      onTap: widget.onVoiceRecordToggle,
                       child: Container(
                         width: 48,
                         height: 48,
@@ -3250,15 +3605,93 @@ class _ChatPanelState extends State<_ChatPanel> {
                     ),
                   ],
                 ),
-                if (widget.isRecordingVoice)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 10),
-                    child: Text(
-                      'Recording voice... release to send',
-                      style: TextStyle(
-                        color: Color(0xFFD32F2F),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    widget.isRecordingVoice
+                        ? 'Recording... tap mic again to stop'
+                        : (widget.voiceDraftPath == null
+                              ? ''
+                              : 'Voice draft ready: preview, delete, or send'),
+                    style: TextStyle(
+                      color: widget.isRecordingVoice
+                          ? const Color(0xFFD32F2F)
+                          : const Color(0xFF8B95AC),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (widget.voiceDraftPath != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF4EEFF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE0D0FF)),
+                      ),
+                      child: Row(
+                        children: [
+                          InkWell(
+                            onTap: _toggleVoiceDraftPlayback,
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color(0xFFE7DBFF),
+                              ),
+                              child: Icon(
+                                _isPlayingVoiceDraft
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                color: const Color(0xFF6D2DF5),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Voice message ${_voiceDraftDurationLabel(widget.voiceDraftDurationSeconds)}',
+                              style: const TextStyle(
+                                color: Color(0xFF4E3F78),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: widget.onDeleteVoiceDraft,
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: Color(0xFF8F4A4A),
+                            ),
+                            tooltip: 'Delete voice draft',
+                          ),
+                          FilledButton.icon(
+                            onPressed: widget.isSending
+                                ? null
+                                : widget.onSendVoiceDraft,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF6D2DF5),
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(86, 38),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                            ),
+                            icon: const Icon(Icons.send_rounded, size: 16),
+                            label: const Text('Send'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -3380,9 +3813,12 @@ class _MessageBubble extends StatefulWidget {
 }
 
 class _MessageBubbleState extends State<_MessageBubble> {
+  final LocalMessagesRepository _localMessagesRepository =
+      LocalMessagesRepository();
   AudioPlayer? _audioPlayer;
   StreamSubscription<PlayerState>? _playerStateSub;
   bool _isPlaying = false;
+  bool _isDownloadingDocument = false;
   String? _loadedUrl;
 
   _Message get message => widget.message;
@@ -3418,6 +3854,99 @@ class _MessageBubbleState extends State<_MessageBubble> {
         await _audioPlayer!.play();
       }
     } catch (_) {}
+  }
+
+  Future<void> _openDocumentAttachment(_MessageMedia media) async {
+    final name = _resolveDocumentFileName(media);
+
+    Future<bool> openUri(Uri uri) async {
+      return launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+
+    try {
+      if (!_isDownloadingDocument) {
+        final cachedPath = message.cachedMediaPath;
+        if (cachedPath != null && cachedPath.trim().isNotEmpty) {
+          final cached = await ChatMediaCacheService.instance.getCachedMedia(
+            cachedPath,
+          );
+          if (cached != null) {
+            final opened = await openUri(Uri.file(cached.path));
+            if (!opened && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Unable to open cached file.')),
+              );
+            }
+            return;
+          }
+        }
+      }
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isDownloadingDocument = true;
+      });
+
+      final downloadedPath = await ChatMediaCacheService.instance
+          .cacheMediaFromUrl(media.url, name);
+      if (downloadedPath == null || downloadedPath.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to download file.')),
+          );
+        }
+        return;
+      }
+
+      if (!message.isLocal) {
+        await _localMessagesRepository.updateCachedMediaPath(
+          messageId: message.id,
+          cachedPath: downloadedPath,
+        );
+      }
+
+      final opened = await openUri(Uri.file(downloadedPath));
+      if (!opened) {
+        await openUri(Uri.parse(media.url));
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved to local cache: $name')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open document.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloadingDocument = false;
+        });
+      }
+    }
+  }
+
+  String _resolveDocumentFileName(_MessageMedia media) {
+    final fromPayload = media.fileName;
+    if (fromPayload != null && fromPayload.trim().isNotEmpty) {
+      return fromPayload.trim();
+    }
+
+    try {
+      final uri = Uri.parse(media.url);
+      final fromPath = path_util.basename(uri.path);
+      if (fromPath.trim().isNotEmpty) {
+        return fromPath.trim();
+      }
+    } catch (_) {}
+
+    return 'document.bin';
   }
   
   Future<void> _openMediaItemDetails(_MessageMedia media) async {
@@ -3660,7 +4189,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final isImageOnly = message.media?.type == _MessageMediaType.image;
+    // Render as regular bubble (not full-width) if it has item_id (trade acceptance message)
+    final hasItemLink = message.media?.itemId != null;
+    final isImageOnly = message.media?.type == _MessageMediaType.image && !hasItemLink;
     final bubble = InkWell(
       onLongPress: widget.onLongPress,
       borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
@@ -3786,7 +4317,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 ),
               ),
             ],
-            if (isImageOnly && message.media?.itemId != null) ...[
+            if (message.media?.itemId != null) ...[
               const SizedBox(height: 10),
               _buildItemActionButtons(message.media!),
             ],
@@ -3938,7 +4469,85 @@ class _MessageBubbleState extends State<_MessageBubble> {
           ),
         );
       case _MessageMediaType.document:
-        return _mediaErrorCard('Document attachment');
+        return InkWell(
+          onTap: _isDownloadingDocument
+              ? null
+              : () => _openDocumentAttachment(media),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 320),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: message.isMine
+                  ? Colors.white.withValues(alpha: 0.15)
+                  : const Color(0xFFF4EEFF),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.description_rounded,
+                  size: 26,
+                  color: message.isMine
+                      ? Colors.white
+                      : const Color(0xFF7A54FF),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _resolveDocumentFileName(media),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: message.isMine
+                              ? Colors.white
+                              : const Color(0xFF24314D),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _isDownloadingDocument
+                            ? 'Downloading...'
+                            : (message.cachedMediaPath == null
+                                  ? 'Tap to download'
+                                  : 'Tap to open cached file'),
+                        style: TextStyle(
+                          color: message.isMine
+                              ? Colors.white.withValues(alpha: 0.92)
+                              : const Color(0xFF5E6A87),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isDownloadingDocument)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF7A54FF),
+                    ),
+                  )
+                else
+                  Icon(
+                    Icons.download_rounded,
+                    size: 20,
+                    color: message.isMine
+                        ? Colors.white
+                        : const Color(0xFF7A54FF),
+                  ),
+              ],
+            ),
+          ),
+        );
     }
   }
 
@@ -4068,7 +4677,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                                 sellerDisplayName:
                                     seller?.username ?? 'Seller',
                                 sellerId: media.sellerId!,
-                                buyerId: currentUserId!,
+                                buyerId: currentUserId,
                                 sellerMeetupOptions: meetups,
                                 // trade: meet-up only, no payment
                                 tradeTransactionId: media.transactionId!,
@@ -4310,11 +4919,13 @@ class _HeaderIconButton extends StatelessWidget {
 
 class _AvatarBubble extends StatelessWidget {
   final String name;
+  final String? imageUrl;
   final List<Color> colors;
   final double size;
 
   const _AvatarBubble({
     required this.name,
+    this.imageUrl,
     required this.colors,
     this.size = 56,
   });
@@ -4325,6 +4936,9 @@ class _AvatarBubble extends StatelessWidget {
     final initials = parts.length > 1
         ? '${parts.first[0]}${parts.last[0]}'
         : name.substring(0, 1);
+    final normalizedImageUrl = imageUrl?.trim();
+    final hasImage =
+        normalizedImageUrl != null && normalizedImageUrl.isNotEmpty;
 
     return Container(
       width: size,
@@ -4339,13 +4953,32 @@ class _AvatarBubble extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE6DDFF), width: 2),
       ),
       child: Center(
-        child: Text(
-          initials.toUpperCase(),
-          style: TextStyle(
-            color: const Color(0xFF1B2543),
-            fontSize: size * 0.3,
-            fontWeight: FontWeight.w800,
-          ),
+        child: ClipOval(
+          child: hasImage
+              ? Image.network(
+                  normalizedImageUrl,
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) {
+                    return Text(
+                      initials.toUpperCase(),
+                      style: TextStyle(
+                        color: const Color(0xFF1B2543),
+                        fontSize: size * 0.3,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    );
+                  },
+                )
+              : Text(
+                  initials.toUpperCase(),
+                  style: TextStyle(
+                    color: const Color(0xFF1B2543),
+                    fontSize: size * 0.3,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
         ),
       ),
     );
@@ -4401,6 +5034,7 @@ class _Conversation {
   final int id;
   final String name;
   final ChatThread? chatThread;
+  final String? avatarUrl;
   final String status;
   final String? badge;
   final String timeAgo;
@@ -4415,6 +5049,7 @@ class _Conversation {
     required this.id,
     this.chatThread,
     required this.name,
+    this.avatarUrl,
     required this.status,
     required this.badge,
     required this.timeAgo,
@@ -4435,6 +5070,7 @@ class _Conversation {
       id: id,
       chatThread: chatThread,
       name: name,
+      avatarUrl: avatarUrl,
       status: status,
       badge: badge,
       timeAgo: timeAgo ?? this.timeAgo,
@@ -4558,6 +5194,7 @@ class _Message {
   final int id;
   final String text;
   final _MessageMedia? media;
+  final String? cachedMediaPath;
   final String time;
   final bool isMine;
   final String senderId;
@@ -4573,6 +5210,7 @@ class _Message {
     required this.id,
     required this.text,
     this.media,
+    this.cachedMediaPath,
     required this.time,
     required this.isMine,
     required this.senderId,

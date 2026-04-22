@@ -11,6 +11,7 @@ import '../screens/item/create_item_screen.dart';
 import 'auth/login_screen.dart';
 import '../../core/theme/app_colors.dart';
 import '../../../services/supabase_service.dart';
+import '../../../services/notification_service.dart';
 
 class MainShell extends StatefulWidget {
   final bool isDarkMode;
@@ -58,6 +59,7 @@ class _MainShellState extends State<MainShell> {
       _hideChatNavigation = false;
     }
     });
+    NotificationService.instance.setChatTabActive(index == 2);
   }
 
   void _onAddTap() {
@@ -126,6 +128,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    NotificationService.instance.setChatTabActive(_currentIndex == 2);
     final screens = [
       const HomeScreen(),
       DiscoverScreen(
