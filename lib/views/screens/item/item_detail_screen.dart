@@ -447,6 +447,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
 
     await _fetchReplies();
+
+    final refreshedItem = await ItemsRepository().getById(widget.item.id);
+    if (!mounted) return;
+    if (refreshedItem != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              ItemDetailsScreen(user: widget.user, item: refreshedItem),
+        ),
+      );
+    } else {
+      setState(() {});
+    }
   }
 
   Future<void> _rejectReply(int replyId) async {
