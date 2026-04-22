@@ -96,7 +96,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     if (mounted) {
       setState(() {
         _ownerName = resolvedName.isEmpty ? 'Unknown' : resolvedName;
-        _ownerAuthUserId = owner?.id;
       });
     }
   }
