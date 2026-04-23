@@ -97,7 +97,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _addressCtrl.addListener(_onDraftChanged);
 
     checkStatus();
-
   }
 
   Future<void> _init() async {

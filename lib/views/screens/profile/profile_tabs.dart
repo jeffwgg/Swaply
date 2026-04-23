@@ -519,27 +519,7 @@ class FavouriteTab extends StatefulWidget {
 }
 
 class  _FavouriteTabState extends State<FavouriteTab>{
-  List<ItemListing> _items = [];
   bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load(); // ← 这里调用
-  }
-
-  // ✅ 加在这里
-  Future<void> _load() async {
-    print("🔥 _load called");
-    setState(() => _loading = true);
-    final items = await ItemsRepository().getFavouriteItems(widget.user.id);
-    if (mounted) {
-      setState(() {
-        _items = items;
-        _loading = false;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -574,7 +554,6 @@ class  _FavouriteTabState extends State<FavouriteTab>{
                     builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
                   ),
                 );
-                _load();
                 },
               child: Container(
                 decoration: BoxDecoration(

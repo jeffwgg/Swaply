@@ -36,12 +36,10 @@ class ItemsRepository {
     String? listingType,
     String? searchQuery,
   }) async {
-    log(userId.toString());
-
     try {
       List<String> matchedUserIds = [];
       
-      // find user id whose username matches
+      // search matched seller's items
       if (searchQuery != null && searchQuery.isNotEmpty) {
         try {
           final usersRes = await SupabaseService.client
@@ -73,9 +71,14 @@ class ItemsRepository {
         queryBuilder = queryBuilder.or(orClause);
       }
 
-      queryBuilder = queryBuilder
-          .eq('status', 'available')
-          .filter('replied_to', 'is', null);
+      if (searchQuery != null && searchQuery.isNotEmpty){
+        queryBuilder = queryBuilder
+            .filter('replied_to', 'is', null);
+      }else{
+        queryBuilder = queryBuilder
+            .eq('status', 'available')
+            .filter('replied_to', 'is', null);
+      }
 
       if (searchQuery == null || searchQuery.isEmpty) {
         // exclude items owned by the current user by default when not searching
