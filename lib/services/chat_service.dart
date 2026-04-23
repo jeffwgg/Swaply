@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/chat_message.dart';
 import '../models/chat_pinned_message.dart';
 import '../models/chat_thread.dart';
+import '../services/notification_service.dart';
 import '../repositories/chats_repository.dart';
 import '../repositories/local/local_chats_repository.dart';
 import '../repositories/local/local_messages_repository.dart';
@@ -40,6 +41,7 @@ class ChatService {
 
   final Map<int, StreamSubscription<List<ChatMessage>>> _remoteMessageMirrors =
       {};
+  final Map<int, Timer> _remoteMessagePollers = {};
   bool _isDisposed = false;
 
   String? _cachedCurrentUserId;
@@ -118,6 +120,7 @@ class ChatService {
     }
     _requirePositiveId(chatId, fieldName: 'chatId');
     _ensureRemoteMessageMirror(chatId);
+    _ensureRemoteMessagePoller(chatId);
     unawaited(_primeMessages(chatId));
     unawaited(flushPendingQueue(chatId: chatId));
     return _localMessagesRepository.watchForChat(chatId);
@@ -150,6 +153,13 @@ class ChatService {
       await _localMessagesRepository.resolvePendingWithRemote(
         pending: pending,
         remote: remote,
+      );
+      unawaited(
+        _notifyRecipientForMessage(
+          chatId: chatId,
+          senderId: senderId,
+          content: normalizedContent,
+        ),
       );
       return remote;
     } catch (error) {
@@ -318,7 +328,28 @@ class ChatService {
             return;
           }
           await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
-        }, onError: (_) {});
+        }, onError: (_, __) {
+          _restartRemoteMessageMirror(chatId);
+        }, onDone: () {
+          _restartRemoteMessageMirror(chatId);
+        });
+  }
+
+  void _restartRemoteMessageMirror(int chatId) {
+    final existing = _remoteMessageMirrors.remove(chatId);
+    if (existing != null) {
+      unawaited(existing.cancel());
+    }
+    if (_isDisposed) {
+      return;
+    }
+
+    Future<void>.delayed(const Duration(milliseconds: 350), () {
+      if (_isDisposed) {
+        return;
+      }
+      _ensureRemoteMessageMirror(chatId);
+    });
   }
 
   Future<void> _primeMessages(int chatId) async {
@@ -326,6 +357,22 @@ class ChatService {
       final remoteMessages = await _messagesRepository.listForChat(chatId);
       await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
     } catch (_) {}
+  }
+
+  void _ensureRemoteMessagePoller(int chatId) {
+    if (_isDisposed || _remoteMessagePollers.containsKey(chatId)) {
+      return;
+    }
+
+    _remoteMessagePollers[chatId] = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) {
+        if (_isDisposed) {
+          return;
+        }
+        unawaited(_primeMessages(chatId));
+      },
+    );
   }
 
   Future<void> _refreshInboxCache(Future<List<ChatThread>> remoteFuture) async {
@@ -345,6 +392,59 @@ class ChatService {
     } catch (_) {}
   }
 
+  Future<void> _notifyRecipientForMessage({
+    required int chatId,
+    required String senderId,
+    required String content,
+  }) async {
+    try {
+      final chat = await _chatsRepository.getById(chatId);
+      if (chat == null) {
+        return;
+      }
+
+      final recipientId = chat.otherUserId(senderId);
+      if (recipientId.isEmpty || recipientId == senderId) {
+        return;
+      }
+
+      await NotificationService.instance.sendNotificationToUser(
+        recipientId: recipientId,
+        title: 'New message',
+        body: _buildNotificationPreview(content),
+        type: 'chat',
+        data: {
+          'action': 'open_chat',
+          'chat_id': chatId,
+          'item_id': chat.itemId,
+        },
+      );
+    } catch (_) {}
+  }
+
+  String _buildNotificationPreview(String content) {
+    final trimmed = content.trim();
+    if (trimmed.startsWith('[[media]]')) {
+      final lower = trimmed.toLowerCase();
+      if (lower.contains('"type":"image"')) {
+        return 'Photo';
+      }
+      if (lower.contains('"type":"voice"')) {
+        return 'Voice message';
+      }
+      if (lower.contains('"type":"document"')) {
+        return 'Document';
+      }
+      return 'Attachment';
+    }
+
+    if (trimmed.startsWith('[Location]')) {
+      return 'Location shared';
+    }
+
+    return trimmed;
+  }
+
   Future<void> dispose() async {
     if (_isDisposed) {
       return;
@@ -354,6 +454,11 @@ class ChatService {
     _remoteMessageMirrors.clear();
     for (final subscription in subscriptions) {
       await subscription.cancel();
+    }
+    final pollers = _remoteMessagePollers.values.toList(growable: false);
+    _remoteMessagePollers.clear();
+    for (final poller in pollers) {
+      poller.cancel();
     }
   }
 

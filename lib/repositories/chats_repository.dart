@@ -243,6 +243,17 @@ class ChatsRepository {
     final channel = SupabaseService.client.channel(
       'public:chats:$userId:${DateTime.now().millisecondsSinceEpoch}',
     );
+    DateTime? lastMessageRefreshAt;
+
+    void emitInboxRefresh() {
+      final now = DateTime.now();
+      final last = lastMessageRefreshAt;
+      if (last != null && now.difference(last).inMilliseconds < 300) {
+        return;
+      }
+      lastMessageRefreshAt = now;
+      onRelevantChange();
+    }
 
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
@@ -269,8 +280,19 @@ class ChatsRepository {
 
         if ((hasNext && matchesParticipant(next)) ||
             (hasPrevious && matchesParticipant(previous))) {
-          onRelevantChange();
+          emitInboxRefresh();
         }
+      },
+    );
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'messages',
+      callback: (_) {
+        // If chats.updated_at isn't maintained by a DB trigger, message inserts
+        // would otherwise not refresh inbox previews and unread state.
+        emitInboxRefresh();
       },
     );
 

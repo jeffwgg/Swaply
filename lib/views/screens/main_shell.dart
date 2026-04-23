@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import '../../models/app_user.dart';
 import '../../repositories/users_repository.dart';
+import '../../repositories/items_repository.dart';
 import '../widgets/common/bottom_nav_bar.dart';
 import '../screens/home/home_screen.dart';
 
@@ -9,9 +11,11 @@ import '../screens/explore/discover_screen.dart';
 import '../screens/chat/inbox_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/item/create_item_screen.dart';
+import '../screens/item/item_detail_screen.dart';
 import 'auth/login_screen.dart';
 import '../../core/theme/app_colors.dart';
 import '../../../services/supabase_service.dart';
+import '../../../services/notification_service.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -24,11 +28,117 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   bool _hideChatNavigation = false;
   AppUser? _user;
+  StreamSubscription<Map<String, dynamic>>? _notificationTapSubscription;
+  int? _focusConversationId;
 
   @override
   void initState() {
     super.initState();
     _loadUser();
+    _notificationTapSubscription = NotificationService
+        .instance
+        .notificationTapStream
+        .listen(_handleNotificationTap);
+    final pendingTap = NotificationService.instance.takePendingNotificationTap();
+    if (pendingTap != null) {
+      _handleNotificationTap(pendingTap);
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationTapSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _handleNotificationTap(Map<String, dynamic> payload) {
+    unawaited(_handleNotificationTapAsync(payload));
+  }
+
+  Future<void> _handleNotificationTapAsync(Map<String, dynamic> payload) async {
+    final type = (payload['type'] ?? '').toString().toLowerCase();
+    final data = _normalizeMap(payload['data']);
+    final notificationId = (payload['notification_id'] ?? '').toString();
+
+    if (notificationId.isNotEmpty) {
+      unawaited(NotificationService.instance.markAsRead(notificationId));
+    }
+
+    if (type != 'chat') {
+      final handledItem = await _openItemDetailsFromNotificationData(data);
+      if (handledItem) {
+        return;
+      }
+    }
+
+    final rawChatId = data['chat_id'] ?? data['chatId'] ?? payload['chat_id'];
+    final chatId = rawChatId is int
+        ? rawChatId
+        : int.tryParse(rawChatId?.toString() ?? '');
+    if (chatId != null && chatId > 0) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _currentIndex = 2;
+        _hideChatNavigation = false;
+        _focusConversationId = chatId;
+      });
+      NotificationService.instance.setChatTabActive(true);
+      return;
+    }
+
+    await _openItemDetailsFromNotificationData(data);
+  }
+
+  Future<bool> _openItemDetailsFromNotificationData(
+    Map<String, dynamic> data,
+  ) async {
+    final action = (data['action'] ?? '').toString().toLowerCase();
+    final rawItemId = data['item_id'] ?? data['itemId'];
+    final itemId = rawItemId is int
+        ? rawItemId
+        : int.tryParse(rawItemId?.toString() ?? '');
+
+    final shouldOpenItem = action == 'open_item' || itemId != null;
+    if (!shouldOpenItem || itemId == null || itemId <= 0) {
+      return false;
+    }
+
+    try {
+      final item = await ItemsRepository().getById(itemId);
+      if (!mounted || item == null) {
+        return false;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(user: _user, item: item),
+        ),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Map<String, dynamic> _normalizeMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
+    return const <String, dynamic>{};
+  }
+
+  void _handleFocusedConversation(int chatId) {
+    if (_focusConversationId != chatId || !mounted) {
+      return;
+    }
+    setState(() {
+      _focusConversationId = null;
+    });
   }
 
   Future<void> _loadUser() async {
@@ -52,6 +162,7 @@ class _MainShellState extends State<MainShell> {
       _hideChatNavigation = false;
     }
     });
+    NotificationService.instance.setChatTabActive(index == 2);
   }
 
   void _onAddTap() {
@@ -120,12 +231,15 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    NotificationService.instance.setChatTabActive(_currentIndex == 2);
     final screens = [
       SwipeHomeScreen(user: _user),
       DiscoverScreen(
         user: _user
       ),
       InboxScreen(
+        focusConversationId: _focusConversationId,
+        onFocusConversationHandled: _handleFocusedConversation,
         onConversationViewChanged: (isConversationOpen) {
           if (_hideChatNavigation == isConversationOpen) return;
           setState(() => _hideChatNavigation = isConversationOpen);
