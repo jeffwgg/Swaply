@@ -8,6 +8,7 @@ import '../../../models/transaction.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
+import 'profile_screen.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   const TransactionDetailScreen({
@@ -379,7 +380,23 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 6),
-                  Text(widget.seller?.username ?? tx.sellerId),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProfileScreen(viewingUserId: tx.sellerId),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      widget.seller?.username ?? tx.sellerId,
+                      style: const TextStyle(
+                        color: Color(0xFF7C3AED),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -401,9 +418,11 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                   const SizedBox(height: 6),
                   Text(tx.fulfillmentMethod ?? '-'),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Meet-up location',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  Text(
+                    (tx.fulfillmentMethod ?? '').toLowerCase() == 'shipping'
+                        ? 'Shipping address'
+                        : 'Meet-up location',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
                   ),
                   const SizedBox(height: 6),
                   Text(tx.address ?? '-'),
@@ -436,7 +455,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                 ],
               ),
             ),
-            if (status == 'cancelled') ...[
+            if (status == 'cancelled' && !isTrade && widget.payment != null) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(14),

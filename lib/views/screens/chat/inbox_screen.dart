@@ -28,7 +28,7 @@ import '../../../services/notification_service.dart';
 import '../../../services/supabase_service.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/meetup_address_option.dart';
-import '../../../views/screens/checkout/checkout_screen.dart';
+import '../../../views/screens/transaction/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../views/screens/profile/transaction_detail_screen.dart';
@@ -3997,7 +3997,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             media.itemId!,
                           );
                           await ItemsRepository().updateStatus(
-                            'available',
+                            'dropped',
                             media.offeredItemId!,
                           );
                           await TransactionsRepository().updateStatus(

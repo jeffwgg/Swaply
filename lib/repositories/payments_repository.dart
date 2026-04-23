@@ -77,5 +77,24 @@ class PaymentsRepository {
       );
     }
   }
+
+  Future<void> updateMethodForTransaction({
+    required int transactionId,
+    required String paymentMethod,
+  }) async {
+    final response = await SupabaseService.client
+        .from(_table)
+        .update({'payment_method': paymentMethod})
+        .eq('transaction_id', transactionId)
+        .select('payment_id');
+
+    final rows =
+        _requireListOfMaps(response, operation: 'updateMethodForTransaction');
+    if (rows.isEmpty) {
+      throw StateError(
+        'No payment updated. This is usually caused by RLS/permissions.',
+      );
+    }
+  }
 }
 
