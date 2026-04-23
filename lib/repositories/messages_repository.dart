@@ -1,4 +1,5 @@
 import '../models/chat_message.dart';
+import '../core/utils/parsing.dart';
 import '../services/supabase_service.dart';
 
 class MessagesRepository {
@@ -81,7 +82,10 @@ class MessagesRepository {
     return ChatMessage.fromMap(_requireMap(response, operation: 'send'));
   }
 
-  Future<void> markAsRead({required int chatId, required String viewerId}) async {
+  Future<void> markAsRead({
+    required int chatId,
+    required String viewerId,
+  }) async {
     try {
       // Try the RPC first (exists when migrations have been applied).
       await SupabaseService.client.rpc(
@@ -123,5 +127,61 @@ class MessagesRepository {
       'delete_message_as_user',
       params: {'p_message_id': messageId, 'p_actor_id': actorId},
     );
+  }
+
+  Future<Map<int, int>> unreadCountsByChat({
+    required String viewerId,
+    List<int>? chatIds,
+  }) async {
+    final normalizedChatIds = (chatIds ?? const <int>[])
+        .where((id) => id > 0)
+        .toSet()
+        .toList(growable: false);
+
+    if (chatIds != null && normalizedChatIds.isEmpty) {
+      return const <int, int>{};
+    }
+
+    dynamic response;
+    try {
+      var query = SupabaseService.client
+          .from(_table)
+          .select('chat_id')
+          .neq('sender_id', viewerId)
+          .isFilter('read_at', null);
+      if (normalizedChatIds.isNotEmpty) {
+        query = query.inFilter('chat_id', normalizedChatIds);
+      }
+      response = await query;
+    } catch (_) {
+      // Legacy fallback for schema where read state used is_read boolean.
+      var query = SupabaseService.client
+          .from(_table)
+          .select('chat_id')
+          .neq('sender_id', viewerId)
+          .eq('is_read', false);
+      if (normalizedChatIds.isNotEmpty) {
+        query = query.inFilter('chat_id', normalizedChatIds);
+      }
+      response = await query;
+    }
+
+    final rows = _requireListOfMaps(response, operation: 'unreadCountsByChat');
+
+    final counts = <int, int>{};
+    for (final row in rows) {
+      final rawChatId = row['chat_id'];
+      if (rawChatId == null) {
+        continue;
+      }
+      final chatId = rawChatId is int
+          ? rawChatId
+          : parseNullableInt(rawChatId, fieldName: 'messages.chat_id');
+      if (chatId == null || chatId <= 0) {
+        continue;
+      }
+      counts[chatId] = (counts[chatId] ?? 0) + 1;
+    }
+    return counts;
   }
 }

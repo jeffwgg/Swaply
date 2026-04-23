@@ -74,7 +74,6 @@ class _InboxScreenState extends State<InboxScreen> {
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<AiMessage>>? _aiMessagesSubscription;
   Timer? _inboxSubscriptionRetryTimer;
-  Timer? _inboxRefreshTimer;
   bool _isLoadingInboxData = false;
   int? _activeChatId;
   final Map<int, List<ChatMessage>> _rawMessagesByChat = {};
@@ -107,7 +106,6 @@ class _InboxScreenState extends State<InboxScreen> {
     }
     _loadInbox();
     _ensureInboxRealtimeSubscription();
-    _startInboxRefreshFallback();
   }
 
   @override
@@ -120,7 +118,6 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   void dispose() {
-    _inboxRefreshTimer?.cancel();
     _inboxSubscriptionRetryTimer?.cancel();
     _authSubscription?.cancel();
     _messagesSubscription?.cancel();
@@ -129,13 +126,23 @@ class _InboxScreenState extends State<InboxScreen> {
       _inboxViewModel.unsubscribeInboxChanges(_inboxSubscription);
     }
     _composerController.dispose();
+    NotificationService.instance.setActiveChatContext(
+      isConversationOpen: false,
+    );
     unawaited(_audioRecorder.dispose());
     _inboxViewModel.dispose();
     super.dispose();
   }
 
+  @override
+  void deactivate() {
+    NotificationService.instance.setActiveChatContext(
+      isConversationOpen: false,
+    );
+    super.deactivate();
+  }
+
   void _handleUserChanged() {
-    _inboxRefreshTimer?.cancel();
     _inboxSubscriptionRetryTimer?.cancel();
     if (_inboxSubscription != null) {
       unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
@@ -162,17 +169,6 @@ class _InboxScreenState extends State<InboxScreen> {
     _composerController.clear();
     _loadInbox();
     _ensureInboxRealtimeSubscription();
-    _startInboxRefreshFallback();
-  }
-
-  void _startInboxRefreshFallback() {
-    _inboxRefreshTimer?.cancel();
-    _inboxRefreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(_loadInbox(force: false));
-    });
   }
 
   void _ensureInboxRealtimeSubscription() {
@@ -222,6 +218,9 @@ class _InboxScreenState extends State<InboxScreen> {
     _isLoadingInboxData = true;
     try {
       final threads = await _inboxViewModel.loadInbox();
+      final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
+        threads.map((thread) => thread.id).toList(growable: false),
+      );
       _refreshUnreadNotificationCount();
       _ensureInboxRealtimeSubscription();
       final currentUserId = _currentUserId;
@@ -244,11 +243,12 @@ class _InboxScreenState extends State<InboxScreen> {
               ? (t.user2Name ?? t.user1Name ?? 'User')
               : t.otherUserName(currentUserId),
           avatarUrl: currentUserId == null
-            ? null
-            : t.otherUserProfileImage(currentUserId),
+              ? null
+              : t.otherUserProfileImage(currentUserId),
           status: 'Active',
           badge: null,
           timeAgo: _formatTime(t.updatedAt),
+          unreadCount: unreadCountsByChat[t.id] ?? 0,
           preview: t.lastMessage == null
               ? 'No messages yet'
               : _parseMessageBody(
@@ -268,6 +268,7 @@ class _InboxScreenState extends State<InboxScreen> {
         status: 'Online',
         badge: 'AI',
         timeAgo: 'Always',
+        unreadCount: 0,
         preview: 'Your AI assistant',
         avatarColors: const [Color(0xFF6D2DF5), Color(0xFF935FFF)],
         item: null,
@@ -721,9 +722,9 @@ class _InboxScreenState extends State<InboxScreen> {
                                         context,
                                         _SearchDialogResult(
                                           query: h,
-                                          conversationId:
-                                              historyMatches.first
-                                                  .conversationId,
+                                          conversationId: historyMatches
+                                              .first
+                                              .conversationId,
                                         ),
                                       );
                                       return;
@@ -896,10 +897,7 @@ class _InboxScreenState extends State<InboxScreen> {
     }
 
     if (result.conversationId != null) {
-      _selectConversationById(
-        result.conversationId!,
-        openMobile: true,
-      );
+      _selectConversationById(result.conversationId!, openMobile: true);
     } else if (focusConversationId != null) {
       _selectConversationById(focusConversationId, openMobile: true);
     }
@@ -1025,7 +1023,7 @@ class _InboxScreenState extends State<InboxScreen> {
       try {
         isWide = MediaQuery.sizeOf(context).width >= 950;
       } catch (_) {}
-      
+
       if (isWide || _showMobileChat) {
         _inboxViewModel.markChatAsRead(selected.id).catchError((_) {});
       }
@@ -1059,7 +1057,12 @@ class _InboxScreenState extends State<InboxScreen> {
               final hasUnreadIncoming = messages.any(
                 (m) => m.senderId != _currentUserId && m.readAt == null,
               );
-              
+              final unreadIncomingCount = messages
+                  .where(
+                    (m) => m.senderId != _currentUserId && m.readAt == null,
+                  )
+                  .length;
+
               bool isWide = false;
               try {
                 isWide = MediaQuery.sizeOf(context).width >= 950;
@@ -1079,6 +1082,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 if (index != -1) {
                   _allConversations[index] = _allConversations[index].copyWith(
                     messages: uiMessages,
+                    unreadCount: unreadIncomingCount,
                   );
                 }
               });
@@ -1177,9 +1181,11 @@ class _InboxScreenState extends State<InboxScreen> {
 
     final replyText = replied == null
         ? null
-        : _parseMessageBody(_parseAiRagItems(
-            _parseReplyMetadata(replied.content).messageText,
-          ).visibleText).previewText;
+        : _parseMessageBody(
+            _parseAiRagItems(
+              _parseReplyMetadata(replied.content).messageText,
+            ).visibleText,
+          ).previewText;
 
     final local = message.createdAt.toLocal();
     final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
@@ -1200,10 +1206,11 @@ class _InboxScreenState extends State<InboxScreen> {
       deletedAt: null,
       replyToMessageId: parsed.repliedMessageId,
       replyToText: replyText,
-      ragItems: _shouldRenderAiRagItems(
-        visibleText: ragParsed.visibleText,
-        items: ragParsed.items,
-      )
+      ragItems:
+          _shouldRenderAiRagItems(
+            visibleText: ragParsed.visibleText,
+            items: ragParsed.items,
+          )
           ? ragParsed.items
           : const [],
     );
@@ -1305,7 +1312,8 @@ class _InboxScreenState extends State<InboxScreen> {
         }
 
         final priceValue = map['price'];
-        final price = (priceValue == null || priceValue.toString().trim().isEmpty)
+        final price =
+            (priceValue == null || priceValue.toString().trim().isEmpty)
             ? null
             : priceValue.toString();
 
@@ -2419,7 +2427,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
     setState(() => _showMobileChat = isOpen);
     widget.onConversationViewChanged?.call(isOpen);
-    
+
     if (isOpen && _activeChatId != null && _activeChatId! > 0) {
       _inboxViewModel.markChatAsRead(_activeChatId!).catchError((_) {});
     }
@@ -2431,6 +2439,19 @@ class _InboxScreenState extends State<InboxScreen> {
         return;
       }
       widget.onConversationViewChanged?.call(!isWide && _showMobileChat);
+      final hasChatOpen = isWide || _showMobileChat;
+      final selected = _conversations.isNotEmpty
+          ? _conversations[_selectedConversation < _conversations.length
+                ? _selectedConversation
+                : 0]
+          : null;
+      final activeChatId = hasChatOpen && selected != null && selected.id > 0
+          ? selected.id
+          : null;
+      NotificationService.instance.setActiveChatContext(
+        isConversationOpen: activeChatId != null,
+        chatId: activeChatId,
+      );
     });
   }
 
@@ -2452,164 +2473,166 @@ class _InboxScreenState extends State<InboxScreen> {
           bottom: false,
           child: LayoutBuilder(
             builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 950;
-            final selected = _conversations.isNotEmpty
-                ? _conversations[_selectedConversation < _conversations.length
-                      ? _selectedConversation
-                      : 0]
-                : null;
-            final pins = selected == null
-                ? const <ChatPinnedMessage>[]
-                : (_chatPins[selected.id] ?? const <ChatPinnedMessage>[]);
-            final pinnedMessages = selected == null
-                ? const <_Message>[]
-                : pins
-                      .map((pin) {
-                        final idx = selected.messages.indexWhere(
-                          (m) => m.id == pin.messageId,
-                        );
-                        return idx == -1 ? null : selected.messages[idx];
-                      })
-                      .whereType<_Message>()
-                      .toList();
-            _syncShellChrome(isWide);
+              final isWide = constraints.maxWidth >= 950;
+              final selected = _conversations.isNotEmpty
+                  ? _conversations[_selectedConversation < _conversations.length
+                        ? _selectedConversation
+                        : 0]
+                  : null;
+              final pins = selected == null
+                  ? const <ChatPinnedMessage>[]
+                  : (_chatPins[selected.id] ?? const <ChatPinnedMessage>[]);
+              final pinnedMessages = selected == null
+                  ? const <_Message>[]
+                  : pins
+                        .map((pin) {
+                          final idx = selected.messages.indexWhere(
+                            (m) => m.id == pin.messageId,
+                          );
+                          return idx == -1 ? null : selected.messages[idx];
+                        })
+                        .whereType<_Message>()
+                        .toList();
+              _syncShellChrome(isWide);
 
-            if (isWide) {
-              return Row(
-                children: [
-                  SizedBox(
-                    width: 430,
-                    child: _InboxPanel(
-                      conversations: _conversations,
-                      filters: _filters,
-                      selectedFilter: _selectedFilter,
-                      selectedIndex: _selectedConversation,
-                      onFilterSelected: _onFilterSelected,
-                      onConversationSelected: (index) =>
-                          _onConversationSelected(index),
-                      searchQuery: _searchQuery,
-                      onSearchTap: _openSearchDialog,
-                      onNotificationsTap: _openNotificationsScreen,
-                      unreadNotificationCount: _unreadNotificationCount,
-                      pinnedChats: _pinnedChats,
-                      manuallyUnreadChats: _manuallyUnreadChats,
-                      onPinToggled: _togglePin,
-                      onConversationLongPress: _showConversationActions,
-                      isLoading: _isLoading,
+              if (isWide) {
+                return Row(
+                  children: [
+                    SizedBox(
+                      width: 430,
+                      child: _InboxPanel(
+                        conversations: _conversations,
+                        filters: _filters,
+                        selectedFilter: _selectedFilter,
+                        selectedIndex: _selectedConversation,
+                        onFilterSelected: _onFilterSelected,
+                        onConversationSelected: (index) =>
+                            _onConversationSelected(index),
+                        searchQuery: _searchQuery,
+                        onSearchTap: _openSearchDialog,
+                        onNotificationsTap: _openNotificationsScreen,
+                        unreadNotificationCount: _unreadNotificationCount,
+                        pinnedChats: _pinnedChats,
+                        manuallyUnreadChats: _manuallyUnreadChats,
+                        onPinToggled: _togglePin,
+                        onConversationLongPress: _showConversationActions,
+                        isLoading: _isLoading,
+                      ),
                     ),
-                  ),
-                  const VerticalDivider(width: 1, color: Color(0xFFE7DFFF)),
-                  Expanded(
-                    child: selected != null
-                        ? _ChatPanel(
-                            conversation: selected,
-                            onBack: null,
-                            messageController: _composerController,
-                            onSend: () => _sendCurrentMessage(selected),
-                            isSending: _isSending,
-                            replyingTo: _replyingTo,
-                            pinnedMessages: pinnedMessages,
-                            isAiConversation: selected.id == -1,
-                            onDismissReply: () =>
-                                setState(() => _replyingTo = null),
-                            onLongPressMessage: (message) =>
-                                _showMessageActions(
-                                  conversation: selected,
-                                  message: message,
-                                ),
-                            onPickPhoto: () => _sendGalleryPhoto(selected),
-                            onOpenCamera: () => _sendCameraPhoto(selected),
-                            onShareLocation: () => _sendLocation(selected),
-                            onPickDocument: () => _sendDocument(selected),
-                            onVoiceRecordToggle: _toggleVoiceRecording,
-                            isRecordingVoice: _isRecordingVoice,
-                            voiceDraftPath: _voiceDraftPath,
-                            voiceDraftDurationSeconds: _voiceDraftDurationSeconds,
-                            onDeleteVoiceDraft: _discardVoiceDraft,
-                            onSendVoiceDraft: () => _sendVoiceDraft(selected),
-                            onUnpinPinnedMessage: (message) {
-                              if (selected.id == -1) {
-                                _unpinAiMessage(message);
-                              } else {
-                                _unpinMessage(selected, message);
-                              }
-                            },
-                            isConversationPinned: _pinnedChats.contains(
-                              selected.id,
+                    const VerticalDivider(width: 1, color: Color(0xFFE7DFFF)),
+                    Expanded(
+                      child: selected != null
+                          ? _ChatPanel(
+                              conversation: selected,
+                              onBack: null,
+                              messageController: _composerController,
+                              onSend: () => _sendCurrentMessage(selected),
+                              isSending: _isSending,
+                              replyingTo: _replyingTo,
+                              pinnedMessages: pinnedMessages,
+                              isAiConversation: selected.id == -1,
+                              onDismissReply: () =>
+                                  setState(() => _replyingTo = null),
+                              onLongPressMessage: (message) =>
+                                  _showMessageActions(
+                                    conversation: selected,
+                                    message: message,
+                                  ),
+                              onPickPhoto: () => _sendGalleryPhoto(selected),
+                              onOpenCamera: () => _sendCameraPhoto(selected),
+                              onShareLocation: () => _sendLocation(selected),
+                              onPickDocument: () => _sendDocument(selected),
+                              onVoiceRecordToggle: _toggleVoiceRecording,
+                              isRecordingVoice: _isRecordingVoice,
+                              voiceDraftPath: _voiceDraftPath,
+                              voiceDraftDurationSeconds:
+                                  _voiceDraftDurationSeconds,
+                              onDeleteVoiceDraft: _discardVoiceDraft,
+                              onSendVoiceDraft: () => _sendVoiceDraft(selected),
+                              onUnpinPinnedMessage: (message) {
+                                if (selected.id == -1) {
+                                  _unpinAiMessage(message);
+                                } else {
+                                  _unpinMessage(selected, message);
+                                }
+                              },
+                              isConversationPinned: _pinnedChats.contains(
+                                selected.id,
+                              ),
+                              onOpenConversationMenu: () =>
+                                  _showConversationActions(selected),
+                              onOpenItemDetails: () =>
+                                  _openConversationItemDetails(selected),
+                            )
+                          : const Center(
+                              child: Text(
+                                'No conversations selected',
+                                style: TextStyle(color: Colors.grey),
+                              ),
                             ),
-                            onOpenConversationMenu: () =>
-                                _showConversationActions(selected),
-                            onOpenItemDetails: () =>
-                              _openConversationItemDetails(selected),
-                          )
-                        : const Center(
-                            child: Text(
-                              'No conversations selected',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          ),
-                  ),
-                ],
-              );
-            }
+                    ),
+                  ],
+                );
+              }
 
-            if (_showMobileChat && selected != null) {
-              return _ChatPanel(
-                conversation: selected,
-                onBack: () => _setMobileConversationView(false),
-                messageController: _composerController,
-                onSend: () => _sendCurrentMessage(selected),
-                isSending: _isSending,
-                replyingTo: _replyingTo,
-                pinnedMessages: pinnedMessages,
-                isAiConversation: selected.id == -1,
-                onDismissReply: () => setState(() => _replyingTo = null),
-                onLongPressMessage: (message) => _showMessageActions(
+              if (_showMobileChat && selected != null) {
+                return _ChatPanel(
                   conversation: selected,
-                  message: message,
-                ),
-                onPickPhoto: () => _sendGalleryPhoto(selected),
-                onOpenCamera: () => _sendCameraPhoto(selected),
-                onShareLocation: () => _sendLocation(selected),
-                onPickDocument: () => _sendDocument(selected),
-                onVoiceRecordToggle: _toggleVoiceRecording,
-                isRecordingVoice: _isRecordingVoice,
-                voiceDraftPath: _voiceDraftPath,
-                voiceDraftDurationSeconds: _voiceDraftDurationSeconds,
-                onDeleteVoiceDraft: _discardVoiceDraft,
-                onSendVoiceDraft: () => _sendVoiceDraft(selected),
-                onUnpinPinnedMessage: (message) {
-                  if (selected.id == -1) {
-                    _unpinAiMessage(message);
-                  } else {
-                    _unpinMessage(selected, message);
-                  }
-                },
-                isConversationPinned: _pinnedChats.contains(selected.id),
-                onOpenConversationMenu: () =>
-                    _showConversationActions(selected),
-                onOpenItemDetails: () => _openConversationItemDetails(selected),
-              );
-            }
+                  onBack: () => _setMobileConversationView(false),
+                  messageController: _composerController,
+                  onSend: () => _sendCurrentMessage(selected),
+                  isSending: _isSending,
+                  replyingTo: _replyingTo,
+                  pinnedMessages: pinnedMessages,
+                  isAiConversation: selected.id == -1,
+                  onDismissReply: () => setState(() => _replyingTo = null),
+                  onLongPressMessage: (message) => _showMessageActions(
+                    conversation: selected,
+                    message: message,
+                  ),
+                  onPickPhoto: () => _sendGalleryPhoto(selected),
+                  onOpenCamera: () => _sendCameraPhoto(selected),
+                  onShareLocation: () => _sendLocation(selected),
+                  onPickDocument: () => _sendDocument(selected),
+                  onVoiceRecordToggle: _toggleVoiceRecording,
+                  isRecordingVoice: _isRecordingVoice,
+                  voiceDraftPath: _voiceDraftPath,
+                  voiceDraftDurationSeconds: _voiceDraftDurationSeconds,
+                  onDeleteVoiceDraft: _discardVoiceDraft,
+                  onSendVoiceDraft: () => _sendVoiceDraft(selected),
+                  onUnpinPinnedMessage: (message) {
+                    if (selected.id == -1) {
+                      _unpinAiMessage(message);
+                    } else {
+                      _unpinMessage(selected, message);
+                    }
+                  },
+                  isConversationPinned: _pinnedChats.contains(selected.id),
+                  onOpenConversationMenu: () =>
+                      _showConversationActions(selected),
+                  onOpenItemDetails: () =>
+                      _openConversationItemDetails(selected),
+                );
+              }
 
-            return _InboxPanel(
-              conversations: _conversations,
-              filters: _filters,
-              selectedFilter: _selectedFilter,
-              selectedIndex: _selectedConversation,
-              onFilterSelected: _onFilterSelected,
-              onConversationSelected: (index) =>
-                  _onConversationSelected(index, openMobile: true),
-              searchQuery: _searchQuery,
-              onSearchTap: _openSearchDialog,
-              onNotificationsTap: _openNotificationsScreen,
-              unreadNotificationCount: _unreadNotificationCount,
-              pinnedChats: _pinnedChats,
-              manuallyUnreadChats: _manuallyUnreadChats,
-              onPinToggled: _togglePin,
-              onConversationLongPress: _showConversationActions,
-              isLoading: _isLoading,
-            );
+              return _InboxPanel(
+                conversations: _conversations,
+                filters: _filters,
+                selectedFilter: _selectedFilter,
+                selectedIndex: _selectedConversation,
+                onFilterSelected: _onFilterSelected,
+                onConversationSelected: (index) =>
+                    _onConversationSelected(index, openMobile: true),
+                searchQuery: _searchQuery,
+                onSearchTap: _openSearchDialog,
+                onNotificationsTap: _openNotificationsScreen,
+                unreadNotificationCount: _unreadNotificationCount,
+                pinnedChats: _pinnedChats,
+                manuallyUnreadChats: _manuallyUnreadChats,
+                onPinToggled: _togglePin,
+                onConversationLongPress: _showConversationActions,
+                isLoading: _isLoading,
+              );
             },
           ),
         ),
@@ -2801,18 +2824,20 @@ class _InboxPanel extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final conversation = conversations[index];
                         final selectedConversationId =
-                          selectedIndex >= 0 &&
-                            selectedIndex < conversations.length
-                          ? conversations[selectedIndex].id
-                          : null;
+                            selectedIndex >= 0 &&
+                                selectedIndex < conversations.length
+                            ? conversations[selectedIndex].id
+                            : null;
                         final isPinned = pinnedChats.contains(conversation.id);
-                        final hasUnread =
-                            conversation.messages.any(
-                              (m) => !m.isMine && m.readAt == null,
-                            ) ||
-                            manuallyUnreadChats.contains(conversation.id);
-                        final showUnreadDot =
-                          hasUnread && conversation.id != selectedConversationId;
+                        final hasManualUnread = manuallyUnreadChats.contains(
+                          conversation.id,
+                        );
+                        final unreadCount = conversation.unreadCount > 0
+                            ? conversation.unreadCount
+                            : (hasManualUnread ? 1 : 0);
+                        final showUnreadBadge =
+                            unreadCount > 0 &&
+                            conversation.id != selectedConversationId;
                         return GestureDetector(
                           onLongPress: () =>
                               onConversationLongPress(conversation),
@@ -2973,15 +2998,32 @@ class _InboxPanel extends StatelessWidget {
                                       children: [
                                         if (conversation.item != null)
                                           _ItemThumb(item: conversation.item!),
-                                        if (showUnreadDot) ...[
+                                        if (showUnreadBadge) ...[
                                           const SizedBox(height: 10),
                                           Container(
-                                            width: 16,
-                                            height: 16,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 20,
+                                              minHeight: 20,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF7A54FF),
+                                              color: const Color(0xFF6441E8),
                                               borderRadius:
                                                   BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              unreadCount > 99
+                                                  ? '99+'
+                                                  : unreadCount.toString(),
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -3468,9 +3510,7 @@ class _ChatPanelState extends State<_ChatPanel> {
             child: SingleChildScrollView(
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
-              child: Column(
-                children: _buildTimelineWidgets(),
-              ),
+              child: Column(children: _buildTimelineWidgets()),
             ),
           ),
           Container(height: 1, color: const Color(0xFFE7DFFF)),
@@ -3972,9 +4012,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved to local cache: $name')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Saved to local cache: $name')));
       }
     } catch (_) {
       if (mounted) {
@@ -4007,13 +4047,13 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
     return 'document.bin';
   }
-  
+
   Future<void> _openMediaItemDetails(_MessageMedia media) async {
     final itemId = media.itemId;
     if (itemId == null) {
       return;
     }
-  
+
     try {
       final authUser = SupabaseService.client.auth.currentUser;
       AppUser? currentUser;
@@ -4060,7 +4100,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
           : await itemsRepo.getById(tx.tradedItemId!);
 
       final seller = await UsersRepository().getById(tx.sellerId);
-      final payments = await PaymentsRepository().listForTransaction(tx.transactionId);
+      final payments = await PaymentsRepository().listForTransaction(
+        tx.transactionId,
+      );
       final latestPayment = payments.isNotEmpty ? payments.first : null;
 
       if (!mounted) return;
@@ -4152,7 +4194,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
       child: InkWell(
-     //   onTap: () => _openRagItemDetails(ragItem),
+        //   onTap: () => _openRagItemDetails(ragItem),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -4250,7 +4292,8 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Widget build(BuildContext context) {
     // Render as regular bubble (not full-width) if it has item_id (trade acceptance message)
     final hasItemLink = message.media?.itemId != null;
-    final isImageOnly = message.media?.type == _MessageMediaType.image && !hasItemLink;
+    final isImageOnly =
+        message.media?.type == _MessageMediaType.image && !hasItemLink;
     final bubble = InkWell(
       onLongPress: widget.onLongPress,
       borderRadius: BorderRadius.circular(isImageOnly ? 18 : 22),
@@ -4430,7 +4473,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
     switch (media.type) {
       case _MessageMediaType.image:
         return InkWell(
-          onTap: media.itemId == null ? null : () => _openMediaItemDetails(media),
+          onTap: media.itemId == null
+              ? null
+              : () => _openMediaItemDetails(media),
           borderRadius: BorderRadius.circular(14),
           child: Stack(
             children: [
@@ -4615,12 +4660,14 @@ class _MessageBubbleState extends State<_MessageBubble> {
     final isBuyer = currentUserId != null && media.buyerId == currentUserId;
     final isSeller = currentUserId != null && media.sellerId == currentUserId;
 
-    final canCancel = (isBuyer || isSeller) &&
+    final canCancel =
+        (isBuyer || isSeller) &&
         media.transactionId != null &&
         media.itemId != null &&
         media.offeredItemId != null;
 
-    final canProceed = isBuyer &&
+    final canProceed =
+        isBuyer &&
         media.transactionId != null &&
         media.itemId != null &&
         media.offeredItemId != null &&
@@ -4689,10 +4736,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF6F45FF),
-                  side: const BorderSide(
-                    color: Color(0xFFB895FF),
-                    width: 1.4,
-                  ),
+                  side: const BorderSide(color: Color(0xFFB895FF), width: 1.4),
                   backgroundColor: const Color(0xFFF8F3FF),
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   shape: RoundedRectangleBorder(
@@ -4713,8 +4757,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       ? null
                       : () async {
                           try {
-                            final item =
-                                await ItemsRepository().getById(media.itemId!);
+                            final item = await ItemsRepository().getById(
+                              media.itemId!,
+                            );
                             if (item == null) {
                               throw StateError('Item not found.');
                             }
@@ -4727,7 +4772,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             final seller = await UsersRepository().getById(
                               media.sellerId!,
                             );
-                            final meetups = MeetupAddressOption.fromSellerItem(item);
+                            final meetups = MeetupAddressOption.fromSellerItem(
+                              item,
+                            );
 
                             if (!mounted) return;
                             await Navigator.push<void>(
@@ -5100,6 +5147,7 @@ class _Conversation {
   final String status;
   final String? badge;
   final String timeAgo;
+  final int unreadCount;
   final String preview;
   final List<Color> avatarColors;
   final _ItemPreview? item;
@@ -5115,6 +5163,7 @@ class _Conversation {
     required this.status,
     required this.badge,
     required this.timeAgo,
+    required this.unreadCount,
     required this.preview,
     required this.avatarColors,
     required this.item,
@@ -5127,6 +5176,7 @@ class _Conversation {
     List<_Message>? messages,
     String? preview,
     String? timeAgo,
+    int? unreadCount,
   }) {
     return _Conversation(
       id: id,
@@ -5136,6 +5186,7 @@ class _Conversation {
       status: status,
       badge: badge,
       timeAgo: timeAgo ?? this.timeAgo,
+      unreadCount: unreadCount ?? this.unreadCount,
       preview: preview ?? this.preview,
       avatarColors: avatarColors,
       item: item,

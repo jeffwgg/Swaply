@@ -39,7 +39,8 @@ class _MainShellState extends State<MainShell> {
         .instance
         .notificationTapStream
         .listen(_handleNotificationTap);
-    final pendingTap = NotificationService.instance.takePendingNotificationTap();
+    final pendingTap = NotificationService.instance
+        .takePendingNotificationTap();
     if (pendingTap != null) {
       _handleNotificationTap(pendingTap);
     }
@@ -154,13 +155,16 @@ class _MainShellState extends State<MainShell> {
 
   void _onNavTap(int index) {
     setState(() {
-     if (index >= 4) return; 
+      if (index >= 4) return;
 
-    _currentIndex = index;
+      _currentIndex = index;
 
-    if (index != 2) {
-      _hideChatNavigation = false;
-    }
+      if (index != 2) {
+        _hideChatNavigation = false;
+        NotificationService.instance.setActiveChatContext(
+          isConversationOpen: false,
+        );
+      }
     });
     NotificationService.instance.setChatTabActive(index == 2);
   }
@@ -222,7 +226,10 @@ class _MainShellState extends State<MainShell> {
               );
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text("Log In / Register", style: TextStyle(color: Colors.white)),
+            child: const Text(
+              "Log In / Register",
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -234,9 +241,7 @@ class _MainShellState extends State<MainShell> {
     NotificationService.instance.setChatTabActive(_currentIndex == 2);
     final screens = [
       SwipeHomeScreen(user: _user),
-      DiscoverScreen(
-        user: _user
-      ),
+      DiscoverScreen(user: _user),
       InboxScreen(
         focusConversationId: _focusConversationId,
         onFocusConversationHandled: _handleFocusedConversation,
@@ -267,11 +272,8 @@ class _MainShellState extends State<MainShell> {
             ? BottomNavBar(currentIndex: _currentIndex, onTap: _onNavTap)
             : null,
       ),
-      
     );
-    
   }
-  
 }
 
 class _GlowFab extends StatelessWidget {
