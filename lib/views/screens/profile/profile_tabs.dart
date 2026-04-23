@@ -416,6 +416,14 @@ class _TransactionTabState extends State<TransactionTab> {
               if (ok != true) return;
               try {
                 await ItemsRepository().updateStatus('available', tx.itemId);
+                if (tx.tradedItemId != null) {
+                  // Offerer (buyer) cancel => drop offered item.
+                  // Seller cancel => make offered item available again.
+                  await ItemsRepository().updateStatus(
+                    isBuyer ? 'dropped' : 'rejected',
+                    tx.tradedItemId!,
+                  );
+                }
                 await TransactionsRepository().updateStatus(
                   transactionId: tx.transactionId,
                   transactionStatus: 'cancelled',

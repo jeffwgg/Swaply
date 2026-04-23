@@ -222,9 +222,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     try {
       if (widget.meetUpOnly && widget.tradeTransactionId != null) {
         try {
+          debugPrint(
+            '[CheckoutScreen trade confirm] txId=${widget.tradeTransactionId}, '
+            'buyerId=${widget.buyerId}, sellerId=${widget.sellerId}, '
+            'primaryItemId=${widget.primaryItem.id}, swapItemId=${widget.swapItem?.id}, '
+            'selectedMeetupId=$_selectedMeetupId, meetupOptions=${widget.sellerMeetupOptions.length}',
+          );
           final address = widget.sellerMeetupOptions
               .firstWhere((o) => o.id == _selectedMeetupId)
               .fullAddress;
+          debugPrint('[CheckoutScreen trade confirm] address="$address"');
           await _transactions.updateMeetupAndStatus(
             transactionId: widget.tradeTransactionId!,
             transactionStatus: 'confirmed',
@@ -235,7 +242,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           if (widget.swapItem != null) {
             await _items.updateStatus('confirmed', widget.swapItem!.id);
           }
-        } catch (e) {
+          debugPrint('[CheckoutScreen trade confirm] SUCCESS');
+        } catch (e, st) {
+          debugPrint('[CheckoutScreen trade confirm] FAILED: $e');
+          debugPrint('[CheckoutScreen trade confirm] STACKTRACE:\n$st');
           if (mounted) {
             AppSnackBars.error(context, 'Confirm trade failed: $e');
           }
