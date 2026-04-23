@@ -1,7 +1,7 @@
 import 'dart:developer';
 import 'dart:async';
 import 'dart:io';
-
+import '../../../services/supabase_service.dart';
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
@@ -28,6 +28,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   List<String> _recentSearches = [];
   bool _showSearchHistory = false;
   int _reloadToken = 0;
+  StreamSubscription? _favStream;
 
   final List<String> _categories = const [
     'All',
@@ -52,10 +53,22 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             _searchController.text.trim().isEmpty;
       });
     });
+    if (widget.user != null) {
+      _favStream = SupabaseService.client
+          .from('favourites')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', widget.user!.id)
+          .listen((_) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) _reloadDiscover();
+        });
+      });
+    }
   }
 
   @override
   void dispose() {
+    _favStream?.cancel();
     _searchHistoryDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();

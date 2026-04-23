@@ -211,5 +211,16 @@ class LocalDbService {
       CREATE INDEX IF NOT EXISTS idx_transactions_cache_user_created
       ON transactions_cache(buyer_id, seller_id, created_at)
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        id TEXT PRIMARY KEY,
+        username TEXT,
+        full_name TEXT,
+        bio TEXT,
+        profile_image TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
   }
 }

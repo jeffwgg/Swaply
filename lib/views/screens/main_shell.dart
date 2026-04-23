@@ -16,6 +16,7 @@ import 'auth/login_screen.dart';
 import '../../core/theme/app_colors.dart';
 import '../../../services/supabase_service.dart';
 import '../../../services/notification_service.dart';
+import '../widgets/common/guest_login_prompt_view.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -242,7 +243,13 @@ class _MainShellState extends State<MainShell> {
     final screens = [
       SwipeHomeScreen(user: _user),
       DiscoverScreen(user: _user),
-      InboxScreen(
+      _user == null
+          ? const GuestLoginPromptView(
+        icon: Icons.chat_bubble_outline_rounded,
+        title: "Messages Locked",
+        message: "Log in to chat with other swappers and negotiate deals!",
+      )
+          : InboxScreen(
         focusConversationId: _focusConversationId,
         onFocusConversationHandled: _handleFocusedConversation,
         onConversationViewChanged: (isConversationOpen) {

@@ -216,4 +216,44 @@ class ItemsRepository {
     if (response == null) return null;
     return ItemListing.fromMap(response);
   }
+
+  Future<List<ItemListing>> getSwipeList({String? userId}) async {
+    try {
+      // 1. 构建基础查询：只要是 available 的主商品就行
+      var queryBuilder = SupabaseService.client
+          .from(_table)
+          .select('*, users(username)')
+          .eq('status', 'available')
+          .filter('replied_to', 'is', null);
+
+      // 2. 只有在用户【已登录】的情况下，才去过滤“自己的”和“已点赞的”
+      if (userId != null) {
+        // Condition 1: 不显示自己的物品
+        queryBuilder = queryBuilder.neq('owner_id', userId);
+
+        // Condition 2: 不显示已经点赞过的物品
+        final favIds = await FavouriteRepository().getUserFavouriteItemIds(userId);
+        if (favIds.isNotEmpty) {
+          queryBuilder = queryBuilder.not('id', 'in', favIds.toList());
+        }
+      }
+
+      // 3. 执行查询并限制数量
+      final response = await queryBuilder
+          .order('created_at', ascending: false)
+          .limit(20);
+
+      final rows = _requireListOfMaps(response, operation: 'getSwipeList');
+      List<ItemListing> items = rows.map<ItemListing>(ItemListing.fromMap).toList();
+
+      for (var item in items) {
+        item.isFavorite = false;
+      }
+
+      return items;
+    } catch (e) {
+      log('getSwipeList error: $e');
+      return [];
+    }
+  }
 }

@@ -39,9 +39,9 @@ class FavouriteRepository {
           .select()
           .eq('user_id', userId)
           .eq('item_id', itemId)
-          .maybeSingle();
+          .count(CountOption.exact);
 
-      return response != null;
+      return response.count > 0;
     } catch (e) {
       throw Exception('Failed to check favourite: $e');
     }
@@ -92,6 +92,36 @@ class FavouriteRepository {
       await addFavourite(userId, itemId);
       return true;
     }
+  }
+
+  Future<int> getTotalSavedForSeller(String sellerId) async {
+    try {
+      final items = await _supabase
+          .from('items')
+          .select('id')
+          .eq('owner_id', sellerId);
+
+      if (items.isEmpty) return 0;
+
+      final itemIds = (items as List).map((i) => i['id'] as int).toList();
+      final response = await _supabase
+          .from('favourites')
+          .select('id')
+          .inFilter('item_id', itemIds)
+          .count(CountOption.exact);
+
+      return response.count;
+    } catch (e) {
+      print('Failed to get seller total saved: $e');
+      return 0;
+    }
+  }
+
+  Stream<List<Map<String, dynamic>>> watchFavouriteIds(String userId) {
+    return _supabase
+        .from('favourites')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', userId);
   }
 }
 

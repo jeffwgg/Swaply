@@ -57,7 +57,7 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
   Future<void> _loadItems() async {
     setState(() => _loading = true);
     try {
-      final items = await ItemsRepository().getDiscoverList();
+      final items = await ItemsRepository().getSwipeList(userId: widget.user?.id);
       setState(() {
         _items = items;
         _loading = false;

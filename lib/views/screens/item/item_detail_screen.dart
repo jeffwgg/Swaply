@@ -24,7 +24,6 @@ import '../transaction/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../../services/supabase_service.dart';
-import '../../../services/stats_notifier.dart';
 import '../../../services/follow_service.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
@@ -59,6 +58,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     _fetchReplies();
     _fetchFavouriteCount();
     _loadFollowState();
+    _checkIfFavourite();
   }
 
   void _showFollowError(String message) {
@@ -77,6 +77,24 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     if (!mounted) return;
     setState(() => _isFollowing = following);
+  }
+
+  Future<void> _checkIfFavourite() async {
+    if (widget.user == null) return;
+    try {
+      final isFav = await FavouriteRepository().isFavourited(
+        widget.user!.id,
+        widget.item.id,
+      );
+      if (mounted) {
+        setState(() {
+          _isFavourite = isFav;
+          widget.item.isFavorite = isFav;
+        });
+      }
+    } catch (e) {
+      log('Check favourite error: $e');
+    }
   }
 
   Future<void> _fetchOwner() async {
@@ -815,8 +833,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       await FollowService.followUser(currentUser.id, targetUserId);
                       setState(() => _isFollowing = true);
                     }
-
-                    StatsNotifier.refresh();
 
                     if (mounted) {
                       ScaffoldMessenger.of(context).hideCurrentSnackBar();

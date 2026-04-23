@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/app_user.dart';
@@ -10,6 +11,7 @@ import 'package:swaply/repositories/local/local_transactions_repository.dart';
 import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/repositories/favourite_repository.dart';
 import 'package:swaply/models/checkout_flow_kind.dart';
 import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
@@ -654,20 +656,36 @@ class FavouriteTab extends StatefulWidget {
   State<FavouriteTab> createState() => _FavouriteTabState();
 }
 
-class  _FavouriteTabState extends State<FavouriteTab>{
+class _FavouriteTabState extends State<FavouriteTab> {
+  StreamSubscription? _subscription;
+  late Stream<List<Map<String, dynamic>>> _stream;
   List<ItemListing> _items = [];
   bool _loading = true;
 
-  @override
   void initState() {
     super.initState();
-    _load(); // ← 这里调用
+    _fetchItems(); // 初始加载
+
+    // 👈 2. 监听变化，并加上延迟
+    _subscription = FavouriteRepository()
+        .watchFavouriteIds(widget.user.id)
+        .listen((_) {
+      // 加上 300 毫秒的延迟，解决极速 WebSocket 和 REST API 之间的读写竞争问题
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          _fetchItems();
+        }
+      });
+    });
+  }
+  @override
+  void dispose() {
+    // 👈 3. 极其重要：当页面真正销毁时，必须取消监听防止内存泄漏！
+    _subscription?.cancel();
+    super.dispose();
   }
 
-  // ✅ 加在这里
-  Future<void> _load() async {
-    print("🔥 _load called");
-    setState(() => _loading = true);
+  Future<void> _fetchItems() async {
     final items = await ItemsRepository().getFavouriteItems(widget.user.id);
     if (mounted) {
       setState(() {
@@ -679,105 +697,102 @@ class  _FavouriteTabState extends State<FavouriteTab>{
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getFavouriteItems(widget.user.id),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: Color(0xFF5B21B6)),
-          );
-        }
-        final items = snapshot.data ?? [];
-        if (items.isEmpty) {
-          return _buildEmptyState(Icons.favorite_border, "No favourites yet");
-        }
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: items.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 0.8,
-          ),
-          itemBuilder: (context, index) {
-            final item = items[index];
-            return GestureDetector(
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
-                  ),
-                );
-                _load();
-                },
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: _buildImage(
-                          item.imageUrls.isNotEmpty ? item.imageUrls[0] : null,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withOpacity(0.8),
-                              Colors.black.withOpacity(0.4),
-                              Colors.transparent,
-                            ],
-                          ),
-                          borderRadius: const BorderRadius.vertical(
-                            bottom: Radius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          item.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: _StatusBadge(status: item.status, mini: true),
-                    ),
-                  ],
-                ),
-              ),
-            );
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF5B21B6)),
+      );
+    }
+
+    if (_items.isEmpty) {
+      return _buildEmptyState(Icons.favorite_border, "No favourites yet");
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: _items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 0.8,
+      ),
+      itemBuilder: (context, index) {
+        final item = _items[index];
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
+              ), // 👈 MaterialPageRoute 的右括号在这里结束
+            ).then((_) { // 2. 👈 .then() 必须接在 Navigator.push 的括号外面
+              _fetchItems();
+            });
           },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _buildImage(
+                      item.imageUrls.isNotEmpty ? item.imageUrls[0] : null,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.8),
+                          Colors.black.withOpacity(0.4),
+                          Colors.transparent,
+                        ],
+                      ),
+                      borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: _StatusBadge(status: item.status, mini: true),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );

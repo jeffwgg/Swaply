@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/views/screens/profile/profile_tabs.dart';
+import 'package:swaply/repositories/favourite_repository.dart';
 import '/services/supabase_service.dart';
 import '/services/profile_service.dart';
-import '/services/stats_notifier.dart';
 import '/services/follow_service.dart';
-import '/services/saved_items_service.dart';
 import '../auth/login_screen.dart';
 import 'settings_screen.dart';
 import '../../../models/app_user.dart';
@@ -30,6 +30,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<Map<String, int>>? _statsFuture;
   String? _profileUserId;
 
+  StreamSubscription? _followingStream;
+  StreamSubscription? _followersStream;
+
   @override
   void initState() {
     super.initState();
@@ -37,13 +40,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _profileUserId = widget.viewingUserId ?? user?.id;
       if (_profileUserId != null) {
         _statsFuture = _loadStatistics(_profileUserId!);
+        _setupFollowStreams();
       }
     _checkFollowStatus();
-    StatsNotifier.refreshTrigger.addListener(_onStatsRefresh);
   }
-  
-  void _onStatsRefresh() {
-    _refreshStats();
+  void _setupFollowStreams() {
+    if (_profileUserId == null) return;
+
+    _followingStream = SupabaseService.client
+        .from('follows')
+        .stream(primaryKey: ['id'])
+        .eq('follower_id', _profileUserId!)
+        .listen((_) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _refreshStats();
+      });
+    });
+
+    _followersStream = SupabaseService.client
+        .from('follows')
+        .stream(primaryKey: ['id'])
+        .eq('following_id', _profileUserId!)
+        .listen((_) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _refreshStats();
+      });
+    });
   }
 
   void _refreshStats() {
@@ -55,7 +77,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
-    StatsNotifier.refreshTrigger.removeListener(_onStatsRefresh); 
+    _followingStream?.cancel();
+    _followersStream?.cancel();
     super.dispose();
   }
 
@@ -223,11 +246,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = SupabaseService.client.auth.currentUser;
     final profileUserId = widget.viewingUserId ?? user!.id;
     final isOwnProfile = profileUserId == user!.id;
-    print("🔥 THIS SCREEN BUILdsdweD");
     return FutureBuilder<AppUser?>(
       future: ProfileService.getProfile(profileUserId),
 
-        
       builder: (context, snapshot) {  
 
           print("STATE: ${snapshot.connectionState}");
@@ -237,8 +258,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
-        // ❌ Error
         if (snapshot.hasError) {
           return Scaffold(
             body: Center(
@@ -276,7 +295,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
 
-        // ✅ Data loaded successfully
         final fullName = profile.fullName ?? 'User';
         final username = profile.username ?? 'user';
         final bio = profile.bio ?? 'No bio yet';
@@ -292,16 +310,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // ✅ Swaply 左边，跟 home screen 一样
-                        const Text(
-                          'Swaply',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5A2CA0),
+                        if(isOwnProfile)
+                          const Text(
+                            'Swaply',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5A2CA0),
+                            ),
+                          )
+                        else
+                          GestureDetector(
+                            onTap: () {
+                              if (Navigator.canPop(context)) Navigator.pop(context);
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0), // 增加点击区域
+                              child: Icon(Icons.arrow_back_ios_new, color: Color(0xFF5A2CA0)),
+                            ),
                           ),
-                        ),
-                        // ✅ 右边：自己显示设置，别人显示返回
+
                         if (isOwnProfile)
                           IconButton(
                             icon: const Icon(Icons.settings_outlined, color: Color(0xFF5A2CA0)),
@@ -313,12 +341,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             },
                           )
                         else
-                          GestureDetector(
-                            onTap: () {
-                              if (Navigator.canPop(context)) Navigator.pop(context);
-                            },
-                            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF5A2CA0)),
-                          ),
+                          const SizedBox(width: 48),
                       ],
                     ),
                   ),
@@ -542,7 +565,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<Map<String, int>> _loadStatistics(String userId) async {
     final following = await FollowService.getFollowingCount(userId);
     final followers = await FollowService.getFollowerCount(userId);
-    final saved = await SavedItemsService.getTotalSavedCount(userId);
+    final saved = await FavouriteRepository().getTotalSavedForSeller(userId);
 
     return {
       'following': following,
