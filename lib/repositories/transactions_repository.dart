@@ -1,4 +1,5 @@
 import '../models/transaction.dart';
+import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
 
 class TransactionsRepository {
@@ -45,7 +46,13 @@ class TransactionsRepository {
         .select()
         .single();
     final map = _requireMap(response, operation: 'create transaction');
-    return Transaction.fromMap(map);
+    final created = Transaction.fromMap(map);
+    await _notifyTransactionStatus(
+      transaction: created,
+      status: created.transactionStatus ?? 'pending',
+      event: 'created',
+    );
+    return created;
   }
 
   Future<Transaction?> getById(int transactionId) async {
@@ -67,14 +74,23 @@ class TransactionsRepository {
         .from(_table)
         .update({'transaction_status': transactionStatus})
         .eq('transaction_id', transactionId)
-        .select('transaction_id');
+        .select()
+        .maybeSingle();
 
-    final rows = _requireListOfMaps(response, operation: 'updateStatus');
-    if (rows.isEmpty) {
+    if (response == null) {
       throw StateError(
         'No transaction updated. This is usually caused by RLS/permissions.',
       );
     }
+
+    final transaction = Transaction.fromMap(
+      _requireMap(response, operation: 'updateStatus'),
+    );
+    await _notifyTransactionStatus(
+      transaction: transaction,
+      status: transactionStatus,
+      event: 'updated',
+    );
   }
 
   Future<void> updateMeetupAndStatus({
@@ -90,14 +106,23 @@ class TransactionsRepository {
           'address': address,
         })
         .eq('transaction_id', transactionId)
-        .select('transaction_id');
+        .select()
+        .maybeSingle();
 
-    final rows = _requireListOfMaps(response, operation: 'updateMeetupAndStatus');
-    if (rows.isEmpty) {
+    if (response == null) {
       throw StateError(
         'No transaction updated. This is usually caused by RLS/permissions.',
       );
     }
+
+    final transaction = Transaction.fromMap(
+      _requireMap(response, operation: 'updateMeetupAndStatus'),
+    );
+    await _notifyTransactionStatus(
+      transaction: transaction,
+      status: transactionStatus,
+      event: 'updated',
+    );
   }
 
   Future<List<Transaction>> listForBuyer(String buyerId) async {
@@ -119,5 +144,62 @@ class TransactionsRepository {
     final rows = _requireListOfMaps(response, operation: 'listForSeller');
     return rows.map<Transaction>(Transaction.fromMap).toList();
   }
-}
 
+  Future<void> _notifyTransactionStatus({
+    required Transaction transaction,
+    required String status,
+    required String event,
+  }) async {
+    final normalized = status.trim().toLowerCase();
+
+    String title;
+    String body;
+    switch (normalized) {
+      case 'pending':
+        title = 'Transaction request';
+        body = 'A new transaction request has been created.';
+        break;
+      case 'confirmed':
+        title = 'Transaction confirmed';
+        body = 'A transaction request has been confirmed.';
+        break;
+      case 'completed':
+        title = 'Transaction completed';
+        body = 'This transaction has been marked as completed.';
+        break;
+      default:
+        return;
+    }
+
+    final recipients = <String>{transaction.buyerId, transaction.sellerId}
+      ..removeWhere((id) => id.trim().isEmpty);
+
+    if (recipients.isEmpty) {
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'action': 'open_transaction',
+      'transaction_id': transaction.transactionId,
+      'status': normalized,
+      'event': event,
+      'item_id': transaction.itemId,
+      if (transaction.tradedItemId != null)
+        'traded_item_id': transaction.tradedItemId,
+    };
+
+    for (final recipientId in recipients) {
+      try {
+        await NotificationService.instance.sendNotificationToUser(
+          recipientId: recipientId,
+          title: title,
+          body: body,
+          type: 'transaction',
+          data: payload,
+        );
+      } catch (_) {
+        // Do not block transaction writes when notification insertion fails.
+      }
+    }
+  }
+}
