@@ -4672,7 +4672,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             media.itemId!,
                           );
                           await ItemsRepository().updateStatus(
-                            'dropped',
+                            isBuyer ? 'dropped' : 'rejected',
                             media.offeredItemId!,
                           );
                           await TransactionsRepository().updateStatus(

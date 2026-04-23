@@ -176,7 +176,12 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     try {
       await _itemsRepo.updateStatus('available', tx.itemId);
       if (tx.tradedItemId != null) {
-        await _itemsRepo.updateStatus('available', tx.tradedItemId!);
+        final viewerIsBuyer = widget.viewer.id == tx.buyerId;
+        // Offerer (buyer) cancel => drop offered item; seller cancel => available.
+        await _itemsRepo.updateStatus(
+          viewerIsBuyer ? 'dropped' : 'rejected',
+          tx.tradedItemId!,
+        );
       }
       await _txRepo.updateStatus(
         transactionId: tx.transactionId,
