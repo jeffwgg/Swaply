@@ -154,7 +154,7 @@ class ItemsRepository {
   Future<List<ItemListing>> getReplyList(int id) async {
     var query = SupabaseService.client
         .from(_table)
-        .select()
+        .select('*, users(username)')
         .eq('replied_to', id);
 
     final response = await query.order('created_at', ascending: false);
@@ -181,6 +181,7 @@ class ItemsRepository {
         .from(_table)
         .select()
         .eq('owner_id', userId)
+        .neq('status', 'dropped')  // ✅ Exclude dropped items
         .order('created_at', ascending: false);
     
     final rows = _requireListOfMaps(response, operation: 'getUserItems');
@@ -208,7 +209,7 @@ class ItemsRepository {
   Future<ItemListing?> getById(int id) async {
     final response = await SupabaseService.client
         .from(_table)
-        .select()
+        .select('*, users(username)')
         .eq('id', id)
         .maybeSingle();
     

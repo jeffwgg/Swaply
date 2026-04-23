@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -21,7 +22,12 @@ class DiscoverScreen extends StatefulWidget {
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   String _searchQuery = '';
+  Timer? _searchHistoryDebounce;
+  List<String> _recentSearches = [];
+  bool _showSearchHistory = false;
+  int _reloadToken = 0;
 
   final List<String> _categories = const [
     'All',
@@ -34,9 +40,56 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadRecentSearches();
+    _searchFocusNode.addListener(() {
+      if (!mounted) return;
+      setState(() {
+        _showSearchHistory =
+            _searchFocusNode.hasFocus &&
+            _recentSearches.isNotEmpty &&
+            _searchController.text.trim().isEmpty;
+      });
+    });
+  }
+
+  @override
   void dispose() {
+    _searchHistoryDebounce?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadRecentSearches() async {
+    final recents = await ItemService().loadRecentSearchQueries();
+    if (!mounted) return;
+    setState(() {
+      _recentSearches = recents;
+      _showSearchHistory =
+          _searchFocusNode.hasFocus &&
+          _recentSearches.isNotEmpty &&
+          _searchController.text.trim().isEmpty;
+    });
+  }
+
+  void _reloadDiscover() {
+    setState(() {
+      _reloadToken++;
+    });
+  }
+
+  void _saveSearchHistory(String query) {
+    final normalized = query.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    _searchHistoryDebounce?.cancel();
+    _searchHistoryDebounce = Timer(const Duration(milliseconds: 600), () async {
+      await ItemService().saveSearchQuery(normalized);
+      await _loadRecentSearches();
+    });
   }
 
   @override
@@ -48,97 +101,205 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20.0, 16.0, 20.0, 8.0),
-            child: Column(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFE9D5FF)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.deepPurple.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search, color: accent),
-                    suffixIcon: IconButton(
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE9D5FF)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.deepPurple.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        onTap: () {
+                          setState(() {
+                            _showSearchHistory =
+                                _recentSearches.isNotEmpty &&
+                                _searchController.text.trim().isEmpty;
+                          });
+                        },
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                            _showSearchHistory =
+                                _searchFocusNode.hasFocus &&
+                                _recentSearches.isNotEmpty &&
+                                value.trim().isEmpty;
+                          });
+                          _saveSearchHistory(value);
+                        },
+                        onSubmitted: _saveSearchHistory,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search, color: accent),
+                          suffixIcon: IconButton(
                             icon: const Icon(Icons.clear, color: accent),
                             onPressed: () {
                               _searchController.clear();
                               setState(() {
                                 _searchQuery = '';
+                                _showSearchHistory =
+                                    _searchFocusNode.hasFocus &&
+                                    _recentSearches.isNotEmpty;
                               });
                             },
                           ),
-                    labelText: 'Search listings',
-                    labelStyle: const TextStyle(color: accent),
-                    hintText: 'Search items or sellers',
-                    filled: true,
-                    fillColor: Colors.transparent,
-                    border: const OutlineInputBorder(
-                      borderSide: BorderSide.none,
-                      borderRadius: BorderRadius.all(Radius.circular(14.0)),
+                          labelText: 'Search listings',
+                          labelStyle: const TextStyle(color: accent),
+                          hintText: 'Search items or sellers',
+                          filled: true,
+                          fillColor: Colors.transparent,
+                          border: const OutlineInputBorder(
+                            borderSide: BorderSide.none,
+                            borderRadius: BorderRadius.all(Radius.circular(14.0)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TabBar(
+                      dividerColor: Colors.transparent,
+                      overlayColor: WidgetStateProperty.all(Colors.transparent),
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      labelColor: Colors.white,
+                      unselectedLabelColor: accent,
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      indicator: const BubbleTabIndicator(
+                        indicatorHeight: 30.0,
+                        indicatorColor: accent,
+                        indicatorRadius: 10.0,
+                        tabBarIndicatorSize: TabBarIndicatorSize.tab,
+                      ),
+                      tabs: _categories.map((cat) {
+                        if (cat == 'All') {
+                          return const Tab(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.format_list_bulleted, size: 18),
+                                SizedBox(width: 6),
+                                Text("All"),
+                              ],
+                            ),
+                          );
+                        }
+                        return Tab(text: cat);
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: TabBarView(
+                        children: _categories
+                            .map(
+                              (cat) => NestedTabBar(
+                                outerTab: cat,
+                                user: widget.user,
+                                searchQuery: _searchQuery,
+                                reloadToken: _reloadToken,
+                                onRefreshParent: _reloadDiscover,
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_showSearchHistory)
+                  Positioned(
+                    top: 58,
+                    left: 0,
+                    right: 0,
+                    child: Material(
+                      color: Colors.transparent,
+                      elevation: 8,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE9D5FF)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x14000000),
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 10, 4, 6),
+                              child: Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Recent searches',
+                                      style: TextStyle(
+                                        color: Color(0xFF5B21B6),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      await ItemService().clearSearchHistory();
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _recentSearches = [];
+                                        _showSearchHistory = false;
+                                      });
+                                    },
+                                    child: const Text('Clear'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Divider(height: 1, color: Color(0xFFF3E8FF)),
+                            ..._recentSearches.take(5).map((history) {
+                              return ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.history_rounded,
+                                  size: 18,
+                                  color: Color(0xFF7C3AED),
+                                ),
+                                title: Text(
+                                  history,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Color(0xFF5B21B6)),
+                                ),
+                                onTap: () {
+                                  _searchController.text = history;
+                                  setState(() {
+                                    _searchQuery = history;
+                                    _showSearchHistory = false;
+                                  });
+                                  _saveSearchHistory(history);
+                                  FocusScope.of(context).unfocus();
+                                },
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              TabBar(
-                dividerColor: Colors.transparent,
-                overlayColor: WidgetStateProperty.all(Colors.transparent),
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: Colors.white,
-                unselectedLabelColor: accent,
-                indicatorSize: TabBarIndicatorSize.tab,
-                indicator: const BubbleTabIndicator(
-                  indicatorHeight: 30.0,
-                  indicatorColor: accent,
-                  indicatorRadius: 10.0,
-                  tabBarIndicatorSize: TabBarIndicatorSize.tab,
-                ),
-                tabs: _categories.map((cat) {
-                  if (cat == 'All') {
-                    return const Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.format_list_bulleted, size: 18),
-                          SizedBox(width: 6),
-                          Text("All"),
-                        ],
-                      ),
-                    );
-                  }
-                  return Tab(text: cat);
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: TabBarView(
-                  children: _categories
-                      .map(
-                        (cat) => NestedTabBar(
-                          outerTab: cat,
-                          user: widget.user,
-                          searchQuery: _searchQuery,
-                        ),
-                      )
-                      .toList(),
-                ),
-              ),
-            ],
+              ],
             ),
           ),
         ),
@@ -151,9 +312,13 @@ class NestedTabBar extends StatefulWidget {
   final String outerTab;
   final AppUser? user;
   final String searchQuery;
+  final int reloadToken;
+  final VoidCallback? onRefreshParent;
   const NestedTabBar({
     required this.outerTab,
     required this.searchQuery,
+    required this.reloadToken,
+    this.onRefreshParent,
     this.user,
     super.key,
   });
@@ -204,7 +369,8 @@ class _NestedTabBarState extends State<NestedTabBar>
 
     if (oldWidget.user != widget.user ||
         oldWidget.searchQuery != widget.searchQuery ||
-        oldWidget.outerTab != widget.outerTab) {
+        oldWidget.outerTab != widget.outerTab ||
+        oldWidget.reloadToken != widget.reloadToken) {
       _loadItems();
       setState(() {});
     }
@@ -314,6 +480,7 @@ class _NestedTabBarState extends State<NestedTabBar>
                           user: widget.user, 
                           item: items[index],
                           onRefresh: () {
+                            widget.onRefreshParent?.call();
                             setState(() {
                               _loadItems();
                             });
@@ -342,19 +509,21 @@ class ItemCard extends StatefulWidget {
 }
 
 class _ItemCardState extends State<ItemCard> {
-  late final Future<AppUser?> _ownerFuture;
+  Future<AppUser?>? _ownerFuture;
 
   @override
   void initState() {
     super.initState();
-    _ownerFuture = UsersRepository().getById(widget.item.ownerId);
+    if ((widget.item.ownerUsername ?? '').trim().isEmpty) {
+      _ownerFuture = UsersRepository().getById(widget.item.ownerId);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () async {
-        final result = await Navigator.push(
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) =>
@@ -366,10 +535,8 @@ class _ItemCardState extends State<ItemCard> {
         // widget.item is updated inside ItemDetailsScreen
         setState(() {});
 
-        if (result == true) {
-          if (widget.onRefresh != null) {
-            widget.onRefresh!();
-          }
+        if (widget.onRefresh != null) {
+          widget.onRefresh!();
         }
       },
       child: Container(
@@ -504,9 +671,12 @@ class _ItemCardState extends State<ItemCard> {
                         child: FutureBuilder<AppUser?>(
                           future: _ownerFuture,
                           builder: (context, snapshot) {
-                            final ownerName = snapshot.data?.username ?? 'Unknown';
+                            final fallbackName = widget.item.ownerUsername;
+                            final ownerName =
+                                (snapshot.data?.username ?? fallbackName ?? 'Unknown')
+                                    .trim();
                             return Text(
-                              ownerName,
+                              ownerName.isEmpty ? 'Unknown' : ownerName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(color: Color(0xFF7C3AED)),

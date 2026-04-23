@@ -22,6 +22,9 @@ import '../auth/login_screen.dart';
 import '../checkout/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
+import '../../../services/supabase_service.dart';
+import '../../../services/stats_notifier.dart';
+import '../../../services/follow_service.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
   final AppUser? user;
@@ -35,13 +38,13 @@ class ItemDetailsScreen extends StatefulWidget {
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? user;
   String _ownerName = '';
-  String? _ownerAuthUserId;
   List<ItemListing> _replies = [];
   final Map<int, String> _replyOwnerNames = {};
   int _currentImageIndex = 0;
   bool _isFollowing = false;
   bool _isFavourite = false;
   int? _favCount;
+  bool _isLoadingFollow = false;
   final ChatService _chatService = ChatService();
 
   @override
@@ -54,16 +57,45 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     _fetchOwner();
     _fetchReplies();
     _fetchFavouriteCount();
+    _loadFollowState();
+  }
+
+  void _showFollowError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  Future<void> _loadFollowState() async {
+    if(user!.id == widget.item.ownerId){
+      return;
+    }
+    final following = await FollowService.isFollowing(
+      user!.id,
+      widget.item.ownerId,
+    );
+
+    if (!mounted) return;
+    setState(() => _isFollowing = following);
   }
 
   Future<void> _fetchOwner() async {
-    final user = await UsersRepository().getById(widget.item.ownerId);
-    log('here $widget.item.ownerId');
-    log(user.toString());
+    AppUser? owner;
+    try {
+      owner = await UsersRepository().getById(widget.item.ownerId);
+    } catch (e) {
+      log('Owner lookup fallback used: $e');
+    }
+
+    final fallbackName = (widget.item.ownerUsername ?? '').trim();
+    final resolvedName = (owner?.username ?? fallbackName).trim();
     if (mounted) {
       setState(() {
-        _ownerName = user?.username ?? 'Unknown';
-        _ownerAuthUserId = user?.id;
+        _ownerName = resolvedName.isEmpty ? 'Unknown' : resolvedName;
       });
     }
   }
@@ -72,8 +104,15 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     try {
       final replies = await ItemsRepository().getReplyList(widget.item.id);
       for (var r in replies) {
-        final user = await UsersRepository().getById(r.ownerId);
-        _replyOwnerNames[r.id] = user?.username ?? 'Unknown';
+        final fallbackName = (r.ownerUsername ?? '').trim();
+        try {
+          final user = await UsersRepository().getById(r.ownerId);
+          final resolved = (user?.username ?? fallbackName).trim();
+          _replyOwnerNames[r.id] = resolved.isEmpty ? 'Unknown' : resolved;
+        } catch (_) {
+          _replyOwnerNames[r.id] =
+              fallbackName.isEmpty ? 'Unknown' : fallbackName;
+        }
       }
       if (mounted) {
         setState(() {
@@ -131,7 +170,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     final meetups = MeetupAddressOption.fromSellerItem(widget.item);
     final sellerName = _ownerName.trim().isEmpty ? 'Seller' : _ownerName;
-    final sellerId = _ownerAuthUserId;
+    final sellerId = widget.item.ownerId;
     if (sellerId == null || sellerId.isEmpty) {
       if (!mounted) {
         return;
@@ -433,6 +472,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
 
     await _fetchReplies();
+
+    final refreshedItem = await ItemsRepository().getById(widget.item.id);
+    if (!mounted) return;
+    if (refreshedItem != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              ItemDetailsScreen(user: widget.user, item: refreshedItem),
+        ),
+      );
+    } else {
+      setState(() {});
+    }
   }
 
   Future<void> _rejectReply(int replyId) async {
@@ -748,12 +801,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => ProfileScreen(
-                      isDarkMode:
-                          Theme.of(context).brightness == Brightness.dark,
-                      onThemeChanged: (_) {},
+                      viewingUserId: widget.item.ownerId,
                     ),
                   ),
-                );
+                ).then((_) {
+                  if (mounted) _loadFollowState();
+                });
               },
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -772,10 +825,51 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             ),
             if (user == null || user.id != item.ownerId)
               TextButton(
-                onPressed: () {
-                  setState(() {
-                    _isFollowing = !_isFollowing;
-                  });
+                onPressed: _isLoadingFollow
+                    ? null
+                    : () async {
+                  final currentUser = SupabaseService.client.auth.currentUser;
+                  final targetUserId = item.ownerId;
+
+                  if (currentUser == null) {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+                    return;
+                  }
+
+                  if (currentUser.id == targetUserId) {
+                    _showFollowError('You cannot follow yourself.');
+                    return;
+                  }
+
+                  setState(() => _isLoadingFollow = true);
+
+                  try {
+                    if (_isFollowing) {
+                      await FollowService.unfollowUser(currentUser.id, targetUserId);
+                      setState(() => _isFollowing = false);
+                    } else {
+                      await FollowService.followUser(currentUser.id, targetUserId);
+                      setState(() => _isFollowing = true);
+                    }
+
+                    StatsNotifier.refresh();
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(_isFollowing ? 'Following now!' : 'Unfollowed successfully.'),
+                          backgroundColor: _isFollowing ? Colors.green : Colors.grey[700],
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    print('Follow error: $e');
+                    if (mounted) _showFollowError('Error updating follow state. Please try again.');
+                  } finally {
+                    if (mounted) setState(() => _isLoadingFollow = false);
+                  }
                 },
                 style: TextButton.styleFrom(
                   backgroundColor: _isFollowing
@@ -1338,12 +1432,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (context) => ProfileScreen(
-                                              isDarkMode:
-                                                  Theme.of(
-                                                    context,
-                                                  ).brightness ==
-                                                  Brightness.dark,
-                                              onThemeChanged: (_) {},
                                             ),
                                           ),
                                         );

@@ -146,74 +146,32 @@ class LocalDbService {
   ''');
 
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS items_cache (
-      id INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      price REAL,
-      listing_type TEXT,
-      owner_id TEXT,
-      status TEXT,
-      category TEXT,
-      image_urls TEXT,
-      preference TEXT,
-      replied_to INTEGER,
-      address TEXT,
-      latitude REAL,
-      longitude REAL,
-      created_at TEXT,
-      last_synced_at TEXT,
-      cached_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-  ''');
+      CREATE TABLE IF NOT EXISTS item_draft_images (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        draft_id INTEGER NOT NULL,
+        image_bytes BLOB NOT NULL,
+        image_ext TEXT,
+        sort_order INTEGER NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
 
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS favourites (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      item_id INTEGER NOT NULL,
-      is_deleted INTEGER NOT NULL DEFAULT 0,
-      is_synced INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id, item_id)
-    )
-  ''');
+      CREATE INDEX IF NOT EXISTS idx_item_draft_images_draft_sort
+      ON item_draft_images(draft_id, sort_order)
+    ''');
 
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS user_items (
-      id INTEGER PRIMARY KEY,
-      name TEXT,
-      description TEXT,
-      price REAL,
-      listing_type TEXT,
-      owner_id TEXT,
-      category TEXT,
-      image_urls TEXT,
-      preference TEXT,
-      status TEXT,
-      replied_to INTEGER,
-      address TEXT,
-      latitude REAL,
-      longitude REAL,
-      is_trade_offer INTEGER DEFAULT 0,
-      created_at TEXT,
-      is_synced INTEGER DEFAULT 1,
-      is_deleted INTEGER DEFAULT 0,
-      last_synced_at TEXT
-    )
-  ''');
+      CREATE TABLE IF NOT EXISTS search_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query TEXT NOT NULL UNIQUE,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
 
     await db.execute('''
-    CREATE TABLE IF NOT EXISTS offline_actions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action_type TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      retry_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      last_attempt_at TEXT
-    )
-  ''');
+      CREATE INDEX IF NOT EXISTS idx_search_history_updated_at
+      ON search_history(updated_at DESC)
+    ''');
   }
 }

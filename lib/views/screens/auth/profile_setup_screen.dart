@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
 import '../main_shell.dart';
+import '../../../services/profile_service.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -62,8 +63,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       SnackBar(content: Text(message)),
     );
   }
+  void _showSuccess(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.green),
+    );
+  }
 
-  // ✅ 保存 Profile 到数据库
   Future<void> _saveProfile() async {
     setState(() => isSaving = true);
 
@@ -71,28 +77,21 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       final user = SupabaseService.client.auth.currentUser;
       if (user == null) throw Exception("User session not found");
 
-      print("📝 Saving profile for User ID: ${user.id}");
-      print("📧 User Email: ${user.email}");
+      final error = await ProfileService.createProfile(
+        userId: user.id,
+        email: user.email!,
+        username: usernameController.text.trim(),
+        fullName: fullNameController.text.trim(),
+        bio: bioController.text.trim(),
+        phone: phoneController.text.trim(),
+        gender: gender,
+        birthdate: selectedDate,
+      );
 
-      // 准备要插入的数据包
-      final updates = {
-        'id': user.id,
-        'email': user.email,
-        'username': usernameController.text.trim(),
-        'full_name': fullNameController.text.trim(),
-        'bio': bioController.text.trim(),
-        'phone': phoneController.text.trim(),
-        'gender': gender,
-        'birthdate': selectedDate?.toIso8601String().split('T')[0],
-        'created_at': DateTime.now().toIso8601String(),
-      };
-
-      print("📦 Inserting data: $updates");
-
-      // 执行插入
-      await SupabaseService.client.from('users').insert(updates);
-
-      print("✅ Profile saved successfully!");
+      if (error != null) {
+        _showError(error);
+        return;
+      }
 
       if (!mounted) return;
 
@@ -103,33 +102,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         ),
       );
 
-      // 💡 关键：使用 pushAndRemoveUntil 清空导航栈，防止返回到注册/验证页面
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) =>  MainShell(isDarkMode: false, onThemeChanged: (_) {})),
+        MaterialPageRoute(builder: (_) => MainShell()),
         (route) => false,
       );
-
     } catch (e) {
-      print("❌ FULL ERROR DETAIL: $e");
-      print("❌ Error type: ${e.runtimeType}");
-
-      // 具体的错误诊断
-      String errorMsg = "Error: ${e.toString()}";
-      if (e.toString().contains("duplicate key") || e.toString().contains("already exists")) {
-        errorMsg = "Profile already exists. Please contact support.";
-      } else if (e.toString().contains("permission denied")) {
-        errorMsg = "Permission denied. Please check your account settings.";
-      } else if (e.toString().contains("connection")) {
-        errorMsg = "Network error. Please check your connection and try again.";
-      }
-
-      // 如果你想在手机屏幕上也看到具体错误
-      _showError(errorMsg);
+      _showError("Something went wrong");
     } finally {
       if (mounted) setState(() => isSaving = false);
     }
   }
-
   // ✅ 验证输入
   Future<void> _validateAndContinue() async {
     String fullName = fullNameController.text.trim();
@@ -173,8 +155,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       return;
     }
 
-    if (phone.length < 7) {
-      _showError("Please enter a valid phone number");
+    if (!ProfileService.isValidPhoneNumber(phone)) {
+      _showError("Phone number must be 11-12 digits and contain only numbers");
       return;
     }
 
@@ -182,15 +164,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _showError("Please select your birthdate");
       return;
     }
-
-    // Check if user is at least 13 years old
-    final today = DateTime.now();
-    final age = today.year - selectedDate!.year;
-    if (age < 13) {
-      _showError("You must be at least 13 years old to use Swaply");
-      return;
-    }
-
     // All validations passed, proceed to save
     await _saveProfile();
   }

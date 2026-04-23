@@ -5,16 +5,9 @@ import 'change_password_screen.dart';
 import 'help_center_screen.dart';
 import 'about_app_screen.dart';
 
-
+// logout put where
 class SettingsScreen extends StatefulWidget {
-  final bool isDarkMode;
-  final Function(bool) onThemeChanged;
-
-  const SettingsScreen({
-    super.key,
-    required this.isDarkMode,
-    required this.onThemeChanged,
-  });
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -27,7 +20,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F3F8),
       appBar: AppBar(
         title: const Text("Settings"),
         backgroundColor: Colors.transparent,
@@ -41,11 +33,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // 👤 ACCOUNT
           _SectionTitle("Account"),
-          _Tile(Icons.person, "Edit Profile", onTap: () {
-            Navigator.push(
+          _Tile(Icons.person, "Edit Profile", onTap: () async {
+            // Listen for profile update and pop with result
+            final result = await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const EditProfileScreen()),
             );
+            
+            // If profile was updated, pass the result back to ProfileScreen
+            if (result == true && mounted) {
+              Navigator.pop(context, true);
+            }
           }),
           _Tile(Icons.lock, "Change Password", onTap: () {
             Navigator.push(
@@ -58,16 +56,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ⚙️ PREFERENCES
           _SectionTitle("Preferences"),
-
-          SwitchListTile(
-            title: const Text("Dark Mode"),
-            value: widget.isDarkMode,
-            activeColor: Colors.purple,
-            onChanged: (value) {
-              widget.onThemeChanged(value);
-              setState(() {});
-            },
-          ),
 
           SwitchListTile(
             title: const Text("Notifications"),
@@ -124,58 +112,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               if (confirm == true && mounted) {
                 try {
-                  // Show loading
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (_) => const Dialog(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text("Logging out..."),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-
-                  // Perform logout
+                  // Perform logout immediately
                   print("🔐 Signing out from Supabase...");
                   await SupabaseService.logout();
 
                   print("✅ Logout successful!");
 
-                  // Close loading dialog
-                  if (mounted) Navigator.pop(context);
-
-                  // Show success message
+                  // Clear all routes and navigate to login
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("✅ You've been logged out successfully"),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 2),
-                      ),
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      '/',
+                      (route) => false,
                     );
                   }
-
-                  // AuthGate will automatically handle the navigation back to guest mode
-                  // No need to manually navigate - the auth stream will trigger a rebuild
                 } catch (e) {
                   print("❌ Logout error: $e");
 
-                  // Close loading dialog if still open
-                  if (mounted) {
-                    try {
-                      Navigator.pop(context);
-                    } catch (_) {}
-                  }
-
-                  // Show error
+                  // Show error message
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
