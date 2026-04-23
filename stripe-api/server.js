@@ -56,6 +56,44 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+// GET /payment-intent-method?payment_intent_id=pi_...
+// Returns: { "paymentMethod": "card" | "grabpay" | ... }
+app.get('/payment-intent-method', async (req, res) => {
+  try {
+    const paymentIntentId = req.query?.payment_intent_id;
+    if (!paymentIntentId || typeof paymentIntentId !== 'string') {
+      return res.status(400).json({ error: 'Missing payment_intent_id' });
+    }
+
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ['latest_charge', 'charges.data.balance_transaction'],
+    });
+
+    const latestCharge = intent.latest_charge;
+    const chargeTypeFromLatest =
+      latestCharge && typeof latestCharge === 'object'
+        ? latestCharge.payment_method_details?.type
+        : null;
+
+    const charges = intent.charges?.data ?? [];
+    const chargeTypeFromCharges =
+      charges.length > 0 ? charges[0]?.payment_method_details?.type : null;
+
+    const type =
+      chargeTypeFromLatest ??
+      chargeTypeFromCharges ??
+      intent.payment_method_types?.[0] ??
+      null;
+
+    return res.json({
+      paymentMethod: type,
+      status: intent.status,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message ?? String(e) });
+  }
+});
+
 const port = process.env.PORT ?? 3000;
 app.listen(port, () => {
   // eslint-disable-next-line no-console

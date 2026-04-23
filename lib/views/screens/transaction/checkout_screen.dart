@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../core/theme/app_colors.dart';
 import '../../../models/checkout_flow_kind.dart';
@@ -9,12 +13,10 @@ import '../../../models/transaction.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
-import '../../../services/location_address_service.dart';
 import '../../../services/stripe_payment_service.dart';
+import 'map_location_picker.dart';
 
 enum _Fulfillment { meetup, shipping }
-
-enum _UiPaymentMethod { card, grabPay, googlePay }
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({
@@ -51,13 +53,15 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   String? _selectedMeetupId;
   final TextEditingController _shippingAddressController = TextEditingController();
-  final LocationAddressService _locationService = LocationAddressService();
   final StripePaymentService _stripe = StripePaymentService();
   final TransactionsRepository _transactions = TransactionsRepository();
   final PaymentsRepository _payments = PaymentsRepository();
   final ItemsRepository _items = ItemsRepository();
 
-  _UiPaymentMethod _paymentMethod = _UiPaymentMethod.card;
+  Timer? _shipDebounce;
+  bool _shipSearching = false;
+  List<dynamic> _shipResults = const [];
+
   bool _agreedToTerms = false;
   bool _busy = false;
 
@@ -86,6 +90,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   void dispose() {
+    _shipDebounce?.cancel();
     _shippingAddressController.dispose();
     super.dispose();
   }
@@ -121,30 +126,80 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _onUseGpsPressed() async {
-    setState(() => _busy = true);
+    final initialText = _shippingAddressController.text.trim();
+    final result = await Navigator.of(context).push<MapLocationPickerResult>(
+      MaterialPageRoute(
+        builder: (_) => MapLocationPicker(
+          title: 'Shipping address',
+          initialAddress: initialText.isEmpty ? null : initialText,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+    setState(() {
+      _shippingAddressController.text = result.address;
+    });
+  }
+
+  Future<List<dynamic>> _searchPlaces(String query) async {
     try {
-      final line = await _locationService.resolveCurrentAddressLine();
-      if (!mounted) {
-        return;
-      }
-      if (line == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Could not read your location. Enable GPS and grant permission, then try again.',
-            ),
-          ),
-        );
-        return;
-      }
-      setState(() {
-        _shippingAddressController.text = line;
+      final url = Uri.https("nominatim.openstreetmap.org", "/search", {
+        "q": query,
+        "format": "jsonv2",
+        "limit": "5",
+        "addressdetails": "1",
       });
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
+
+      final response = await http.get(
+        url,
+        headers: {
+          "User-Agent": "SwaplyApp/1.0 (swaply)",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
       }
+      return [];
+    } catch (_) {
+      return [];
     }
+  }
+
+  void _onShippingQueryChanged(String value) {
+    _shipDebounce?.cancel();
+    _shipDebounce = Timer(const Duration(milliseconds: 600), () async {
+      final q = value.trim();
+      if (q.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _shipResults = const [];
+          _shipSearching = false;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() => _shipSearching = true);
+      final results = await _searchPlaces(q);
+      if (!mounted) return;
+      setState(() {
+        _shipResults = results;
+        _shipSearching = false;
+      });
+    });
+  }
+
+  void _pickShippingSuggestion(dynamic place) {
+    final addr = place is Map ? place['display_name']?.toString() : null;
+    if (addr == null || addr.trim().isEmpty) return;
+    setState(() {
+      _shippingAddressController.text = addr;
+      _shipResults = const [];
+      _shipSearching = false;
+    });
   }
 
   Future<void> _onCheckoutPressed() async {
@@ -180,9 +235,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             address: address,
           );
 
-          await _items.updateStatus('reserved', widget.primaryItem.id);
+          await _items.updateStatus('confirmed', widget.primaryItem.id);
           if (widget.swapItem != null) {
-            await _items.updateStatus('reserved', widget.swapItem!.id);
+            await _items.updateStatus('confirmed', widget.swapItem!.id);
           }
         } catch (e) {
           if (mounted) {
@@ -284,11 +339,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
           return;
         }
-        final method = switch (_paymentMethod) {
-          _UiPaymentMethod.card => 'card',
-          _UiPaymentMethod.grabPay => 'grabpay',
-          _UiPaymentMethod.googlePay => 'google_pay',
-        };
+        var method = await _stripe.fetchPaymentMethodType(intentId) ?? 'unknown';
         try {
           await _payments.create(
             Payment(
@@ -301,6 +352,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
             ),
           );
+
+          // If redirect method hasn't populated yet, try updating shortly after.
+          if (method == 'unknown') {
+            method = await _stripe.fetchPaymentMethodType(intentId) ?? 'unknown';
+            if (method != 'unknown') {
+              await _payments.updateMethodForTransaction(
+                transactionId: createdTx.transactionId,
+                paymentMethod: method,
+              );
+            }
+          }
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -372,8 +434,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   else if (!widget.meetUpOnly)
                     _ShippingSection(
                       controller: _shippingAddressController,
-                      onChanged: () => setState(() {}),
-                      onUseGps: _busy ? null : _onUseGpsPressed,
+                      searching: _shipSearching,
+                      results: _shipResults,
+                      onQueryChanged: (v) {
+                        setState(() {});
+                        _onShippingQueryChanged(v);
+                      },
+                      onPickSuggestion: _pickShippingSuggestion,
+                      onViewOnMap: _busy ? null : _onUseGpsPressed,
                     ),
                   const SizedBox(height: 12),
                   _ProductBlock(
@@ -401,9 +469,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   if (!widget.hidePaymentSection)
                     if (_requiresPayment) ...[
                       const SizedBox(height: 12),
-                      _PaymentMethodsCard(
-                        value: _paymentMethod,
-                        onChanged: (m) => setState(() => _paymentMethod = m),
+                      const _InfoNote(
+                        text: 'You will choose the payment method in Stripe.',
                       ),
                     ] else ...[
                       const SizedBox(height: 12),
@@ -652,13 +719,19 @@ class _MeetupSection extends StatelessWidget {
 class _ShippingSection extends StatelessWidget {
   const _ShippingSection({
     required this.controller,
-    required this.onChanged,
-    required this.onUseGps,
+    required this.searching,
+    required this.results,
+    required this.onQueryChanged,
+    required this.onPickSuggestion,
+    required this.onViewOnMap,
   });
 
   final TextEditingController controller;
-  final VoidCallback onChanged;
-  final VoidCallback? onUseGps;
+  final bool searching;
+  final List<dynamic> results;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<dynamic> onPickSuggestion;
+  final VoidCallback? onViewOnMap;
 
   @override
   Widget build(BuildContext context) {
@@ -694,24 +767,69 @@ class _ShippingSection extends StatelessWidget {
                   Expanded(
                     child: TextField(
                       controller: controller,
-                      onChanged: (_) => onChanged(),
+                      onChanged: onQueryChanged,
                       maxLines: 4,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'Add shipping address',
                         border: InputBorder.none,
                         isDense: true,
+                        suffixIcon: searching
+                            ? const Padding(
+                                padding: EdgeInsets.all(12.0),
+                                child: SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            : null,
                       ),
                     ),
                   ),
                 ],
               ),
+              if (results.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFFE9D5FF)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    itemCount: results.length,
+                    itemBuilder: (context, index) {
+                      final place = results[index];
+                      final title = place is Map
+                          ? place['display_name']?.toString() ?? ''
+                          : place.toString();
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(
+                          Icons.place_outlined,
+                          color: Color(0xFF6D28D9),
+                        ),
+                        title: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        onTap: () => onPickSuggestion(place),
+                      );
+                    },
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: onUseGps,
-                  icon: const Icon(Icons.my_location_rounded, size: 18),
-                  label: const Text('Use current location (GPS)'),
+                  onPressed: onViewOnMap,
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('View on map'),
                   style: TextButton.styleFrom(foregroundColor: AppColors.primary),
                 ),
               ),
@@ -972,66 +1090,6 @@ class _MoneyRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _PaymentMethodsCard extends StatelessWidget {
-  const _PaymentMethodsCard({
-    required this.value,
-    required this.onChanged,
-  });
-
-  final _UiPaymentMethod value;
-  final ValueChanged<_UiPaymentMethod> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget row(String title, _UiPaymentMethod mode) {
-      final selected = value == mode;
-      return InkWell(
-        onTap: () => onChanged(mode),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1B1340),
-                  ),
-                ),
-              ),
-              Icon(
-                selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selected ? AppColors.primary : const Color(0xFFC8C6D6),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return _CardShell(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Payment Methods',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF1B1340),
-            ),
-          ),
-          const Divider(height: 22),
-          row('Credit / Debit Card', _UiPaymentMethod.card),
-          row('GrabPay', _UiPaymentMethod.grabPay),
-          row('Google Pay', _UiPaymentMethod.googlePay),
-        ],
-      ),
     );
   }
 }

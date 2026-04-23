@@ -20,7 +20,7 @@ import '../../../services/item_service.dart';
 import '../../../services/notification_service.dart';
 import '../../../services/network_service.dart';
 import '../auth/login_screen.dart';
-import '../checkout/checkout_screen.dart';
+import '../transaction/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../../services/supabase_service.dart';
