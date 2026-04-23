@@ -39,8 +39,15 @@ import '../../../repositories/local/local_messages_repository.dart';
 
 class InboxScreen extends StatefulWidget {
   final ValueChanged<bool>? onConversationViewChanged;
+  final int? focusConversationId;
+  final ValueChanged<int>? onFocusConversationHandled;
 
-  const InboxScreen({super.key, this.onConversationViewChanged});
+  const InboxScreen({
+    super.key,
+    this.onConversationViewChanged,
+    this.focusConversationId,
+    this.onFocusConversationHandled,
+  });
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
@@ -85,6 +92,7 @@ class _InboxScreenState extends State<InboxScreen> {
   int? _voiceDraftDurationSeconds;
   bool _hasAttemptedAiConversationInit = false;
   int _unreadNotificationCount = 0;
+  int? _lastAppliedFocusConversationId;
 
   String? get _currentUserId => _inboxViewModel.currentUserId;
 
@@ -100,6 +108,14 @@ class _InboxScreenState extends State<InboxScreen> {
     _loadInbox();
     _ensureInboxRealtimeSubscription();
     _startInboxRefreshFallback();
+  }
+
+  @override
+  void didUpdateWidget(covariant InboxScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusConversationId != widget.focusConversationId) {
+      _tryFocusConversationFromExternalRequest();
+    }
   }
 
   @override
@@ -270,6 +286,7 @@ class _InboxScreenState extends State<InboxScreen> {
         });
       }
       unawaited(_initializeAiConversationIfNeeded());
+      _tryFocusConversationFromExternalRequest();
       _subscribeToSelectedConversationMessages();
     } catch (e) {
       if (mounted) {
@@ -581,6 +598,25 @@ class _InboxScreenState extends State<InboxScreen> {
       return;
     }
     _onConversationSelected(idx, openMobile: openMobile);
+  }
+
+  void _tryFocusConversationFromExternalRequest() {
+    final requestedId = widget.focusConversationId;
+    if (requestedId == null || requestedId <= 0) {
+      return;
+    }
+    if (_lastAppliedFocusConversationId == requestedId) {
+      return;
+    }
+
+    final idx = _conversations.indexWhere((c) => c.id == requestedId);
+    if (idx == -1) {
+      return;
+    }
+
+    _lastAppliedFocusConversationId = requestedId;
+    _onConversationSelected(idx, openMobile: true);
+    widget.onFocusConversationHandled?.call(requestedId);
   }
 
   Future<void> _openSearchDialog({int? focusConversationId}) async {

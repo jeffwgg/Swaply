@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -24,15 +25,27 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   final StreamController<List<SystemNotificationItem>> _streamController =
       StreamController<List<SystemNotificationItem>>.broadcast();
+    final StreamController<Map<String, dynamic>> _tapStreamController =
+      StreamController<Map<String, dynamic>>.broadcast();
   StreamSubscription<AuthState>? _authSubscription;
   RealtimeChannel? _notificationsChannel;
   String? _subscribedRecipientId;
   bool _isChatTabActive = false;
+    Map<String, dynamic>? _pendingTapPayload;
 
   bool _isInitialized = false;
 
   Stream<List<SystemNotificationItem>> get notificationsStream =>
       _streamController.stream;
+
+  Stream<Map<String, dynamic>> get notificationTapStream =>
+      _tapStreamController.stream;
+
+  Map<String, dynamic>? takePendingNotificationTap() {
+    final payload = _pendingTapPayload;
+    _pendingTapPayload = null;
+    return payload;
+  }
 
   void setChatTabActive(bool isActive) {
     _isChatTabActive = isActive;
@@ -50,7 +63,15 @@ class NotificationService {
 
     await _plugin.initialize(
       const InitializationSettings(android: androidSettings, iOS: iosSettings),
+      onDidReceiveNotificationResponse: (response) {
+        _handleNotificationTapPayload(response.payload);
+      },
     );
+
+    final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      _handleNotificationTapPayload(launchDetails?.notificationResponse?.payload);
+    }
 
     final androidPlugin = _plugin
         .resolvePlatformSpecificImplementation<
@@ -139,6 +160,11 @@ class NotificationService {
       await _showLocalNotification(
         title: title.isEmpty ? 'Swaply' : title,
         body: body,
+        payload: _buildNotificationPayload(
+          notificationId: row['id']?.toString(),
+          type: type,
+          data: _normalizeMap(row['data']),
+        ),
       );
     }
 
@@ -320,6 +346,7 @@ class NotificationService {
   Future<void> _showLocalNotification({
     required String title,
     required String body,
+    String? payload,
   }) async {
     final notificationId = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     await _plugin.show(
@@ -337,7 +364,52 @@ class NotificationService {
         ),
         iOS: DarwinNotificationDetails(),
       ),
+      payload: payload,
     );
+  }
+
+  void _handleNotificationTapPayload(String? rawPayload) {
+    if (rawPayload == null || rawPayload.trim().isEmpty) {
+      return;
+    }
+
+    final decoded = _decodePayload(rawPayload);
+    if (decoded == null) {
+      return;
+    }
+
+    if (_tapStreamController.hasListener) {
+      _tapStreamController.add(decoded);
+      return;
+    }
+
+    _pendingTapPayload = decoded;
+  }
+
+  String _buildNotificationPayload({
+    required String type,
+    required Map<String, dynamic> data,
+    String? notificationId,
+  }) {
+    return jsonEncode({
+      if (notificationId != null && notificationId.isNotEmpty)
+        'notification_id': notificationId,
+      'type': type,
+      'data': data,
+    });
+  }
+
+  Map<String, dynamic>? _decodePayload(String rawPayload) {
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return decoded.map((key, value) => MapEntry(key.toString(), value));
+      }
+    } catch (_) {}
+    return null;
   }
 
   String _requireCurrentUserId() {
