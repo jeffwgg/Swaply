@@ -344,14 +344,13 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
     return Column(
       children: [
         Expanded(child: _buildCardStack()),
-        const SizedBox(height: 4),
         const Text(
           '← swipe to skip  ·  swipe to like →',
           style: TextStyle(color: Colors.grey, fontSize: 12),
         ),
         const SizedBox(height: 6),
         _buildActionButtons(),
-        const SizedBox(height: 8),
+        const SizedBox(height: 40),
       ],
     );
   }
@@ -371,9 +370,12 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
       cards.add(_buildDraggableCard(_currentItem!));
     }
 
-    return Stack(
-      alignment: Alignment.center,
-      children: cards,
+    return Padding(
+      padding: const EdgeInsets.only(top: 30.0), // 👈 通过修改这里的数值，精确控制卡片和 Banner 的距离
+      child: Stack(
+        alignment: Alignment.topCenter, // 👈 让卡片靠上对齐，而不是垂直居中
+        children: cards,
+      ),
     );
   }
 
