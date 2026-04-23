@@ -4697,7 +4697,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       },
                 style: ElevatedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  backgroundColor: const Color(0xFF7A54FF),
+                  backgroundColor: const Color(0xFF10B981), // Green
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   elevation: 0,
                   shape: RoundedRectangleBorder(
