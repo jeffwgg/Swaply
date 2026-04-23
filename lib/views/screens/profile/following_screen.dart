@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/app_user.dart';
 import 'package:swaply/services/follow_service.dart';
 import 'package:swaply/services/supabase_service.dart';
@@ -101,9 +102,7 @@ class _FollowingScreenState extends State<FollowingScreen> {
     } catch (e) {
       print('Error toggling follow: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.toString()}')),
-        );
+        AppSnackBars.error(context, 'Error: ${e.toString()}');
       }
     } finally {
       setState(() => _loadingIds.remove(user.id));

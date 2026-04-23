@@ -29,7 +29,32 @@ class ChatMessage {
   bool get isDeleted => deletedAt != null;
   bool get isEdited => editedAt != null;
 
+  /// Maps a Supabase / SQLite row to a [ChatMessage].
+  ///
+  /// Supports two DB layouts:
+  ///   • **Current schema** – `is_read boolean` (your live DB)
+  ///   • **Future schema** – `read_at timestamptz` (post-migration)
+  ///
+  /// If both are present, `read_at` takes priority.
   factory ChatMessage.fromMap(Map<String, dynamic> map) {
+    // Try the newer `read_at` timestamp column first, then fall back to
+    // the legacy `is_read` boolean that your current DB uses.
+    DateTime? readAt = parseNullableDateTime(
+      map['read_at'],
+      fieldName: 'messages.read_at',
+    );
+    if (readAt == null) {
+      final isReadRaw = map['is_read'];
+      if (isReadRaw == true || isReadRaw == 1) {
+        // Use the message creation time as a stand-in "read" timestamp so
+        // the rest of the app (which checks `readAt != null`) works correctly.
+        readAt = parseDateTime(
+          map['created_at'],
+          fieldName: 'messages.created_at',
+        );
+      }
+    }
+
     return ChatMessage(
       id: parseInt(map['id'], fieldName: 'messages.id'),
       chatId: parseInt(map['chat_id'], fieldName: 'messages.chat_id'),
@@ -39,10 +64,7 @@ class ChatMessage {
         map['cached_media_path'],
         fieldName: 'messages.cached_media_path',
       ),
-      readAt: parseNullableDateTime(
-        map['read_at'],
-        fieldName: 'messages.read_at',
-      ),
+      readAt: readAt,
       editedAt: parseNullableDateTime(
         map['edited_at'],
         fieldName: 'messages.edited_at',

@@ -2,6 +2,7 @@ import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/app_user.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/models/payment.dart';
@@ -260,15 +261,11 @@ class _TransactionTabState extends State<TransactionTab> {
                   transactionStatus: 'completed',
                 );
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Marked as received.')),
-                );
+                AppSnackBars.success(context, 'Marked as received.');
                 _reload();
               } catch (e) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to mark received: $e')),
-                );
+                AppSnackBars.error(context, 'Failed to mark received: $e');
               }
             }
 
@@ -302,17 +299,14 @@ class _TransactionTabState extends State<TransactionTab> {
                   paymentStatus: 'refunded',
                 );
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cancelled. Refund will be issued in 3 working days.'),
-                  ),
+                AppSnackBars.info(
+                  context,
+                  'Cancelled. Refund will be issued in 3 working days.',
                 );
                 _reload();
               } catch (e) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to cancel: $e')),
-                );
+                AppSnackBars.error(context, 'Failed to cancel: $e');
               }
             }
 

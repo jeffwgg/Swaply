@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
@@ -29,23 +30,12 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    AppSnackBars.error(context, message);
   }
 
   void _showSuccess(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    AppSnackBars.success(context, message);
   }
 
   bool _validateInputs() {

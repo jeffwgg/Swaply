@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import 'edit_profile_screen.dart';
 import 'change_password_screen.dart';
 import 'help_center_screen.dart';
@@ -130,12 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   // Show error message
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text("❌ Logout failed: $e"),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
+                    AppSnackBars.error(context, '❌ Logout failed: $e');
                   }
                 }
               }

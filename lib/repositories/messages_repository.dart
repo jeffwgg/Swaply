@@ -82,10 +82,22 @@ class MessagesRepository {
   }
 
   Future<void> markAsRead({required int chatId, required String viewerId}) async {
-    await SupabaseService.client.rpc(
-      'mark_chat_as_read_as_user',
-      params: {'p_chat_id': chatId, 'p_actor_id': viewerId},
-    );
+    try {
+      // Try the RPC first (exists when migrations have been applied).
+      await SupabaseService.client.rpc(
+        'mark_chat_as_read_as_user',
+        params: {'p_chat_id': chatId, 'p_actor_id': viewerId},
+      );
+    } catch (_) {
+      // Fallback: direct update for the legacy `is_read boolean` schema
+      // (initial schema before the read_at migration was applied).
+      await SupabaseService.client
+          .from(_table)
+          .update({'is_read': true})
+          .eq('chat_id', chatId)
+          .neq('sender_id', viewerId)
+          .eq('is_read', false);
+    }
   }
 
   Future<void> editMessage({
