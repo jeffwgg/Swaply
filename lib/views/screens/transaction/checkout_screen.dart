@@ -373,9 +373,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }
       }
 
-      // Update item status to pending after successful checkout + DB inserts.
+      // Update item status to reserved after successful checkout + DB inserts.
       try {
-        await _items.updateStatus('pending', widget.primaryItem.id);
+        await _items.updateStatus('reserved', widget.primaryItem.id);
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
