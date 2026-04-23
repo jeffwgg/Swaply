@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,8 @@ import 'package:swaply/repositories/items_repository.dart';
 import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/repositories/local/local_profile_items_repository.dart';
+import 'package:swaply/services/network_service.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/seller_profile_screen.dart';
 import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
@@ -473,11 +476,12 @@ class _TxnThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 72.0;
     if (url == null || url!.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     if (url!.startsWith('http')) {
@@ -486,24 +490,26 @@ class _TxnThumb extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (_, __, ___) => Container(
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
+    return Image.network(
       url!,
       width: size,
       height: size,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/sample.jpeg',
+      errorBuilder: (_, __, ___) => Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }
@@ -519,12 +525,41 @@ class FavouriteTab extends StatefulWidget {
 }
 
 class  _FavouriteTabState extends State<FavouriteTab>{
-  bool _loading = true;
+  static const _cacheKey = 'favourite';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
+
+  @override
+  void initState() {
+    super.initState();
+    _futureItems = _loadItemsWithCache();
+  }
+
+  Future<List<ItemListing>> _loadItemsWithCache() async {
+    final online = await NetworkService.hasConnection();
+    if (online) {
+      final remoteItems = await ItemsRepository().getFavouriteItems(widget.user.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.user.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      return remoteItems;
+    }
+    return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getFavouriteItems(widget.user.id),
+      future: _futureItems,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -548,6 +583,11 @@ class  _FavouriteTabState extends State<FavouriteTab>{
             final item = items[index];
             return GestureDetector(
               onTap: () async {
+                final online = await NetworkService.hasConnection();
+                if (!online) {
+                  _showNetworkError();
+                  return;
+                }
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -639,10 +679,41 @@ class ItemTab extends StatefulWidget {
 }
 
 class _ItemTabState extends State<ItemTab> {
+  static const _cacheKey = 'your_item';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
+
+  @override
+  void initState() {
+    super.initState();
+    _futureItems = _loadItemsWithCache();
+  }
+
+  Future<List<ItemListing>> _loadItemsWithCache() async {
+    final online = await NetworkService.hasConnection();
+    if (online) {
+      final remoteItems = await ItemsRepository().getUserItems(widget.profileUser.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.profileUser.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      return remoteItems;
+    }
+    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getUserItems(widget.profileUser.id),
+      future: _futureItems,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -663,6 +734,11 @@ class _ItemTabState extends State<ItemTab> {
             final item = items[index];
             return GestureDetector(
               onTap: () async {
+                final online = await NetworkService.hasConnection();
+                if (!online) {
+                  _showNetworkError();
+                  return;
+                }
                 ItemListing? repliedItem;
                 if (item.repliedTo != null) {
                   repliedItem = await ItemsRepository().getById(
@@ -680,6 +756,7 @@ class _ItemTabState extends State<ItemTab> {
                 );
                 if (result == true) {
                   setState(() {});
+                  _futureItems = _loadItemsWithCache();
                 }
               },
               child: Container(
@@ -861,7 +938,7 @@ Widget _buildImage(String? url) {
   if (url == null || url.isEmpty) {
     return Container(
       color: Colors.grey[200],
-      child: const Icon(Icons.image, color: Colors.grey),
+      child: const Icon(Icons.image_outlined, color: Colors.grey),
     );
   }
   if (url.startsWith('http')) {
@@ -871,8 +948,15 @@ Widget _buildImage(String? url) {
       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
     );
   }
-  return Image.asset(
-    url,
+  if (url.startsWith('assets/')) {
+    return Image.asset(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+    );
+  }
+  return Image.file(
+    File(url),
     fit: BoxFit.cover,
     errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
   );

@@ -173,5 +173,22 @@ class LocalDbService {
       CREATE INDEX IF NOT EXISTS idx_search_history_updated_at
       ON search_history(updated_at DESC)
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS profile_items_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        tab_key TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, tab_key, item_id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_profile_items_cache_user_tab_updated
+      ON profile_items_cache(user_id, tab_key, updated_at DESC)
+    ''');
   }
 }

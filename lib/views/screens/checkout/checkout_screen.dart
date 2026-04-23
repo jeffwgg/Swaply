@@ -733,11 +733,12 @@ class _ProductThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (item.imageUrls.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: _size,
         height: _size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     final url = item.imageUrls.first;
@@ -747,24 +748,41 @@ class _ProductThumbnail extends StatelessWidget {
         width: _size,
         height: _size,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, _) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (context, error, _) => Container(
           width: _size,
           height: _size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, _) => Container(
+          width: _size,
+          height: _size,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      );
+    }
+    return Image.network(
       url,
       width: _size,
       height: _size,
       fit: BoxFit.cover,
-      errorBuilder: (context, error, _) => Image.asset(
-        'assets/sample.jpeg',
+      errorBuilder: (context, error, _) => Container(
         width: _size,
         height: _size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }

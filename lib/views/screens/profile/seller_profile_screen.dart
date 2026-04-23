@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
@@ -25,6 +26,65 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
       UsersRepository().getById(widget.sellerId);
   late final Future<List<ItemListing>> _itemsFuture =
       ItemsRepository().getUserItems(widget.sellerId);
+
+  ImageProvider? _avatarProvider(String? path) {
+    if (path == null || path.trim().isEmpty) return null;
+    final value = path.trim();
+    if (value.startsWith('http')) return NetworkImage(value);
+    if (value.startsWith('assets/')) return AssetImage(value);
+    return FileImage(File(value));
+  }
+
+  Widget _buildListingImage(String? image) {
+    if (image == null || image.isEmpty) {
+      return Container(
+        height: 130,
+        width: double.infinity,
+        color: Colors.grey[200],
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
+      );
+    }
+    if (image.startsWith('http')) {
+      return Image.network(
+        image,
+        height: 130,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          height: 130,
+          width: double.infinity,
+          color: Colors.grey[200],
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      );
+    }
+    if (image.startsWith('assets/')) {
+      return Image.asset(
+        image,
+        height: 130,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          height: 130,
+          width: double.infinity,
+          color: Colors.grey[200],
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      );
+    }
+    return Image.file(
+      File(image),
+      height: 130,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        height: 130,
+        width: double.infinity,
+        color: Colors.grey[200],
+        child: const Icon(Icons.broken_image, color: Colors.grey),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,11 +116,10 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                   children: [
                     CircleAvatar(
                       radius: 22,
-                      backgroundImage: (seller?.profileImage != null &&
-                              seller!.profileImage!.isNotEmpty)
-                          ? NetworkImage(seller.profileImage!)
-                          : const AssetImage('assets/sample.jpeg')
-                              as ImageProvider,
+                      backgroundImage: _avatarProvider(seller?.profileImage),
+                      child: _avatarProvider(seller?.profileImage) == null
+                          ? const Icon(Icons.person, size: 20)
+                          : null,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -141,40 +200,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                                   borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(16),
                                   ),
-                                  child: image == null
-                                      ? Image.asset(
-                                          'assets/sample.jpeg',
-                                          height: 130,
-                                          width: double.infinity,
-                                          fit: BoxFit.cover,
-                                        )
-                                      : (image.startsWith('http')
-                                          ? Image.network(
-                                              image,
-                                              height: 130,
-                                              width: double.infinity,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) =>
-                                                  Image.asset(
-                                                'assets/sample.jpeg',
-                                                height: 130,
-                                                width: double.infinity,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            )
-                                          : Image.asset(
-                                              image,
-                                              height: 130,
-                                              width: double.infinity,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) =>
-                                                  Image.asset(
-                                                'assets/sample.jpeg',
-                                                height: 130,
-                                                width: double.infinity,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            )),
+                                  child: _buildListingImage(image),
                                 ),
                                 Padding(
                                   padding: const EdgeInsets.all(10),
