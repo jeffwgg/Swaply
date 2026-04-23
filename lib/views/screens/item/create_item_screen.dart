@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:permission_handler/permission_handler.dart' as handler;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/item_draft.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/items_repository.dart';
@@ -479,9 +480,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       _mapController.move(pos, 15);
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Location error: $e")));
+      if (mounted) {
+        AppSnackBars.error(context, "Location error: $e");
+      }
     }
   }
 
@@ -602,11 +603,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     final category = _selectedCategory;
 
     if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in name, description and category.'),
-        ),
-      );
+      AppSnackBars.error(context, 'Please fill in name, description and category.');
       return;
     }
 
@@ -739,12 +736,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              widget.item != null ? 'Item updated!' : 'Item created!',
-            ),
-          ),
+        AppSnackBars.success(
+          context,
+          widget.item != null ? 'Item updated!' : 'Item created!',
         );
         _skipDraftAutosave = true;
         await ItemService().clearDraft();
@@ -763,16 +757,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         await _savePendingSubmitDraft();
       }
       if (mounted) {
-        ScaffoldMessenger.of(
+        AppSnackBars.error(
           context,
-        ).showSnackBar(
-          SnackBar(
-            content: Text(
-              widget.item == null
-                  ? 'Submit failed. Saved as pending draft for retry. Error: $e'
-                  : 'Error: $e',
-            ),
-          ),
+          widget.item == null
+              ? 'Submit failed. Saved as pending draft for retry. Error: $e'
+              : 'Error: $e',
         );
       }
     } finally {

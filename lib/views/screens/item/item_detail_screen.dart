@@ -7,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
@@ -83,12 +84,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   void _showFollowError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    AppSnackBars.error(context, message);
   }
 
   Future<void> _loadFollowState() async {
@@ -179,12 +175,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       return;
     }
     if (widget.item.price == null) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This listing has no purchase price.')),
-      );
+      if (!mounted) return;
+      AppSnackBars.warning(context, 'This listing has no purchase price.');
       return;
     }
 
@@ -192,12 +184,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     final sellerName = _owner!.username.trim().isEmpty ? 'Seller' : _owner!.username;
     final sellerId = widget.item.ownerId;
     if (sellerId == null || sellerId.isEmpty) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Seller account id not found.')),
-      );
+      if (!mounted) return;
+      AppSnackBars.error(context, 'Seller account id not found.');
       return;
     }
 
@@ -391,16 +379,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       try {
         await ItemsRepository().dropListing(id);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Offer dropped successfully')),
-          );
+          AppSnackBars.success(context, 'Offer dropped successfully');
           _fetchReplies();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Error dropping offer: $e')));
+          AppSnackBars.error(context, 'Error dropping offer: $e');
         }
         log("Error dropping offer: $e");
       }
@@ -446,8 +430,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         );
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Offer accepted but creating transaction failed: $e')),
+          AppSnackBars.error(
+            context,
+            'Offer accepted but creating transaction failed: $e',
           );
         }
       }
@@ -500,12 +485,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         );
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Offer accepted, but follow-up notification/chat failed: $e',
-              ),
-            ),
+          AppSnackBars.error(
+            context,
+            'Offer accepted, but follow-up notification/chat failed: $e',
           );
         }
       }
@@ -545,12 +527,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         );
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Offer rejected, but notification failed to send: $e',
-              ),
-            ),
+          AppSnackBars.error(
+            context,
+            'Offer rejected, but notification failed to send: $e',
           );
         }
       }
@@ -571,14 +550,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
 
     if (currentUser.id == widget.item.ownerId) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You cannot start chat on your own item.'),
-        ),
-      );
+      if (!mounted) return;
+      AppSnackBars.info(context, 'You cannot start chat on your own item.');
       return;
     }
 
@@ -783,12 +756,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
+
+      AppSnackBars.info(
+        context,
             'Message sent to ${_owner!.username.isEmpty ? 'owner' : _owner!.username}. Open Inbox to continue chatting.',
-          ),
-        ),
       );
     } catch (e) {
       if (!mounted) {
@@ -806,9 +777,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         message =
             'Item information is not ready yet. Please refresh and try again.';
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      AppSnackBars.error(context, message);
     }
   }
 

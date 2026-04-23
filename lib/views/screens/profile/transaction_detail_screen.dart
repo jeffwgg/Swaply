@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
 import '../../../models/payment.dart';
@@ -135,21 +136,16 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
 
       widget.onChanged();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            (primaryDone && tradedDone)
-                ? 'Transaction completed.'
-                : 'Marked as received. Waiting for the other party.',
-          ),
-        ),
+      AppSnackBars.success(
+        context,
+        (primaryDone && tradedDone)
+            ? 'Transaction completed.'
+            : 'Marked as received. Waiting for the other party.',
       );
       _reload();
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to mark received: $e')),
-      );
+      AppSnackBars.error(context, 'Failed to mark received: $e');
     }
   }
 
@@ -196,17 +192,11 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
 
       widget.onChanged();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cancelled. Refund will be issued in 3 working days.'),
-        ),
-      );
+      AppSnackBars.info(context, 'Cancelled. Refund will be issued in 3 working days.');
       Navigator.pop(context);
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to cancel: $e')),
-      );
+      AppSnackBars.error(context, 'Failed to cancel: $e');
     }
   }
 

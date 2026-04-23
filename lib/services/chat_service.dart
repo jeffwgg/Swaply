@@ -397,29 +397,10 @@ class ChatService {
     required String senderId,
     required String content,
   }) async {
-    try {
-      final chat = await _chatsRepository.getById(chatId);
-      if (chat == null) {
-        return;
-      }
-
-      final recipientId = chat.otherUserId(senderId);
-      if (recipientId.isEmpty || recipientId == senderId) {
-        return;
-      }
-
-      await NotificationService.instance.sendNotificationToUser(
-        recipientId: recipientId,
-        title: 'New message',
-        body: _buildNotificationPreview(content),
-        type: 'chat',
-        data: {
-          'action': 'open_chat',
-          'chat_id': chatId,
-          'item_id': chat.itemId,
-        },
-      );
-    } catch (_) {}
+    // Local notifications are now handled purely by Supabase realtime
+    // listening to the 'messages' table directly, avoiding inserts
+    // into the system 'notifications' table.
+    return;
   }
 
   String _buildNotificationPreview(String content) {

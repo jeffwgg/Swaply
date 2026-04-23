@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../models/system_notification_item.dart';
 import '../../../repositories/items_repository.dart';
@@ -112,12 +113,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       );
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open the related item.')),
-      );
+      if (!mounted) return;
+      AppSnackBars.error(context, 'Unable to open the related item.');
     }
   }
 
@@ -293,12 +290,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               type: 'general',
             );
           } catch (e) {
-            if (!mounted) {
-              return;
-            }
-            messenger.showSnackBar(
-              SnackBar(content: Text('Unable to send notification: $e')),
-            );
+            if (!mounted) return;
+            AppSnackBars.error(context, 'Unable to send notification: $e');
           }
         },
         icon: const Icon(

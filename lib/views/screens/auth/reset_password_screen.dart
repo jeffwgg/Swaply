@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
@@ -25,12 +26,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
   void _showMessage(String message, {Color color = Colors.red}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-      ),
-    );
+    if (color == Colors.green) {
+      AppSnackBars.success(context, message);
+    } else {
+      AppSnackBars.error(context, message);
+    }
   }
 
   bool _validate() {

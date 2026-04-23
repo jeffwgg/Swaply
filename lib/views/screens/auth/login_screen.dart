@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import 'register_step1_screen.dart';
 import '/services/supabase_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -175,9 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    AppSnackBars.error(context, message);
   }
 
   void _showForgotPasswordDialog() {
@@ -237,13 +236,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   );
                   if (mounted) {
                     Navigator.pop(dialogContext);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Password reset email sent! Check your inbox.",
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
+                    AppSnackBars.success(
+                      context,
+                      'Password reset email sent! Check your inbox.',
                     );
                   }
                 } catch (e) {
@@ -299,12 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // ✅ 登录成功
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Login successful!"),
-              backgroundColor: Colors.green,
-            ),
-          );
+          AppSnackBars.success(context, 'Login successful!');
           Navigator.pop(context);
         }
       }

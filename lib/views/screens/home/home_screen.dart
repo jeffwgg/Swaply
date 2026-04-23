@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../models/item_listing.dart';
 import '../../../repositories/items_repository.dart';
@@ -167,23 +168,7 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
     try {
       await FavouriteRepository().toggleFavourite(currentUser.id, item.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.favorite, color: Colors.white, size: 18),
-                SizedBox(width: 8),
-                Text('Added to favourites!'),
-              ],
-            ),
-            backgroundColor: const Color(0xFF22C55E),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        AppSnackBars.favourite(context, added: true);
       }
     } catch (e) {
       print('Error saving favourite: $e');
@@ -359,13 +344,14 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
     return Column(
       children: [
         Expanded(child: _buildCardStack()),
-        _buildActionButtons(),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         const Text(
           '← swipe to skip  ·  swipe to like →',
           style: TextStyle(color: Colors.grey, fontSize: 12),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 6),
+        _buildActionButtons(),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -479,7 +465,7 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
 
   Widget _buildActionButtons() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [

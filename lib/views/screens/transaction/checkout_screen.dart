@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/checkout_flow_kind.dart';
 import '../../../models/item_listing.dart';
 import '../../../models/meetup_address_option.dart';
@@ -204,20 +205,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Future<void> _onCheckoutPressed() async {
     if (!_agreedToTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please agree to the transaction instructions.')),
-      );
+      AppSnackBars.warning(context, 'Please agree to the transaction instructions.');
       return;
     }
     if (!_locationReady()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _fulfillment == _Fulfillment.meetup
-                ? 'Select a meet-up address from the seller.'
-                : 'Enter your shipping address.',
-          ),
-        ),
+      AppSnackBars.warning(
+        context,
+        _fulfillment == _Fulfillment.meetup
+            ? 'Select a meet-up address from the seller.'
+            : 'Enter your shipping address.',
       );
       return;
     }
@@ -241,17 +237,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Confirm trade failed: $e')),
-            );
+            AppSnackBars.error(context, 'Confirm trade failed: $e');
           }
           return;
         }
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trade confirmed.')),
-        );
+        AppSnackBars.success(context, 'Trade confirmed.');
         Navigator.of(context).pop(true);
         return;
       }
@@ -268,9 +260,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }
         if (!paymentResult.success) {
           if (paymentResult.message != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(paymentResult.message!)),
-            );
+            AppSnackBars.error(context, paymentResult.message!);
           }
           return;
         }
@@ -286,9 +276,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           : null;
       if (widget.flowKind == CheckoutFlowKind.purchase && itemPrice == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('This listing has no price.')),
-          );
+          AppSnackBars.error(context, 'This listing has no price.');
         }
         return;
       }
@@ -321,9 +309,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         );
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Saving transaction failed: $e')),
-          );
+          AppSnackBars.error(context, 'Saving transaction failed: $e');
         }
         return;
       }
@@ -333,9 +319,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         final intentId = paymentResult?.paymentIntentId;
         if (intentId == null || intentId.isEmpty) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Payment succeeded but no intent id found.')),
-            );
+            AppSnackBars.error(context, 'Payment succeeded but no intent id found.');
           }
           return;
         }
@@ -365,9 +349,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Payment OK, but saving payment failed: $e')),
-            );
+            AppSnackBars.error(context, 'Payment OK, but saving payment failed: $e');
           }
           return;
         }
@@ -378,9 +360,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         await _items.updateStatus('pending', widget.primaryItem.id);
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Order saved, but updating item status failed: $e')),
-          );
+          AppSnackBars.error(context, 'Order saved, but updating item status failed: $e');
         }
         return;
       }
@@ -388,9 +368,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order confirmed.')),
-      );
+      AppSnackBars.success(context, 'Order confirmed.');
       Navigator.of(context).pop(true);
     } finally {
       if (mounted) {
