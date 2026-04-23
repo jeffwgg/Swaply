@@ -53,7 +53,7 @@ class InboxScreen extends StatefulWidget {
   State<InboxScreen> createState() => _InboxScreenState();
 }
 
-class _InboxScreenState extends State<InboxScreen> {
+class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   static const _mediaPrefix = '[[media]]';
   static const _ragItemsPrefix = '[[rag_items_json]]';
   static const _chatMediaBucket = 'chat-media';
@@ -98,6 +98,7 @@ class _InboxScreenState extends State<InboxScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadConversationPrefs();
     if (SupabaseService.isConfigured) {
       _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
@@ -118,6 +119,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _inboxSubscriptionRetryTimer?.cancel();
     _authSubscription?.cancel();
     _messagesSubscription?.cancel();
@@ -140,6 +142,41 @@ class _InboxScreenState extends State<InboxScreen> {
       isConversationOpen: false,
     );
     super.deactivate();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_recoverRealtimeAfterResume());
+    }
+  }
+
+  Future<void> _recoverRealtimeAfterResume() async {
+    if (!mounted) {
+      return;
+    }
+
+    try {
+      if (_inboxSubscription != null) {
+        await _inboxViewModel.unsubscribeInboxChanges(_inboxSubscription);
+        _inboxSubscription = null;
+      }
+    } catch (_) {
+      _inboxSubscription = null;
+    }
+
+    _ensureInboxRealtimeSubscription();
+
+    // Rebind selected chat stream to avoid stale realtime listeners after
+    // app background/foreground transitions.
+    _messagesSubscription?.cancel();
+    _messagesSubscription = null;
+    _aiMessagesSubscription?.cancel();
+    _aiMessagesSubscription = null;
+    _activeChatId = null;
+    _subscribeToSelectedConversationMessages();
+
+    await _loadInbox(force: true);
   }
 
   void _handleUserChanged() {
@@ -2844,14 +2881,10 @@ class _InboxPanel extends StatelessWidget {
                           child: Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
                             decoration: BoxDecoration(
-                              color: index == selectedIndex
-                                  ? const Color(0xFFF7F3FF)
-                                  : Colors.white,
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: index == selectedIndex
-                                    ? const Color(0xFFD4C4FF)
-                                    : const Color(0xFFF0EFFF),
+                                color: const Color(0xFFF0EFFF),
                                 width: 1.5,
                               ),
                               boxShadow: [
