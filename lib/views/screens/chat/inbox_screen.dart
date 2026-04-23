@@ -1020,6 +1020,17 @@ class _InboxScreenState extends State<InboxScreen> {
     _aiMessagesSubscription = null;
     _activeChatId = selected.id;
 
+    if (selected.id > 0) {
+      bool isWide = false;
+      try {
+        isWide = MediaQuery.sizeOf(context).width >= 950;
+      } catch (_) {}
+      
+      if (isWide || _showMobileChat) {
+        _inboxViewModel.markChatAsRead(selected.id).catchError((_) {});
+      }
+    }
+
     if (selected.id == -1) {
       _aiMessagesSubscription = _inboxViewModel.watchAiMessages().listen(
         (aiMessages) {
@@ -1048,7 +1059,14 @@ class _InboxScreenState extends State<InboxScreen> {
               final hasUnreadIncoming = messages.any(
                 (m) => m.senderId != _currentUserId && m.readAt == null,
               );
-              if (hasUnreadIncoming) {
+              
+              bool isWide = false;
+              try {
+                isWide = MediaQuery.sizeOf(context).width >= 950;
+              } catch (_) {}
+              final isViewingChat = isWide || _showMobileChat;
+
+              if (hasUnreadIncoming && isViewingChat) {
                 _inboxViewModel.markChatAsRead(selected.id).catchError((_) {});
               }
 
@@ -2401,6 +2419,10 @@ class _InboxScreenState extends State<InboxScreen> {
 
     setState(() => _showMobileChat = isOpen);
     widget.onConversationViewChanged?.call(isOpen);
+    
+    if (isOpen && _activeChatId != null && _activeChatId! > 0) {
+      _inboxViewModel.markChatAsRead(_activeChatId!).catchError((_) {});
+    }
   }
 
   void _syncShellChrome(bool isWide) {
