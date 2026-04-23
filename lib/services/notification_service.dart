@@ -32,6 +32,8 @@ class NotificationService {
   String? _subscribedRecipientId;
   bool _isChatTabActive = false;
     Map<String, dynamic>? _pendingTapPayload;
+  Timer? _fallbackTimer;
+  DateTime? _latestNotificationTime;
 
   bool _isInitialized = false;
 
@@ -101,6 +103,14 @@ class NotificationService {
     });
 
     unawaited(_restartRealtimeSubscription());
+    _startFallbackTimer();
+  }
+
+  void _startFallbackTimer() {
+    _fallbackTimer?.cancel();
+    _fallbackTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      unawaited(_emitLatestAndCheckNew());
+    });
   }
 
   Future<void> _restartRealtimeSubscription() async {
@@ -135,6 +145,15 @@ class NotificationService {
       },
     );
 
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'messages',
+      callback: (payload) {
+        unawaited(_handleIncomingMessage(payload.newRecord));
+      },
+    );
+
     await channel.subscribe();
     _notificationsChannel = channel;
     await _emitLatest();
@@ -145,6 +164,39 @@ class NotificationService {
     _notificationsChannel = null;
     if (channel != null) {
       await SupabaseService.client.removeChannel(channel);
+    }
+  }
+
+  Future<void> _handleIncomingMessage(dynamic rawRow) async {
+    final row = _normalizeMap(rawRow);
+    final senderId = row['sender_id']?.toString().trim();
+    final content = row['content']?.toString().trim() ?? '';
+    final chatId = row['chat_id'];
+
+    if (senderId == null || senderId == _subscribedRecipientId) {
+      return;
+    }
+
+    final shouldSuppressLocal = _isChatTabActive;
+
+    if (!shouldSuppressLocal && content.isNotEmpty) {
+      String preview = content;
+      if (preview.length > 50) {
+        preview = '${preview.substring(0, 47)}...';
+      }
+
+      await _showLocalNotification(
+        title: 'New message',
+        body: preview,
+        payload: _buildNotificationPayload(
+          notificationId: null,
+          type: 'chat',
+          data: {
+            'action': 'open_chat',
+            'chat_id': chatId,
+          },
+        ),
+      );
     }
   }
 
@@ -337,8 +389,41 @@ class NotificationService {
   }
 
   Future<void> _emitLatest() async {
+    await _emitLatestAndCheckNew();
+  }
+
+  Future<void> _emitLatestAndCheckNew() async {
     try {
       final items = await getNotifications();
+      if (items.isNotEmpty) {
+        final currentMaxTime = items
+            .map((i) => i.createdAt)
+            .reduce((a, b) => a.isAfter(b) ? a : b);
+
+        if (_latestNotificationTime != null &&
+            currentMaxTime.isAfter(_latestNotificationTime!)) {
+          // We missed some via realtime! Find the new ones and show local notifications
+          for (final item in items) {
+            if (item.createdAt.isAfter(_latestNotificationTime!) &&
+                !item.isRead) {
+              final shouldSuppressLocal =
+                  item.type.toLowerCase() == 'chat' && _isChatTabActive;
+              if (!shouldSuppressLocal) {
+                await _showLocalNotification(
+                  title: item.title.isEmpty ? 'Swaply' : item.title,
+                  body: item.body,
+                  payload: _buildNotificationPayload(
+                    notificationId: item.id,
+                    type: item.type,
+                    data: item.data,
+                  ),
+                );
+              }
+            }
+          }
+        }
+        _latestNotificationTime = currentMaxTime;
+      }
       _streamController.add(items);
     } catch (_) {}
   }

@@ -9,6 +9,7 @@ import '/services/saved_items_service.dart';
 import '../auth/login_screen.dart';
 import 'settings_screen.dart';
 import '../../../models/app_user.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'followers_screen.dart';
@@ -185,19 +186,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     );
 
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Verification email resent! Check your inbox."),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Error: ${e.toString()}")),
-                      );
-                    }
+                    AppSnackBars.success(context, 'Verification email resent! Check your inbox.');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppSnackBars.error(context, 'Error: ${e.toString()}');
+                  }
                   }
                 },
                 child: Container(
@@ -608,13 +602,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (imageFile == null) return;
       if (imageFile.lengthSync() > 2 * 1024 * 1024) {
-        // 2MB limit
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Image must be less than 2MB'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBars.error(context, 'Image must be less than 2MB');
         return;
       }
       final user = SupabaseService.client.auth.currentUser;
@@ -622,12 +610,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (!isValidImage(imageFile)) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Only JPG, JPEG, PNG images are allowed'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          AppSnackBars.error(context, 'Only JPG, JPEG, PNG images are allowed');
         }
         return;
       }
@@ -635,31 +618,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
       print('IMAGE URL: $url');
       if (url != null && mounted) {
- 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile picture updated!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        AppSnackBars.success(context, 'Profile picture updated!');
         setState(() {});
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to upload profile picture'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBars.error(context, 'Failed to upload profile picture');
       }
     } catch (e) {
       print('Error uploading profile picture: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error uploading profile picture'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBars.error(context, 'Error uploading profile picture');
       }
     }
   }
@@ -676,32 +643,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() => _isFollowing = false);
         _refreshStats(); 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unfollowed!')),
-          );
+          AppSnackBars.info(context, 'Unfollowed!');
         }
       } else {
         await FollowService.followUser(currentUser.id, widget.viewingUserId!);
         setState(() => _isFollowing = true);
-         _refreshStats(); // ✅ 加这行
+         _refreshStats();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Following!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          AppSnackBars.success(context, 'Following!');
         }
       }
     } catch (e) {
       print('Error toggling follow: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error updating follow status'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBars.error(context, 'Error updating follow status');
       }
     } finally {
       if (mounted) {

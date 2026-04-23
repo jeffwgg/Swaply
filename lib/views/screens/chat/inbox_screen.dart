@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +35,7 @@ import '../../../views/screens/item/item_detail_screen.dart';
 import '../../../views/screens/profile/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 import '../../../repositories/local/local_messages_repository.dart';
+import '../../../core/utils/app_snack_bars.dart';
 
 class InboxScreen extends StatefulWidget {
   final ValueChanged<bool>? onConversationViewChanged;
@@ -222,6 +222,7 @@ class _InboxScreenState extends State<InboxScreen> {
     _isLoadingInboxData = true;
     try {
       final threads = await _inboxViewModel.loadInbox();
+      _refreshUnreadNotificationCount();
       _ensureInboxRealtimeSubscription();
       final currentUserId = _currentUserId;
       final mapped = threads.map((t) {
@@ -1002,15 +1003,15 @@ class _InboxScreenState extends State<InboxScreen> {
       return;
     }
 
+    if (_activeChatId == selected.id &&
+        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
+      return;
+    }
+
     if (selected.id == -1) {
       _loadPinnedMessagesForAiChat();
     } else {
       _loadPinnedMessagesForChat(selected.id);
-    }
-
-    if (_activeChatId == selected.id &&
-        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
-      return;
     }
 
     _messagesSubscription?.cancel();
@@ -4590,7 +4591,14 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Widget _buildItemActionButtons(_MessageMedia media) {
     final currentUserId = Supabase.instance.client.auth.currentUser?.id;
     final isBuyer = currentUserId != null && media.buyerId == currentUserId;
-    final canAct = isBuyer &&
+    final isSeller = currentUserId != null && media.sellerId == currentUserId;
+
+    final canCancel = (isBuyer || isSeller) &&
+        media.transactionId != null &&
+        media.itemId != null &&
+        media.offeredItemId != null;
+
+    final canProceed = isBuyer &&
         media.transactionId != null &&
         media.itemId != null &&
         media.offeredItemId != null &&
@@ -4633,7 +4641,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: !canAct
+                onPressed: !canCancel
                     ? null
                     : () async {
                         try {
@@ -4650,15 +4658,11 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             transactionStatus: 'cancelled',
                           );
                           if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Offer cancelled.')),
-                          );
+                          AppSnackBars.success(context, 'Offer cancelled.');
                           setState(() {});
                         } catch (e) {
                           if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Cancel failed: $e')),
-                          );
+                          AppSnackBars.error(context, 'Cancel failed: $e');
                         }
                       },
                 style: OutlinedButton.styleFrom(
@@ -4679,73 +4683,73 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 ),
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: !canAct
-                    ? null
-                    : () async {
-                        try {
-                          final item =
-                              await ItemsRepository().getById(media.itemId!);
-                          if (item == null) {
-                            throw StateError('Item not found.');
-                          }
-                          final offered = await ItemsRepository().getById(
-                            media.offeredItemId!,
-                          );
-                          if (offered == null) {
-                            throw StateError('Offered item not found.');
-                          }
-                          final seller = await UsersRepository().getById(
-                            media.sellerId!,
-                          );
-                          final meetups = MeetupAddressOption.fromSellerItem(item);
+            if (isBuyer) ...[
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: !canProceed
+                      ? null
+                      : () async {
+                          try {
+                            final item =
+                                await ItemsRepository().getById(media.itemId!);
+                            if (item == null) {
+                              throw StateError('Item not found.');
+                            }
+                            final offered = await ItemsRepository().getById(
+                              media.offeredItemId!,
+                            );
+                            if (offered == null) {
+                              throw StateError('Offered item not found.');
+                            }
+                            final seller = await UsersRepository().getById(
+                              media.sellerId!,
+                            );
+                            final meetups = MeetupAddressOption.fromSellerItem(item);
 
-                          if (!mounted) return;
-                          await Navigator.push<void>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CheckoutScreen(
-                                flowKind: CheckoutFlowKind.swap,
-                                primaryItem: item,
-                                swapItem: offered,
-                                sellerDisplayName:
-                                    seller?.username ?? 'Seller',
-                                sellerId: media.sellerId!,
-                                buyerId: currentUserId,
-                                sellerMeetupOptions: meetups,
-                                // trade: meet-up only, no payment
-                                tradeTransactionId: media.transactionId!,
-                                meetUpOnly: true,
-                                hidePaymentSection: true,
+                            if (!mounted) return;
+                            await Navigator.push<void>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CheckoutScreen(
+                                  flowKind: CheckoutFlowKind.swap,
+                                  primaryItem: item,
+                                  swapItem: offered,
+                                  sellerDisplayName:
+                                      seller?.username ?? 'Seller',
+                                  sellerId: media.sellerId!,
+                                  buyerId: currentUserId,
+                                  sellerMeetupOptions: meetups,
+                                  // trade: meet-up only, no payment
+                                  tradeTransactionId: media.transactionId!,
+                                  meetUpOnly: true,
+                                  hidePaymentSection: true,
+                                ),
                               ),
-                            ),
-                          );
-                          if (!mounted) return;
-                          setState(() {});
-                        } catch (e) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Proceed failed: $e')),
-                          );
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: const Color(0xFF10B981), // Green
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                            );
+                            if (!mounted) return;
+                            setState(() {});
+                          } catch (e) {
+                            if (!mounted) return;
+                            AppSnackBars.error(context, 'Proceed failed: $e');
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: const Color(0xFF10B981), // Green
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Proceed',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                child: const Text(
-                  'Proceed',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
               ),
-            ),
+            ],
           ],
         );
       },
