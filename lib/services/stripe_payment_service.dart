@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
@@ -91,6 +92,68 @@ class StripePaymentService {
       debugPrint('StripePaymentService: $e\n$st');
       return StripePaymentResult(success: false, message: e.toString());
     }
+  }
+
+  /// Fetch the actual payment method used for a PaymentIntent.
+  /// This relies on a server endpoint because Stripe secret key must stay server-side.
+  Future<String?> fetchPaymentMethodType(String paymentIntentId) async {
+    if (!AppConfig.hasStripePaymentIntentEndpoint) {
+      return null;
+    }
+    final base = Uri.parse(AppConfig.stripePaymentIntentUrl.trim());
+    final candidates = _derivePaymentMethodUris(base);
+
+    try {
+      for (var attempt = 0; attempt < 6; attempt++) {
+        for (final uri in candidates) {
+          final response = await http.get(
+            uri.replace(
+              queryParameters: {
+                ...uri.queryParameters,
+                'payment_intent_id': paymentIntentId,
+              },
+            ),
+          );
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            continue;
+          }
+          final map = jsonDecode(response.body);
+          if (map is! Map) continue;
+          final val = map['paymentMethod'] ?? map['payment_method'];
+          final method =
+              val is String && val.trim().isNotEmpty ? val.trim() : null;
+          if (method != null && method != 'unknown') return method;
+        }
+        // Redirect methods (GrabPay) can finalize charge slightly later.
+        await Future<void>.delayed(const Duration(milliseconds: 650));
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<Uri> _derivePaymentMethodUris(Uri createIntentUri) {
+    // Common case: /create-payment-intent -> /payment-intent-method
+    final path = createIntentUri.path;
+    if (path.endsWith('/create-payment-intent')) {
+      final a = createIntentUri.replace(
+        path: path.replaceFirst(RegExp(r'/create-payment-intent$'), '/payment-intent-method'),
+        query: '',
+      );
+      final b = createIntentUri.replace(
+        path: '/payment-intent-method',
+        query: '',
+      );
+      return [a, b];
+    }
+    // Fallback: append /payment-intent-method
+    final newPath = path.endsWith('/')
+        ? '${path}payment-intent-method'
+        : '$path/payment-intent-method';
+    final a = createIntentUri.replace(path: newPath, query: '');
+    final b = createIntentUri.replace(path: '/payment-intent-method', query: '');
+    return [a, b];
   }
 
   Future<String?> _fetchClientSecret({

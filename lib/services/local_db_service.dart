@@ -173,5 +173,43 @@ class LocalDbService {
       CREATE INDEX IF NOT EXISTS idx_search_history_updated_at
       ON search_history(updated_at DESC)
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transactions_cache (
+        transaction_id INTEGER PRIMARY KEY,
+        buyer_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        traded_item_id INTEGER,
+        transaction_type TEXT,
+        transaction_status TEXT,
+        item_price REAL,
+        shipping_fee REAL,
+        total_amount REAL,
+        fulfillment_method TEXT,
+        address TEXT,
+        created_at TEXT,
+
+        -- denormalized snapshots for offline UI
+        seller_username TEXT,
+        item_name TEXT,
+        item_image_url TEXT,
+        item_category TEXT,
+        traded_item_name TEXT,
+        traded_item_image_url TEXT,
+        traded_item_category TEXT,
+
+        is_synced INTEGER NOT NULL DEFAULT 1,
+        failed INTEGER NOT NULL DEFAULT 0,
+        last_synced_at TEXT,
+        sync_error TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_transactions_cache_user_created
+      ON transactions_cache(buyer_id, seller_id, created_at)
+    ''');
   }
 }

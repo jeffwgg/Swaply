@@ -8,11 +8,12 @@ import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/models/payment.dart';
 import 'package:swaply/models/transaction.dart';
 import 'package:swaply/repositories/items_repository.dart';
+import 'package:swaply/repositories/local/local_transactions_repository.dart';
 import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
-import 'package:swaply/views/screens/profile/seller_profile_screen.dart';
+import 'package:swaply/views/screens/profile/profile_screen.dart';
 import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
 
@@ -153,14 +154,74 @@ class _TransactionTabState extends State<TransactionTab> {
     final paymentsRepo = PaymentsRepository();
     final itemsRepo = ItemsRepository();
     final usersRepo = UsersRepository();
+    final localRepo = LocalTransactionsRepository();
 
-    final buyerTxs = await repo.listForBuyer(widget.user.id);
-    final sellerTxs = await repo.listForSeller(widget.user.id);
-
-    final all = <Transaction>[
-      ...buyerTxs,
-      ...sellerTxs,
-    ];
+    List<Transaction> all = const [];
+    try {
+      final buyerTxs = await repo.listForBuyer(widget.user.id);
+      final sellerTxs = await repo.listForSeller(widget.user.id);
+      all = <Transaction>[...buyerTxs, ...sellerTxs];
+    } catch (_) {
+      // Offline or request failed -> load from local cache.
+      final cached = await localRepo.listForUser(widget.user.id);
+      return cached
+          .map(
+            (c) => _TransactionRow(
+              tx: c.tx,
+              item: c.itemImageUrl == null
+                  ? null
+                  : ItemListing(
+                      id: c.tx.itemId,
+                      name: c.itemName ?? 'Item #${c.tx.itemId}',
+                      description: '',
+                      price: c.tx.itemPrice,
+                      listingType: 'sell',
+                      ownerId: c.tx.sellerId,
+                      status: 'unknown',
+                      category: c.itemCategory ?? '',
+                      imageUrls: c.itemImageUrl == null ? [] : [c.itemImageUrl!],
+                      preference: null,
+                      repliedTo: null,
+                      createdAt: c.tx.createdAt,
+                      address: null,
+                      latitude: null,
+                      longitude: null,
+                    ),
+              tradedItem: c.tradedItemImageUrl == null && c.tx.tradedItemId == null
+                  ? null
+                  : ItemListing(
+                      id: c.tx.tradedItemId ?? 0,
+                      name: c.tradedItemName ?? 'Item #${c.tx.tradedItemId}',
+                      description: '',
+                      price: null,
+                      listingType: 'trade',
+                      ownerId: c.tx.buyerId,
+                      status: 'unknown',
+                      category: c.tradedItemCategory ?? '',
+                      imageUrls: c.tradedItemImageUrl == null
+                          ? []
+                          : [c.tradedItemImageUrl!],
+                      preference: null,
+                      repliedTo: null,
+                      createdAt: c.tx.createdAt,
+                      address: null,
+                      latitude: null,
+                      longitude: null,
+                    ),
+              payment: null,
+              seller: c.sellerUsername == null
+                  ? null
+                  : AppUser(
+                      id: c.tx.sellerId,
+                      username: c.sellerUsername!,
+                      email: '',
+                      profileImage: null,
+                      createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+                    ),
+            ),
+          )
+          .toList();
+    }
 
     // Deduplicate by transactionId (in case policies allow seeing both views).
     final byId = <int, Transaction>{};
@@ -180,6 +241,22 @@ class _TransactionTabState extends State<TransactionTab> {
       final payments = await paymentsRepo.listForTransaction(tx.transactionId);
       final latestPayment = payments.isNotEmpty ? payments.first : null;
       final seller = await usersRepo.getById(tx.sellerId);
+
+      // Write-through cache for offline history.
+      await localRepo.upsertFromRemote(
+        tx: tx,
+        sellerUsername: seller?.username,
+        itemName: item?.name,
+        itemImageUrl:
+            (item != null && item.imageUrls.isNotEmpty) ? item.imageUrls.first : null,
+        itemCategory: item?.category,
+        tradedItemName: tradedItem?.name,
+        tradedItemImageUrl: (tradedItem != null && tradedItem.imageUrls.isNotEmpty)
+            ? tradedItem.imageUrls.first
+            : null,
+        tradedItemCategory: tradedItem?.category,
+      );
+
       rows.add(
         _TransactionRow(
           tx: tx,
@@ -373,9 +450,8 @@ class _TransactionTabState extends State<TransactionTab> {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => SellerProfileScreen(
-                                          viewer: widget.user,
-                                          sellerId: row.seller!.id,
+                                        builder: (_) => ProfileScreen(
+                                          viewingUserId: row.seller!.id,
                                         ),
                                       ),
                                     );
