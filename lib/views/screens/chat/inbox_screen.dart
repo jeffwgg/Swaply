@@ -411,7 +411,7 @@ class _InboxScreenState extends State<InboxScreen> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
         ),
       );
     } catch (_) {
@@ -4004,7 +4004,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
         ),
       );
     } catch (_) {

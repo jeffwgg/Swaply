@@ -559,7 +559,7 @@ class _ItemCardState extends State<ItemCard> {
           context,
           MaterialPageRoute(
             builder: (_) =>
-                ItemDetailsScreen(user: widget.user, item: widget.item),
+                ItemDetailsScreen(loginUser: widget.user, item: widget.item),
           ),
         );
         

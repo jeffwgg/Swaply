@@ -661,7 +661,7 @@ class  _FavouriteTabState extends State<FavouriteTab>{
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
+                    builder: (_) => ItemDetailsScreen(loginUser: widget.user, item: item),
                   ),
                 );
                 },
@@ -819,7 +819,7 @@ class _ItemTabState extends State<ItemTab> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.loginUser, //widget.user = profile user ！= login user
+                      loginUser: widget.loginUser, //widget.user = profile user ！= login user
                       item: repliedItem ?? item,
                     ),
                   ),

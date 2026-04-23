@@ -494,7 +494,7 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
                   context,
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.user,
+                      loginUser: widget.user,
                       item: _currentItem!,
                     ),
                   ),

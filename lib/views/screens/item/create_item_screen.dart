@@ -481,7 +481,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _mapController.move(pos, 15);
     } catch (e) {
       if (mounted) {
-        AppSnackBars.error(context, "Location error: $e");
+        AppSnackBars.error(context, "Error getting current location: $e");
       }
     }
   }

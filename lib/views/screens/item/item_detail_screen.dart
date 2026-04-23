@@ -29,9 +29,9 @@ import '../../../services/stats_notifier.dart';
 import '../../../services/follow_service.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
-  final AppUser? user;
+  final AppUser? loginUser;
   final ItemListing item;
-  const ItemDetailsScreen({this.user, required this.item, super.key});
+  const ItemDetailsScreen({this.loginUser, required this.item, super.key});
 
   @override
   State<ItemDetailsScreen> createState() => _ItemDetailsScreenState();
@@ -70,16 +70,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   void initState() {
     super.initState();
     _item = widget.item;
-    if (widget.user != null) {
-      loginUser = widget.user;
+    if (widget.loginUser != null) {
+      loginUser = widget.loginUser;
       _isFavourite = _item.isFavorite;
+      _loadFollowState();
     }
     _fetchOwner();
     _fetchReplies();
     _fetchFavouriteCount();
-    if (widget.user != null) {
-      _loadFollowState();
-    }
   }
 
   void _showFollowError(String message) {
@@ -88,7 +86,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _loadFollowState() async {
-    if(loginUser!.id == widget.item.ownerId){
+    if (loginUser!.id == widget.item.ownerId) {
       return;
     }
     final following = await FollowService.isFollowing(
@@ -125,8 +123,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           _replyOwnerNames[r.id] = resolved.isEmpty ? 'Unknown' : resolved;
           _replyOwners[r.id] = user;
         } catch (_) {
-          _replyOwnerNames[r.id] =
-              fallbackName.isEmpty ? 'Unknown' : fallbackName;
+          _replyOwnerNames[r.id] = fallbackName.isEmpty
+              ? 'Unknown'
+              : fallbackName;
           _replyOwners[r.id] = null;
         }
       }
@@ -181,7 +180,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
 
     final meetups = MeetupAddressOption.fromSellerItem(widget.item);
-    final sellerName = _owner!.username.trim().isEmpty ? 'Seller' : _owner!.username;
+    final sellerName = _owner!.username.trim().isEmpty
+        ? 'Seller'
+        : _owner!.username;
     final sellerId = widget.item.ownerId;
     if (sellerId == null || sellerId.isEmpty) {
       if (!mounted) return;
@@ -255,7 +256,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _toggleFavourite() async {
-    if (widget.user == null) {
+    if (widget.loginUser == null) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -271,7 +272,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       if (online != true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Network error. Please check your connection.')),
+          const SnackBar(
+            content: Text('Network error. Please check your connection.'),
+          ),
         );
         return;
       }
@@ -289,7 +292,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     try {
       final newState = await ItemService().toggleFavourite(
         _item.id,
-        widget.user!.id,
+        widget.loginUser!.id,
       );
       if (!mounted) return;
       setState(() {
@@ -343,13 +346,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     if (confirm == true) {
       await ItemsRepository().dropListing(widget.item.id);
 
-      for(var r in _replies){
-        if(r.status == 'pending'){
+      for (var r in _replies) {
+        if (r.status == 'pending') {
           await ItemsRepository().updateStatus('rejected', r.id);
         }
       }
 
       if (mounted) {
+        AppSnackBars.success(context, 'Listing dropped successfully');
         Navigator.pop(context, true);
       }
     }
@@ -392,7 +396,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _acceptReply(int replyId) async {
-    final actingOwner = widget.user;
+    final actingOwner = widget.loginUser;
     if (actingOwner == null) {
       return;
     }
@@ -439,7 +443,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
       final ownerName = actingOwner.username.trim().isNotEmpty
           ? actingOwner.username.trim()
-          : (_owner!.username.trim().isNotEmpty ? _owner!.username.trim() : 'Item owner');
+          : (_owner!.username.trim().isNotEmpty
+                ? _owner!.username.trim()
+                : 'Item owner');
       final offerImage = acceptedReply.imageUrls.isNotEmpty
           ? acceptedReply.imageUrls.first
           : null;
@@ -465,10 +471,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         };
         final autoMessage = '[[media]]${jsonEncode(autoMessagePayload)}';
 
-        await _chatService.sendMessage(
-          chatId: chat.id,
-          content: autoMessage,
-        );
+        await _chatService.sendMessage(chatId: chat.id, content: autoMessage);
 
         await NotificationService.instance.sendNotificationToUser(
           recipientId: acceptedReply.ownerId,
@@ -509,10 +512,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     await ItemsRepository().updateStatus('rejected', replyId);
 
-    if (rejectedReply != null && widget.user != null) {
-      final ownerName = widget.user!.username.trim().isNotEmpty
-          ? widget.user!.username.trim()
-          : (_owner!.username.trim().isNotEmpty ? _owner!.username.trim() : 'Item owner');
+    if (rejectedReply != null && loginUser != null) {
+      final ownerName = loginUser!.username.trim().isNotEmpty
+          ? loginUser!.username.trim()
+          : (_owner!.username.trim().isNotEmpty
+                ? _owner!.username.trim()
+                : 'Item owner');
       try {
         await NotificationService.instance.sendNotificationToUser(
           recipientId: rejectedReply.ownerId,
@@ -539,7 +544,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _composeAndStartItemConversation() async {
-    final currentUser = widget.user;
+    final currentUser = loginUser;
 
     if (currentUser == null) {
       Navigator.push(
@@ -549,15 +554,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       return;
     }
 
-    if (currentUser.id == widget.item.ownerId) {
+    if (currentUser.id == _item.ownerId) {
       if (!mounted) return;
       AppSnackBars.info(context, 'You cannot start chat on your own item.');
       return;
     }
 
-    final ownerName = _owner!.username.trim().isEmpty ? 'there' : _owner!.username.trim();
+    final ownerName = _owner!.username.trim().isEmpty
+        ? 'there'
+        : _owner!.username.trim();
     final initialMessage =
-        'Hi $ownerName, I\'m interested in your "${widget.item.name}". Is it still available?';
+        'Hi $ownerName, I\'m interested in your "${_item.name}". Is it still available?';
     var draftMessage = initialMessage;
 
     final shouldSend =
@@ -759,7 +766,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
       AppSnackBars.info(
         context,
-            'Message sent to ${_owner!.username.isEmpty ? 'owner' : _owner!.username}. Open Inbox to continue chatting.',
+        'Message sent to ${_owner!.username.isEmpty ? 'owner' : _owner!.username}. Open Inbox to continue chatting.',
       );
     } catch (e) {
       if (!mounted) {
@@ -784,7 +791,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final item = _item;
-    final user = widget.user;
+    final loginUser = widget.loginUser;
     final owner = _owner;
     final fallbackOwnerName = (widget.item.ownerUsername ?? '').trim();
     final ownerName = (owner?.username ?? fallbackOwnerName).trim().isEmpty
@@ -803,9 +810,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ProfileScreen(
-                      viewingUserId: widget.item.ownerId,
-                    ),
+                    builder: (context) =>
+                        ProfileScreen(viewingUserId: item.ownerId),
                   ),
                 ).then((_) {
                   if (mounted) _loadFollowState();
@@ -829,54 +835,73 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ],
               ),
             ),
-            if (user == null || user.id != item.ownerId)
+            if (loginUser == null || loginUser.id != item.ownerId)
               TextButton(
                 onPressed: _isLoadingFollow
                     ? null
                     : () async {
-                  final currentUser = SupabaseService.client.auth.currentUser;
-                  final targetUserId = item.ownerId;
+                        final targetUserId = item.ownerId;
 
-                  if (currentUser == null) {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-                    return;
-                  }
+                        if (loginUser == null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(),
+                            ),
+                          );
+                          return;
+                        }
 
-                  if (currentUser.id == targetUserId) {
-                    _showFollowError('You cannot follow yourself.');
-                    return;
-                  }
+                        if (loginUser.id == targetUserId) {
+                          _showFollowError('You cannot follow yourself.');
+                          return;
+                        }
 
-                  setState(() => _isLoadingFollow = true);
+                        setState(() => _isLoadingFollow = true);
 
-                  try {
-                    if (_isFollowing) {
-                      await FollowService.unfollowUser(currentUser.id, targetUserId);
-                      setState(() => _isFollowing = false);
-                    } else {
-                      await FollowService.followUser(currentUser.id, targetUserId);
-                      setState(() => _isFollowing = true);
-                    }
+                        try {
+                          if (_isFollowing) {
+                            await FollowService.unfollowUser(
+                              loginUser.id,
+                              targetUserId,
+                            );
+                            setState(() => _isFollowing = false);
+                          } else {
+                            await FollowService.followUser(
+                              loginUser.id,
+                              targetUserId,
+                            );
+                            setState(() => _isFollowing = true);
+                          }
 
-                    StatsNotifier.refresh();
+                          StatsNotifier.refresh();
 
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(_isFollowing ? 'Following now!' : 'Unfollowed successfully.'),
-                          backgroundColor: _isFollowing ? Colors.green : Colors.grey[700],
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    print('Follow error: $e');
-                    if (mounted) _showFollowError('Error updating follow state. Please try again.');
-                  } finally {
-                    if (mounted) setState(() => _isLoadingFollow = false);
-                  }
-                },
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  _isFollowing
+                                      ? 'Following now!'
+                                      : 'Unfollowed successfully.',
+                                ),
+                                backgroundColor: _isFollowing
+                                    ? Colors.green
+                                    : Colors.grey[700],
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          print('Follow error: $e');
+                          if (mounted)
+                            _showFollowError(
+                              'Error updating follow state. Please try again.',
+                            );
+                        } finally {
+                          if (mounted) setState(() => _isLoadingFollow = false);
+                        }
+                      },
                 style: TextButton.styleFrom(
                   backgroundColor: _isFollowing
                       ? const Color(0xFF5B21B6)
@@ -1372,7 +1397,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 ),
               const SizedBox(height: 10),
               ..._replies.map((reply) {
-                if (reply.status == 'dropped' && reply.ownerId != user?.id) {
+                if (reply.status == 'dropped' &&
+                    reply.ownerId != loginUser?.id) {
                   return Container();
                 }
                 return Container(
@@ -1438,6 +1464,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (context) => ProfileScreen(
+                                              viewingUserId: reply.ownerId,
                                             ),
                                           ),
                                         );
@@ -1447,15 +1474,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                         children: [
                                           Builder(
                                             builder: (context) {
-                                              final replyOwner = _replyOwners[reply.id];
-                                              final replyAvatar = _resolveAvatarImage(
-                                                replyOwner?.profileImage,
-                                              );
+                                              final replyOwner =
+                                                  _replyOwners[reply.id];
+                                              final replyAvatar =
+                                                  _resolveAvatarImage(
+                                                    replyOwner?.profileImage,
+                                                  );
                                               return CircleAvatar(
                                                 radius: 12,
                                                 backgroundImage: replyAvatar,
                                                 child: replyAvatar == null
-                                                    ? const Icon(Icons.person, size: 12)
+                                                    ? const Icon(
+                                                        Icons.person,
+                                                        size: 12,
+                                                      )
                                                     : null,
                                               );
                                             },
@@ -1503,8 +1535,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                     ),
                                     const SizedBox(height: 10),
                                     if (item.status != 'dropped')
-                                      if (user != null &&
-                                          user.id == item.ownerId &&
+                                      if (loginUser != null &&
+                                          loginUser.id == item.ownerId &&
                                           reply.status == 'pending')
                                         Row(
                                           children: [
@@ -1582,7 +1614,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         right: 8,
                         child: _StatusBadge(status: reply.status),
                       ),
-                      if (user != null && user.id == reply.ownerId && item.status == 'available')
+                      if (loginUser != null &&
+                          loginUser.id == reply.ownerId &&
+                          reply.status == 'pending')
                         Positioned(
                           bottom: 8,
                           right: 8,
@@ -1602,7 +1636,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
               }).toList(),
               const SizedBox(height: 14),
               if (item.status == 'available') ...[
-                if (user != null && user.id == item.ownerId)
+                if (loginUser != null && loginUser.id == item.ownerId)
                   Row(
                     children: [
                       Expanded(
@@ -1611,8 +1645,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    CreateItemScreen(user: user, item: item),
+                                builder: (context) => CreateItemScreen(
+                                  user: loginUser,
+                                  item: item,
+                                ),
                               ),
                             );
                             if (result == true && mounted) {
@@ -1666,7 +1702,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         Expanded(
                           child: TextButton(
                             onPressed: () {
-                              if (user == null) {
+                              if (loginUser == null) {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -1674,8 +1710,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   ),
                                 );
                                 return;
-                              }else{
-                                 _openPurchaseCheckout();
+                              } else {
+                                _openPurchaseCheckout();
                               }
                             },
                             style: TextButton.styleFrom(
@@ -1699,7 +1735,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         Expanded(
                           child: TextButton(
                             onPressed: () async {
-                              if (user == null) {
+                              if (loginUser == null) {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -1712,7 +1748,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => CreateItemScreen(
-                                    user: user,
+                                    user: loginUser,
                                     repliedTo: item.id,
                                   ),
                                 ),
@@ -1746,7 +1782,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       width: double.infinity,
                       child: TextButton(
                         onPressed: () {
-                          if (user == null) {
+                          if (loginUser == null) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -1754,9 +1790,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               ),
                             );
                             return;
-                          }else{
-                                 _openPurchaseCheckout();
-                              }
+                          } else {
+                            _openPurchaseCheckout();
+                          }
                         },
                         style: TextButton.styleFrom(
                           backgroundColor: accent,
@@ -1777,7 +1813,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       width: double.infinity,
                       child: TextButton(
                         onPressed: () async {
-                          if (user == null) {
+                          if (loginUser == null) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -1790,7 +1826,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => CreateItemScreen(
-                                user: user,
+                                user: loginUser,
                                 repliedTo: item.id,
                               ),
                             ),
