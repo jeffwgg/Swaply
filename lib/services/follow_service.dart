@@ -1,12 +1,53 @@
 import '../repositories/follow_repository.dart';
+import '../services/notification_service.dart';
+import '../services/supabase_service.dart';
 
 class FollowService {
   static final _repo = FollowRepository();
 
   /// Follow a user
   static Future<bool> followUser(String followerId, String followeeId) async {
+    if (followerId == followeeId) {
+      return false;
+    }
+
+    final alreadyFollowing = await _repo.isFollowing(followerId, followeeId);
+    if (alreadyFollowing) {
+      return true;
+    }
+
     final result = await _repo.follow(followerId, followeeId);
-    print("DATABASE RESPONSE follow: $result");
+    if (!result) {
+      return false;
+    }
+
+    try {
+      final profile = await SupabaseService.client
+          .from('users')
+          .select('username')
+          .eq('id', followerId)
+          .maybeSingle();
+      String followerName = '';
+      if (profile is Map) {
+        final rawProfile = profile as Map;
+        final normalizedProfile = rawProfile.map<String, dynamic>(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        followerName = normalizedProfile['username']?.toString().trim() ?? '';
+      }
+      final displayName = followerName.isEmpty ? 'Someone' : followerName;
+
+      await NotificationService.instance.sendNotificationToUser(
+        recipientId: followeeId,
+        title: 'New follower',
+        body: '$displayName started following you.',
+        type: 'follow',
+        data: {'action': 'open_profile', 'user_id': followerId},
+      );
+    } catch (_) {
+      // Do not fail follow action if notification insertion fails.
+    }
+
     return result;
   }
 

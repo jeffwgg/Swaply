@@ -15,9 +15,12 @@ import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/repositories/local/local_profile_items_repository.dart';
 import 'package:swaply/services/network_service.dart';
+import 'package:swaply/models/checkout_flow_kind.dart';
+import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/profile_screen.dart';
 import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
+import 'package:swaply/views/screens/transaction/checkout_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
 
 class ProfileTabs extends StatefulWidget {
@@ -312,6 +315,7 @@ class _TransactionTabState extends State<TransactionTab> {
 
             final status = tx.transactionStatus ?? 'unknown';
             final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
+            final isTrade = tx.tradedItemId != null;
 
             Future<void> onReceived() async {
               final ok = await showDialog<bool>(
@@ -349,6 +353,53 @@ class _TransactionTabState extends State<TransactionTab> {
               }
             }
 
+            Future<void> onProceed() async {
+              try {
+                final latestPrimary =
+                    item ?? await ItemsRepository().getById(tx.itemId);
+                if (latestPrimary == null) {
+                  throw StateError('Item not found.');
+                }
+                final latestOffered = row.tradedItem ??
+                    (tx.tradedItemId == null
+                        ? null
+                        : await ItemsRepository().getById(tx.tradedItemId!));
+                if (latestOffered == null) {
+                  throw StateError('Offered item not found.');
+                }
+                final seller =
+                    row.seller ?? await UsersRepository().getById(tx.sellerId);
+                final meetups = MeetupAddressOption.fromSellerItem(latestPrimary);
+
+                if (!context.mounted) return;
+                await Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CheckoutScreen(
+                      flowKind: CheckoutFlowKind.swap,
+                      primaryItem: latestPrimary,
+                      swapItem: latestOffered,
+                      sellerDisplayName: seller?.username ?? 'Seller',
+                      sellerId: tx.sellerId,
+                      buyerId: tx.buyerId,
+                      sellerMeetupOptions: meetups,
+                      // trade: meet-up only, no payment
+                      tradeTransactionId: tx.transactionId,
+                      meetUpOnly: true,
+                      hidePaymentSection: true,
+                    ),
+                  ),
+                );
+                if (!context.mounted) return;
+                _reload();
+              } catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Proceed failed: $e')),
+                );
+              }
+            }
+
             Future<void> onCancel() async {
               final ok = await showDialog<bool>(
                 context: context,
@@ -370,6 +421,14 @@ class _TransactionTabState extends State<TransactionTab> {
               if (ok != true) return;
               try {
                 await ItemsRepository().updateStatus('available', tx.itemId);
+                if (tx.tradedItemId != null) {
+                  // Offerer (buyer) cancel => drop offered item.
+                  // Seller cancel => make offered item available again.
+                  await ItemsRepository().updateStatus(
+                    isBuyer ? 'dropped' : 'rejected',
+                    tx.tradedItemId!,
+                  );
+                }
                 await TransactionsRepository().updateStatus(
                   transactionId: tx.transactionId,
                   transactionStatus: 'cancelled',
@@ -498,12 +557,21 @@ class _TransactionTabState extends State<TransactionTab> {
                                 child: const Text('Cancel'),
                               ),
                             ),
-                            if (isBuyer) ...[
+                            if (isBuyer && !isTrade) ...[
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton(
                                   onPressed: onReceived,
                                   child: const Text('Received'),
+                                ),
+                              ),
+                            ],
+                            if (isBuyer && isTrade) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onProceed,
+                                  child: const Text('Proceed'),
                                 ),
                               ),
                             ],

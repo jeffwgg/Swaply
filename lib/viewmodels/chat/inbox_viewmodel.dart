@@ -65,7 +65,7 @@ class InboxViewModel extends ChangeNotifier {
       super.notifyListeners();
     }
   }
-  
+
   Future<List<ChatThread>> loadInbox() async {
     if (_isDisposed) {
       return const <ChatThread>[];
@@ -114,6 +114,13 @@ class InboxViewModel extends ChangeNotifier {
       return Future.value();
     }
     return _chatService.markChatAsRead(chatId);
+  }
+
+  Future<Map<int, int>> loadUnreadCountsByChat(List<int> chatIds) {
+    if (_isDisposed || chatIds.isEmpty) {
+      return Future.value(const <int, int>{});
+    }
+    return _chatService.unreadCountsByChat(chatIds);
   }
 
   Future<void> editChatMessage({

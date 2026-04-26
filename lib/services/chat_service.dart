@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/chat_message.dart';
 import '../models/chat_pinned_message.dart';
 import '../models/chat_thread.dart';
-import '../services/notification_service.dart';
 import '../repositories/chats_repository.dart';
 import '../repositories/local/local_chats_repository.dart';
 import '../repositories/local/local_messages_repository.dart';
@@ -41,7 +40,6 @@ class ChatService {
 
   final Map<int, StreamSubscription<List<ChatMessage>>> _remoteMessageMirrors =
       {};
-  final Map<int, Timer> _remoteMessagePollers = {};
   bool _isDisposed = false;
 
   String? _cachedCurrentUserId;
@@ -120,7 +118,6 @@ class ChatService {
     }
     _requirePositiveId(chatId, fieldName: 'chatId');
     _ensureRemoteMessageMirror(chatId);
-    _ensureRemoteMessagePoller(chatId);
     unawaited(_primeMessages(chatId));
     unawaited(flushPendingQueue(chatId: chatId));
     return _localMessagesRepository.watchForChat(chatId);
@@ -214,6 +211,17 @@ class ChatService {
     await _localMessagesRepository.markChatReadLocally(
       chatId: chatId,
       viewerId: viewerId,
+    );
+  }
+
+  Future<Map<int, int>> unreadCountsByChat(List<int> chatIds) async {
+    if (chatIds.isEmpty) {
+      return const <int, int>{};
+    }
+    final viewerId = await _requireUserId();
+    return _messagesRepository.unreadCountsByChat(
+      viewerId: viewerId,
+      chatIds: chatIds,
     );
   }
 
@@ -323,16 +331,20 @@ class ChatService {
 
     _remoteMessageMirrors[chatId] = _messagesRepository
         .watchForChat(chatId)
-        .listen((remoteMessages) async {
-          if (_isDisposed) {
-            return;
-          }
-          await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
-        }, onError: (_, __) {
-          _restartRemoteMessageMirror(chatId);
-        }, onDone: () {
-          _restartRemoteMessageMirror(chatId);
-        });
+        .listen(
+          (remoteMessages) async {
+            if (_isDisposed) {
+              return;
+            }
+            await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
+          },
+          onError: (_, __) {
+            _restartRemoteMessageMirror(chatId);
+          },
+          onDone: () {
+            _restartRemoteMessageMirror(chatId);
+          },
+        );
   }
 
   void _restartRemoteMessageMirror(int chatId) {
@@ -357,22 +369,6 @@ class ChatService {
       final remoteMessages = await _messagesRepository.listForChat(chatId);
       await _localMessagesRepository.upsertRemoteMessages(remoteMessages);
     } catch (_) {}
-  }
-
-  void _ensureRemoteMessagePoller(int chatId) {
-    if (_isDisposed || _remoteMessagePollers.containsKey(chatId)) {
-      return;
-    }
-
-    _remoteMessagePollers[chatId] = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) {
-        if (_isDisposed) {
-          return;
-        }
-        unawaited(_primeMessages(chatId));
-      },
-    );
   }
 
   Future<void> _refreshInboxCache(Future<List<ChatThread>> remoteFuture) async {
@@ -403,29 +399,6 @@ class ChatService {
     return;
   }
 
-  String _buildNotificationPreview(String content) {
-    final trimmed = content.trim();
-    if (trimmed.startsWith('[[media]]')) {
-      final lower = trimmed.toLowerCase();
-      if (lower.contains('"type":"image"')) {
-        return 'Photo';
-      }
-      if (lower.contains('"type":"voice"')) {
-        return 'Voice message';
-      }
-      if (lower.contains('"type":"document"')) {
-        return 'Document';
-      }
-      return 'Attachment';
-    }
-
-    if (trimmed.startsWith('[Location]')) {
-      return 'Location shared';
-    }
-
-    return trimmed;
-  }
-
   Future<void> dispose() async {
     if (_isDisposed) {
       return;
@@ -435,11 +408,6 @@ class ChatService {
     _remoteMessageMirrors.clear();
     for (final subscription in subscriptions) {
       await subscription.cancel();
-    }
-    final pollers = _remoteMessagePollers.values.toList(growable: false);
-    _remoteMessagePollers.clear();
-    for (final poller in pollers) {
-      poller.cancel();
     }
   }
 

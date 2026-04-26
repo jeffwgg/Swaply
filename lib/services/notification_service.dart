@@ -25,14 +25,14 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   final StreamController<List<SystemNotificationItem>> _streamController =
       StreamController<List<SystemNotificationItem>>.broadcast();
-    final StreamController<Map<String, dynamic>> _tapStreamController =
+  final StreamController<Map<String, dynamic>> _tapStreamController =
       StreamController<Map<String, dynamic>>.broadcast();
   StreamSubscription<AuthState>? _authSubscription;
   RealtimeChannel? _notificationsChannel;
   String? _subscribedRecipientId;
-  bool _isChatTabActive = false;
-    Map<String, dynamic>? _pendingTapPayload;
-  Timer? _fallbackTimer;
+  bool _isChatConversationOpen = false;
+  int? _activeChatId;
+  Map<String, dynamic>? _pendingTapPayload;
   DateTime? _latestNotificationTime;
 
   bool _isInitialized = false;
@@ -50,7 +50,15 @@ class NotificationService {
   }
 
   void setChatTabActive(bool isActive) {
-    _isChatTabActive = isActive;
+    if (!isActive) {
+      _isChatConversationOpen = false;
+      _activeChatId = null;
+    }
+  }
+
+  void setActiveChatContext({required bool isConversationOpen, int? chatId}) {
+    _isChatConversationOpen = isConversationOpen;
+    _activeChatId = isConversationOpen ? chatId : null;
   }
 
   Future<void> initialize() async {
@@ -72,7 +80,9 @@ class NotificationService {
 
     final launchDetails = await _plugin.getNotificationAppLaunchDetails();
     if (launchDetails?.didNotificationLaunchApp == true) {
-      _handleNotificationTapPayload(launchDetails?.notificationResponse?.payload);
+      _handleNotificationTapPayload(
+        launchDetails?.notificationResponse?.payload,
+      );
     }
 
     final androidPlugin = _plugin
@@ -98,24 +108,19 @@ class NotificationService {
       return;
     }
 
-    _authSubscription ??= SupabaseService.client.auth.onAuthStateChange.listen((_) {
+    _authSubscription ??= SupabaseService.client.auth.onAuthStateChange.listen((
+      _,
+    ) {
       unawaited(_restartRealtimeSubscription());
     });
 
     unawaited(_restartRealtimeSubscription());
-    _startFallbackTimer();
-  }
-
-  void _startFallbackTimer() {
-    _fallbackTimer?.cancel();
-    _fallbackTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      unawaited(_emitLatestAndCheckNew());
-    });
   }
 
   Future<void> _restartRealtimeSubscription() async {
     final recipientId = SupabaseService.client.auth.currentUser?.id;
-    if (_subscribedRecipientId == recipientId && _notificationsChannel != null) {
+    if (_subscribedRecipientId == recipientId &&
+        _notificationsChannel != null) {
       return;
     }
 
@@ -177,7 +182,10 @@ class NotificationService {
       return;
     }
 
-    final shouldSuppressLocal = _isChatTabActive;
+    final parsedChatId = chatId is int ? chatId : int.tryParse('$chatId');
+    final shouldSuppressLocal = _shouldSuppressChatNotificationForChat(
+      parsedChatId,
+    );
 
     if (!shouldSuppressLocal && content.isNotEmpty) {
       String preview = content;
@@ -191,10 +199,7 @@ class NotificationService {
         payload: _buildNotificationPayload(
           notificationId: null,
           type: 'chat',
-          data: {
-            'action': 'open_chat',
-            'chat_id': chatId,
-          },
+          data: {'action': 'open_chat', 'chat_id': chatId},
         ),
       );
     }
@@ -206,7 +211,12 @@ class NotificationService {
     final body = row['body']?.toString().trim() ?? '';
     final type = row['type']?.toString().trim().toLowerCase() ?? '';
 
-    final shouldSuppressLocal = type == 'chat' && _isChatTabActive;
+    final chatIdForPayload = type == 'chat'
+        ? _extractChatIdFromData(_normalizeMap(row['data']))
+        : null;
+    final shouldSuppressLocal =
+        type == 'chat' &&
+        _shouldSuppressChatNotificationForChat(chatIdForPayload);
 
     if (!shouldSuppressLocal && (title.isNotEmpty || body.isNotEmpty)) {
       await _showLocalNotification(
@@ -407,7 +417,10 @@ class NotificationService {
             if (item.createdAt.isAfter(_latestNotificationTime!) &&
                 !item.isRead) {
               final shouldSuppressLocal =
-                  item.type.toLowerCase() == 'chat' && _isChatTabActive;
+                  item.type.toLowerCase() == 'chat' &&
+                  _shouldSuppressChatNotificationForChat(
+                    _extractChatIdFromData(item.data),
+                  );
               if (!shouldSuppressLocal) {
                 await _showLocalNotification(
                   title: item.title.isEmpty ? 'Swaply' : item.title,
@@ -536,5 +549,23 @@ class NotificationService {
       return row.map((key, value) => MapEntry(key.toString(), value));
     }
     return const <String, dynamic>{};
+  }
+
+  bool _shouldSuppressChatNotificationForChat(int? chatId) {
+    if (!_isChatConversationOpen) {
+      return false;
+    }
+    if (chatId == null || chatId <= 0) {
+      return false;
+    }
+    return _activeChatId == chatId;
+  }
+
+  int? _extractChatIdFromData(Map<String, dynamic> data) {
+    final rawChatId = data['chat_id'] ?? data['chatId'];
+    if (rawChatId is int) {
+      return rawChatId;
+    }
+    return int.tryParse(rawChatId?.toString() ?? '');
   }
 }
