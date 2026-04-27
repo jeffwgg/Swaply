@@ -10,9 +10,11 @@ class LocalTransactionRow {
   final String? itemName;
   final String? itemImageUrl;
   final String? itemCategory;
+  final String? itemStatus;
   final String? tradedItemName;
   final String? tradedItemImageUrl;
   final String? tradedItemCategory;
+  final String? tradedItemStatus;
   final Payment? payment; // optional (not cached yet)
 
   const LocalTransactionRow({
@@ -21,9 +23,11 @@ class LocalTransactionRow {
     required this.itemName,
     required this.itemImageUrl,
     required this.itemCategory,
+    required this.itemStatus,
     required this.tradedItemName,
     required this.tradedItemImageUrl,
     required this.tradedItemCategory,
+    required this.tradedItemStatus,
     required this.payment,
   });
 }
@@ -42,9 +46,11 @@ class LocalTransactionsRepository {
     required String? itemName,
     required String? itemImageUrl,
     required String? itemCategory,
+    required String? itemStatus,
     required String? tradedItemName,
     required String? tradedItemImageUrl,
     required String? tradedItemCategory,
+    required String? tradedItemStatus,
   }) async {
     final sqlite.Database db = await _localDbService.database;
 
@@ -66,9 +72,11 @@ class LocalTransactionsRepository {
       'item_name': itemName,
       'item_image_url': itemImageUrl,
       'item_category': itemCategory,
+      'item_status': itemStatus,
       'traded_item_name': tradedItemName,
       'traded_item_image_url': tradedItemImageUrl,
       'traded_item_category': tradedItemCategory,
+      'traded_item_status': tradedItemStatus,
       'is_synced': 1,
       'failed': 0,
       'last_synced_at': DateTime.now().toIso8601String(),
@@ -125,12 +133,63 @@ class LocalTransactionsRepository {
         itemName: r['item_name']?.toString(),
         itemImageUrl: r['item_image_url']?.toString(),
         itemCategory: r['item_category']?.toString(),
+        itemStatus: r['item_status']?.toString(),
         tradedItemName: r['traded_item_name']?.toString(),
         tradedItemImageUrl: r['traded_item_image_url']?.toString(),
         tradedItemCategory: r['traded_item_category']?.toString(),
+        tradedItemStatus: r['traded_item_status']?.toString(),
         payment: null,
       );
     }).toList();
+  }
+
+  Future<LocalTransactionRow?> getById(int transactionId) async {
+    final sqlite.Database db = await _localDbService.database;
+    final rows = await db.query(
+      _table,
+      where: 'transaction_id = ?',
+      whereArgs: [transactionId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    final createdAtRaw = r['created_at']?.toString();
+    final createdAt = createdAtRaw == null || createdAtRaw.isEmpty
+        ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+        : DateTime.tryParse(createdAtRaw) ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
+    final tx = Transaction(
+      transactionId: (r['transaction_id'] as num).toInt(),
+      buyerId: r['buyer_id']?.toString() ?? '',
+      sellerId: r['seller_id']?.toString() ?? '',
+      itemId: (r['item_id'] as num).toInt(),
+      tradedItemId: r['traded_item_id'] == null
+          ? null
+          : (r['traded_item_id'] as num).toInt(),
+      transactionType: r['transaction_type']?.toString(),
+      transactionStatus: r['transaction_status']?.toString(),
+      itemPrice: r['item_price'] is num ? (r['item_price'] as num).toDouble() : null,
+      shippingFee: r['shipping_fee'] is num ? (r['shipping_fee'] as num).toDouble() : null,
+      totalAmount: r['total_amount'] is num ? (r['total_amount'] as num).toDouble() : null,
+      fulfillmentMethod: r['fulfillment_method']?.toString(),
+      address: r['address']?.toString(),
+      createdAt: createdAt,
+    );
+
+    return LocalTransactionRow(
+      tx: tx,
+      sellerUsername: r['seller_username']?.toString(),
+      itemName: r['item_name']?.toString(),
+      itemImageUrl: r['item_image_url']?.toString(),
+      itemCategory: r['item_category']?.toString(),
+      itemStatus: r['item_status']?.toString(),
+      tradedItemName: r['traded_item_name']?.toString(),
+      tradedItemImageUrl: r['traded_item_image_url']?.toString(),
+      tradedItemCategory: r['traded_item_category']?.toString(),
+      tradedItemStatus: r['traded_item_status']?.toString(),
+      payment: null,
+    );
   }
 }
 
