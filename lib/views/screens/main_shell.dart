@@ -115,7 +115,7 @@ class _MainShellState extends State<MainShell> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: _user, item: item),
+          builder: (_) => ItemDetailsScreen(loginUser: _user, item: item),
         ),
       );
       return true;

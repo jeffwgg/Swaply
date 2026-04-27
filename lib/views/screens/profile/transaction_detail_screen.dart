@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
 
 import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
@@ -572,11 +573,12 @@ class _Thumb extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 72.0;
     if (url == null || url!.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     if (url!.startsWith('http')) {
@@ -585,24 +587,41 @@ class _Thumb extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (_, __, ___) => Container(
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
-      url!,
-      width: size,
-      height: size,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/sample.jpeg',
+    if (url!.startsWith('assets/')) {
+      return Image.asset(
+        url!,
         width: size,
         height: size,
         fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: size,
+          height: size,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      );
+    }
+    return Image.file(
+      File(url!),
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        width: size,
+        height: size,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }

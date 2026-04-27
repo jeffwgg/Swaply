@@ -1,3 +1,6 @@
+import 'dart:developer';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
@@ -11,7 +14,8 @@ import 'package:swaply/repositories/local/local_transactions_repository.dart';
 import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
-import 'package:swaply/repositories/favourite_repository.dart';
+import 'package:swaply/repositories/local/local_profile_items_repository.dart';
+import 'package:swaply/services/network_service.dart';
 import 'package:swaply/models/checkout_flow_kind.dart';
 import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
@@ -611,11 +615,12 @@ class _TxnThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 72.0;
     if (url == null || url!.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     if (url!.startsWith('http')) {
@@ -624,24 +629,26 @@ class _TxnThumb extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (_, __, ___) => Container(
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
+    return Image.network(
       url!,
       width: size,
       height: size,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/sample.jpeg',
+      errorBuilder: (_, __, ___) => Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }
@@ -656,143 +663,148 @@ class FavouriteTab extends StatefulWidget {
   State<FavouriteTab> createState() => _FavouriteTabState();
 }
 
-class _FavouriteTabState extends State<FavouriteTab> {
-  StreamSubscription? _subscription;
-  late Stream<List<Map<String, dynamic>>> _stream;
-  List<ItemListing> _items = [];
-  bool _loading = true;
+class  _FavouriteTabState extends State<FavouriteTab>{
+  static const _cacheKey = 'favourite';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
 
   void initState() {
     super.initState();
-    _fetchItems(); // 初始加载
-
-    // 👈 2. 监听变化，并加上延迟
-    _subscription = FavouriteRepository()
-        .watchFavouriteIds(widget.user.id)
-        .listen((_) {
-      // 加上 300 毫秒的延迟，解决极速 WebSocket 和 REST API 之间的读写竞争问题
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          _fetchItems();
-        }
-      });
-    });
-  }
-  @override
-  void dispose() {
-    // 👈 3. 极其重要：当页面真正销毁时，必须取消监听防止内存泄漏！
-    _subscription?.cancel();
-    super.dispose();
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
   }
 
-  Future<void> _fetchItems() async {
-    final items = await ItemsRepository().getFavouriteItems(widget.user.id);
-    if (mounted) {
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
+      final remoteItems = await ItemsRepository().getFavouriteItems(widget.user.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.user.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      if (!mounted) return;
       setState(() {
-        _items = items;
-        _loading = false;
+        _futureItems = Future.value(remoteItems);
       });
+    } catch (_) {
+      // Keep cached list when refresh fails.
     }
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF5B21B6)),
-      );
-    }
-
-    if (_items.isEmpty) {
-      return _buildEmptyState(Icons.favorite_border, "No favourites yet");
-    }
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 0.8,
-      ),
-      itemBuilder: (context, index) {
-        final item = _items[index];
-        return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
-              ), // 👈 MaterialPageRoute 的右括号在这里结束
-            ).then((_) { // 2. 👈 .then() 必须接在 Navigator.push 的括号外面
-              _fetchItems();
-            });
-          },
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: _buildImage(
-                      item.imageUrls.isNotEmpty ? item.imageUrls[0] : null,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Colors.black.withOpacity(0.8),
-                          Colors.black.withOpacity(0.4),
-                          Colors.transparent,
-                        ],
-                      ),
-                      borderRadius: const BorderRadius.vertical(
-                        bottom: Radius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      item.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: _StatusBadge(status: item.status, mini: true),
-                ),
-              ],
-            ),
+    return FutureBuilder<List<ItemListing>>(
+      future: _futureItems,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF5B21B6)),
+          );
+        }
+        final items = snapshot.data ?? [];
+        if (items.isEmpty) {
+          return _buildEmptyState(Icons.favorite_border, "No favourites yet");
+        }
+        return GridView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: items.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 0.8,
           ),
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return GestureDetector(
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
+                  return;
+                }
+                navigator.push(
+                  MaterialPageRoute(
+                    builder: (_) => ItemDetailsScreen(loginUser: widget.user, item: item),
+                  ),
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: _buildImage(
+                          item.imageUrls.isNotEmpty ? item.imageUrls[0] : null,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withOpacity(0.8),
+                              Colors.black.withOpacity(0.4),
+                              Colors.transparent,
+                            ],
+                          ),
+                          borderRadius: const BorderRadius.vertical(
+                            bottom: Radius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: _StatusBadge(status: item.status, mini: true),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -811,10 +823,49 @@ class ItemTab extends StatefulWidget {
 }
 
 class _ItemTabState extends State<ItemTab> {
+  static const _cacheKey = 'your_item';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
+
+  @override
+  void initState() {
+    super.initState();
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
+  }
+
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
+      final remoteItems = await ItemsRepository().getUserItems(widget.profileUser.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.profileUser.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      if (!mounted) return;
+      setState(() {
+        _futureItems = Future.value(remoteItems);
+      });
+    } catch (_) {
+      // Keep cached list when refresh fails.
+    }
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getUserItems(widget.profileUser.id),
+      future: _futureItems,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -834,25 +885,27 @@ class _ItemTabState extends State<ItemTab> {
           itemBuilder: (context, index) {
             final item = items[index];
             return GestureDetector(
-              onTap: () async {
-                ItemListing? repliedItem;
-                if (item.repliedTo != null) {
-                  repliedItem = await ItemsRepository().getById(
-                    item.repliedTo!,
-                  );
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
+                  return;
                 }
-                final result = await Navigator.push(
-                  context,
+                navigator.push(
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.loginUser, //widget.user = profile user ！= login user
-                      item: repliedItem ?? item,
+                      loginUser: widget.loginUser, //widget.user = profile user ！= login user
+                      item: item,
                     ),
                   ),
-                );
-                if (result == true) {
-                  setState(() {});
-                }
+                ).then((result) {
+                  if (!mounted) return;
+                  if (result == true) {
+                    setState(() {
+                      _futureItems = _loadCachedItems();
+                    });
+                  }
+                  _refreshRemoteItems();
+                });
               },
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -895,6 +948,8 @@ class _ItemTabState extends State<ItemTab> {
                                 padding: const EdgeInsets.only(right: 65),
                                 child: Text(
                                   item.name.toUpperCase(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,
@@ -1033,7 +1088,7 @@ Widget _buildImage(String? url) {
   if (url == null || url.isEmpty) {
     return Container(
       color: Colors.grey[200],
-      child: const Icon(Icons.image, color: Colors.grey),
+      child: const Icon(Icons.image_outlined, color: Colors.grey),
     );
   }
   if (url.startsWith('http')) {
@@ -1043,8 +1098,15 @@ Widget _buildImage(String? url) {
       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
     );
   }
-  return Image.asset(
-    url,
+  if (url.startsWith('assets/')) {
+    return Image.asset(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+    );
+  }
+  return Image.file(
+    File(url),
     fit: BoxFit.cover,
     errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
   );

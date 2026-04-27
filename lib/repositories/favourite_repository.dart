@@ -10,10 +10,10 @@ class FavouriteRepository {
   /// Add to favourites
   Future<void> addFavourite(String userId, int itemId) async {
     try {
-      await _supabase.from('favourites').insert({
+      await _supabase.from('favourites').upsert({
         'user_id': userId,
         'item_id': itemId,
-      });
+      }, onConflict: 'user_id,item_id');
     } catch (e) {
       throw Exception('Failed to add favourite: $e');
     }
@@ -63,9 +63,7 @@ class FavouriteRepository {
         .select('item_id')
         .eq('user_id', userId);
 
-    return (response as List)
-        .map((e) => e['item_id'] as int)
-        .toSet();
+    return (response as List).map((e) => e['item_id'] as int).toSet();
   }
 
   Future<int> getFavouriteCount(int itemId) async {
@@ -75,7 +73,7 @@ class FavouriteRepository {
           .select('*')
           .eq('item_id', itemId)
           .count(CountOption.exact);
-      
+
       return response.count;
     } catch (e) {
       throw Exception('Failed to get favourite count: $e');
@@ -83,14 +81,23 @@ class FavouriteRepository {
   }
 
   Future<bool> toggleFavourite(String userId, int itemId) async {
-    final exists = await isFavourited(userId, itemId);
+    try {
+      final existing = await _supabase
+          .from('favourites')
+          .select()
+          .eq('user_id', userId)
+          .eq('item_id', itemId)
+          .maybeSingle();
 
-    if (exists) {
-      await removeFavourite(userId, itemId);
-      return false;
-    } else {
-      await addFavourite(userId, itemId);
-      return true;
+      if (existing != null) {
+        await removeFavourite(userId, itemId);
+        return false;
+      } else {
+        await addFavourite(userId, itemId);
+        return true;
+      }
+    } catch (e) {
+      throw Exception('Failed to toggle favourite: $e');
     }
   }
 

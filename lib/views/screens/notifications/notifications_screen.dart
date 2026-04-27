@@ -109,7 +109,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: _currentUser, item: listing),
+          builder: (_) => ItemDetailsScreen(loginUser: _currentUser, item: listing),
         ),
       );
     } catch (_) {

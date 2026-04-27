@@ -98,7 +98,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _addressCtrl.addListener(_onDraftChanged);
 
     checkStatus();
-
   }
 
   Future<void> _init() async {
@@ -482,7 +481,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       _mapController.move(pos, 15);
     } catch (e) {
       if (mounted) {
-        AppSnackBars.error(context, "Location error: $e");
+        AppSnackBars.error(
+          context,
+          "Couldn't get your current location. Please enable location and try again.",
+        );
       }
     }
   }
@@ -604,7 +606,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     final category = _selectedCategory;
 
     if (name.isEmpty || desc.isEmpty || category == null || category.isEmpty) {
-      AppSnackBars.error(context, 'Please fill in name, description and category.');
+      AppSnackBars.error(
+        context,
+        'Please fill in item name, description, and category.',
+      );
       return;
     }
 
@@ -623,7 +628,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
 
       if (_existingImageUrls.isEmpty && validLocalImages.isEmpty) {
-        throw Exception('At least one image is required.');
+        throw Exception('Please add at least one item photo.');
       }
 
       List<String> finalImageUrls = List.from(_existingImageUrls);
@@ -646,7 +651,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
 
       if (finalImageUrls.isEmpty) {
-        throw Exception('Image upload failed. Please try again when online.');
+        throw Exception(
+          'We could not upload your photos. Please check your internet and try again.',
+        );
       }
 
       String listingType = 'both';
@@ -654,7 +661,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         listingType = 'trade';
       } else {
         if (!_enableSelling && !_enableTrading) {
-          throw Exception('Please enable selling or trading.');
+          throw Exception('Please turn on selling or trading before submitting.');
         }
         if (_enableSelling && !_enableTrading) listingType = 'sell';
         if (!_enableSelling && _enableTrading) listingType = 'trade';
@@ -662,13 +669,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       if (_enableSelling) {
         if (price == null) {
-          throw Exception('Price is required.');
+          throw Exception('Please enter a valid price to sell this item.');
         }
       }
 
       if (_enableTrading) {
         if (preference.isEmpty) {
-          throw Exception('Preference is required.');
+          throw Exception('Please tell others what you want in exchange.');
         }
       }
 
@@ -761,8 +768,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         AppSnackBars.error(
           context,
           widget.item == null
-              ? 'Submit failed. Saved as pending draft for retry. Error: $e'
-              : 'Error: $e',
+              ? 'We could not submit your item. Your draft is saved, so you can retry later.'
+              : 'We could not update this item right now. Please try again.',
         );
       }
     } finally {
