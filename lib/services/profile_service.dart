@@ -223,4 +223,15 @@ class ProfileService {
 
     return null;
   }
+
+  static Stream<AppUser?> watchProfile(String userId) {
+    return SupabaseService.client
+        .from('users')
+        .stream(primaryKey: ['id'])
+        .eq('id', userId)
+        .map((data) {
+      if (data.isEmpty) return null;
+      return AppUser.fromMap(data.first);
+    });
+  }
 }
