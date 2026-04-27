@@ -670,21 +670,29 @@ class  _FavouriteTabState extends State<FavouriteTab>{
   @override
   void initState() {
     super.initState();
-    _futureItems = _loadItemsWithCache();
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
   }
 
-  Future<List<ItemListing>> _loadItemsWithCache() async {
-    final online = await NetworkService.hasConnection();
-    if (online) {
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
       final remoteItems = await ItemsRepository().getFavouriteItems(widget.user.id);
       await _cacheRepo.replaceItems(
         userId: widget.user.id,
         tabKey: _cacheKey,
         items: remoteItems,
       );
-      return remoteItems;
+      if (!mounted) return;
+      setState(() {
+        _futureItems = Future.value(remoteItems);
+      });
+    } catch (_) {
+      // Keep cached list when refresh fails.
     }
-    return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
   }
 
   void _showNetworkError() {
@@ -720,19 +728,17 @@ class  _FavouriteTabState extends State<FavouriteTab>{
           itemBuilder: (context, index) {
             final item = items[index];
             return GestureDetector(
-              onTap: () async {
-                final online = await NetworkService.hasConnection();
-                if (!online) {
-                  _showNetworkError();
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
                   return;
                 }
-                await Navigator.push(
-                  context,
+                navigator.push(
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(loginUser: widget.user, item: item),
                   ),
                 );
-                },
+              },
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
@@ -824,21 +830,29 @@ class _ItemTabState extends State<ItemTab> {
   @override
   void initState() {
     super.initState();
-    _futureItems = _loadItemsWithCache();
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
   }
 
-  Future<List<ItemListing>> _loadItemsWithCache() async {
-    final online = await NetworkService.hasConnection();
-    if (online) {
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
       final remoteItems = await ItemsRepository().getUserItems(widget.profileUser.id);
       await _cacheRepo.replaceItems(
         userId: widget.profileUser.id,
         tabKey: _cacheKey,
         items: remoteItems,
       );
-      return remoteItems;
+      if (!mounted) return;
+      setState(() {
+        _futureItems = Future.value(remoteItems);
+      });
+    } catch (_) {
+      // Keep cached list when refresh fails.
     }
-    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
   }
 
   void _showNetworkError() {
@@ -871,31 +885,27 @@ class _ItemTabState extends State<ItemTab> {
           itemBuilder: (context, index) {
             final item = items[index];
             return GestureDetector(
-              onTap: () async {
-                final online = await NetworkService.hasConnection();
-                if (!online) {
-                  _showNetworkError();
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
                   return;
                 }
-                ItemListing? repliedItem;
-                if (item.repliedTo != null) {
-                  repliedItem = await ItemsRepository().getById(
-                    item.repliedTo!,
-                  );
-                }
-                final result = await Navigator.push(
-                  context,
+                navigator.push(
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
                       loginUser: widget.loginUser, //widget.user = profile user ！= login user
-                      item: repliedItem ?? item,
+                      item: item,
                     ),
                   ),
-                );
-                if (result == true) {
-                  setState(() {});
-                  _futureItems = _loadItemsWithCache();
-                }
+                ).then((result) {
+                  if (!mounted) return;
+                  if (result == true) {
+                    setState(() {
+                      _futureItems = _loadCachedItems();
+                    });
+                  }
+                  _refreshRemoteItems();
+                });
               },
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -938,6 +948,8 @@ class _ItemTabState extends State<ItemTab> {
                                 padding: const EdgeInsets.only(right: 65),
                                 child: Text(
                                   item.name.toUpperCase(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,

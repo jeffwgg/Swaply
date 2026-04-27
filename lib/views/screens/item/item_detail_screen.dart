@@ -56,9 +56,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     final trimmed = imagePath.trim();
     if (trimmed.isEmpty) return null;
     if (trimmed.startsWith('http')) {
-      return NetworkImage(
-        '$trimmed?t=${DateTime.now().millisecondsSinceEpoch}',
-      );
+      return NetworkImage(trimmed);
     }
     if (trimmed.startsWith('assets/')) {
       return AssetImage(trimmed);
@@ -168,8 +166,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You cannot buy your own listing.')),
+      AppSnackBars.success(
+        context,
+        'This is your own listing, so you cannot buy it.',
       );
       return;
     }
@@ -189,13 +188,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       AppSnackBars.error(context, 'Seller account id not found.');
       return;
     }
-
-    log(
-      '[BuyNow -> Checkout] itemId=${widget.item.id}, price=${widget.item.price}, '
-      'listingType=${widget.item.listingType}, '
-      'buyerId=${loginUser!.id}, sellerId=$sellerId, '
-      'meetupOptions=${meetups.length}, sellerAddress=${widget.item.address}',
-    );
 
     final completed = await Navigator.push<bool>(
       context,
@@ -256,7 +248,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _toggleFavourite() async {
-    if (widget.loginUser == null) {
+    if (loginUser == null) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -265,52 +257,36 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
 
     final previousState = _isFavourite;
-    final previousCount = _favCount;
-    final isDislikeAction = previousState;
-    if (isDislikeAction) {
-      final online = await NetworkService.hasConnection();
-      if (online != true) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Network error. Please check your connection.'),
-          ),
-        );
-        return;
-      }
-    }
+    final previousCount = _favCount ?? 0;
 
-    setState(() {
-      _isFavourite = !previousState;
-      widget.item.isFavorite = _isFavourite;
-      if (previousCount != null) {
-        final nextCount = _isFavourite ? previousCount + 1 : previousCount - 1;
-        _favCount = nextCount < 0 ? 0 : nextCount;
-      }
-    });
+    if (!mounted) return;
 
     try {
-      final newState = await ItemService().toggleFavourite(
-        _item.id,
-        widget.loginUser!.id,
-      );
-      if (!mounted) return;
+      await ItemService().toggleFavourite(_item.id, loginUser!.id);
+
       setState(() {
-        _isFavourite = newState;
-        _item.isFavorite = newState;
-        if (previousCount != null) {
-          final nextCount = newState ? previousCount + 1 : previousCount - 1;
-          _favCount = nextCount < 0 ? 0 : nextCount;
-        }
+        _isFavourite = !previousState;
+        _item.isFavorite = _isFavourite;
+
+        final nextCount = _isFavourite ? previousCount + 1 : previousCount - 1;
+
+        _favCount = nextCount < 0 ? 0 : nextCount;
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         _isFavourite = previousState;
         _item.isFavorite = previousState;
         _favCount = previousCount;
       });
+
       log("Favourite error: $e");
+
+      AppSnackBars.error(
+        context,
+        'Failed to update favourite. Please try again.',
+      );
     }
   }
 
@@ -388,7 +364,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         }
       } catch (e) {
         if (mounted) {
-          AppSnackBars.error(context, 'Error dropping offer: $e');
+          AppSnackBars.error(
+            context,
+            'Could not remove this trade offer right now. Please try again.',
+          );
         }
         log("Error dropping offer: $e");
       }
@@ -436,7 +415,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         if (mounted) {
           AppSnackBars.error(
             context,
-            'Offer accepted but creating transaction failed: $e',
+            'Offer accepted, but we could not create the transaction yet. Please try again.',
           );
         }
       }
@@ -490,7 +469,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         if (mounted) {
           AppSnackBars.error(
             context,
-            'Offer accepted, but follow-up notification/chat failed: $e',
+            'Offer accepted, but we could not send the chat/notification update.',
           );
         }
       }
@@ -534,7 +513,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         if (mounted) {
           AppSnackBars.error(
             context,
-            'Offer rejected, but notification failed to send: $e',
+            'Offer rejected, but we could not send the notification update.',
           );
         }
       }
@@ -878,25 +857,21 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
                           if (mounted) {
                             ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _isFollowing
-                                      ? 'Following now!'
-                                      : 'Unfollowed successfully.',
-                                ),
-                                backgroundColor: _isFollowing
-                                    ? Colors.green
-                                    : Colors.grey[700],
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
+                            _isFollowing
+                                ? AppSnackBars.success(
+                                    context,
+                                    'Following now!',
+                                  )
+                                : AppSnackBars.success(
+                                    context,
+                                    'Unfollowed successfully.',
+                                  );
                           }
                         } catch (e) {
                           print('Follow error: $e');
                           if (mounted)
                             _showFollowError(
-                              'Error updating follow state. Please try again.',
+                              'Could not update follow status right now. Please try again.',
                             );
                         } finally {
                           if (mounted) setState(() => _isLoadingFollow = false);

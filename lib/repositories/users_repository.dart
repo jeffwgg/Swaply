@@ -1,7 +1,6 @@
 import '../models/app_user.dart';
 import '../services/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:developer';
 
 class UsersRepository {
 
@@ -54,8 +53,6 @@ class UsersRepository {
     if (response == null) {
       return null;
     }
-
-    log('log $response');
 
     return AppUser.fromMap(_requireMap(response, operation: 'getById'));
   }

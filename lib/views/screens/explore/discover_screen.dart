@@ -7,6 +7,7 @@ import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../services/item_service.dart';
 import '../../../services/network_service.dart';
@@ -436,7 +437,9 @@ class _NestedTabBarState extends State<NestedTabBar>
                   }
 
                   if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}'));
+                    return const Center(
+                      child: Text('Could not load items right now. Please try again.'),
+                    );
                   }
 
                   final items = snapshot.data ?? [];
@@ -541,28 +544,26 @@ class _ItemCardState extends State<ItemCard> {
 
   void _showNetworkError() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Network error. Please check your connection.')),
-    );
+    AppSnackBars.error(context, 'You seem to be offline. Please check your internet and try again.');
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () async {
-        final online = await NetworkService.hasConnection();
-        if (!online) {
-          _showNetworkError();
+        if (!mounted) return;
+        final navigator = Navigator.maybeOf(context);
+        if (navigator == null) {
           return;
         }
-        await Navigator.push(
-          context,
+        await navigator.push(
           MaterialPageRoute(
             builder: (_) =>
                 ItemDetailsScreen(loginUser: widget.user, item: widget.item),
           ),
         );
-        
+        if (!mounted) return;
+
         // Refresh the card UI when returning from details screen
         // widget.item is updated inside ItemDetailsScreen
         setState(() {});
@@ -768,14 +769,6 @@ class _ItemCardState extends State<ItemCard> {
     }
 
     final previousState = widget.item.isFavorite;
-    final isDislikeAction = previousState;
-    if (isDislikeAction) {
-      final online = await NetworkService.hasConnection();
-      if (!online) {
-        _showNetworkError();
-        return;
-      }
-    }
     setState(() {
       widget.item.isFavorite = !previousState;
     });

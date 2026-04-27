@@ -121,60 +121,6 @@ class LocalDbService {
     ''');
 
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS item_draft (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        name TEXT,
-        description TEXT,
-        price REAL,
-        listing_type TEXT,
-        owner_id TEXT,
-        category TEXT,
-        image_urls TEXT,
-        preference TEXT,
-        replied_to INTEGER,
-        address TEXT,
-        latitude REAL,
-        longitude REAL,
-  
-        is_pending_upload INTEGER DEFAULT 0,
-        retry_count INTEGER DEFAULT 0,
-        sync_error TEXT,
-      
-        updated_at TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-  ''');
-
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS item_draft_images (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        draft_id INTEGER NOT NULL,
-        image_bytes BLOB NOT NULL,
-        image_ext TEXT,
-        sort_order INTEGER NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_item_draft_images_draft_sort
-      ON item_draft_images(draft_id, sort_order)
-    ''');
-
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS search_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        query TEXT NOT NULL UNIQUE,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_search_history_updated_at
-      ON search_history(updated_at DESC)
-    ''');
-
-    await db.execute('''
       CREATE TABLE IF NOT EXISTS profile_items_cache (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
