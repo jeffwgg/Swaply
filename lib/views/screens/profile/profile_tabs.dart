@@ -1,6 +1,5 @@
 import 'dart:developer';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
@@ -23,6 +22,7 @@ import 'package:swaply/views/screens/profile/profile_screen.dart';
 import 'package:swaply/views/screens/transaction/transaction_detail_screen.dart';
 import 'package:swaply/views/screens/transaction/checkout_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
+import 'package:swaply/repositories/favourite_repository.dart';
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
@@ -669,13 +669,29 @@ class  _FavouriteTabState extends State<FavouriteTab>{
   static const _cacheKey = 'favourite';
   final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
   late Future<List<ItemListing>> _futureItems;
+  StreamSubscription? _streamSub;
 
   void initState() {
     super.initState();
     _futureItems = _loadCachedItems();
     _refreshRemoteItems();
+
+    _streamSub = FavouriteRepository()
+        .watchFavouriteIds(widget.user.id)
+        .listen(
+          (_) {
+        print('🔥 Favourite stream triggered!');
+        _refreshRemoteItems();
+      },
+      onError: (e) => print('Favourite stream error: $e'),
+    );
   }
 
+  @override
+  void dispose() {
+    _streamSub?.cancel();
+    super.dispose();
+  }
   Future<List<ItemListing>> _loadCachedItems() async {
     return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
   }

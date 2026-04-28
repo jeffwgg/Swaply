@@ -33,6 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   StreamSubscription? _followingStream;
   StreamSubscription? _followersStream;
+  StreamSubscription? _favouritesStream;
 
   @override
   void initState() {
@@ -53,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final online = await _isOnline();
     if (!online) {
       print('📴 Offline - skipping follow streams');
+      _refreshStats();
       return;
     }
 
@@ -61,6 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .from('follows')
           .stream(primaryKey: ['id'])
           .eq('follower_id', _profileUserId!)
+          .handleError((e) => print('Following stream error: $e'))
           .listen((_) {
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) _refreshStats();
@@ -71,11 +74,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .from('follows')
           .stream(primaryKey: ['id'])
           .eq('following_id', _profileUserId!)
+          .handleError((e) => print('Followers stream error: $e'))
           .listen((_) {
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) _refreshStats();
         });
       });
+
+      _favouritesStream = SupabaseService.client
+          .from('favourites')
+          .stream(primaryKey: ['id'])
+          .handleError((e) => print('Favourites stream error: $e'))
+          .listen(
+            (_) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _refreshStats();
+          });
+        },
+        onError: (e) => print('Favourites stream error: $e'),
+      );
     }catch(e) {
       print('Stream setup error: $e');
     }
@@ -101,6 +118,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _followingStream?.cancel();
     _followersStream?.cancel();
+    _favouritesStream?.cancel();
     super.dispose();
   }
 
@@ -223,7 +241,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 32),
               GestureDetector(
                 onTap: () async {
-                  // 重新发送验证邮件
                   try {
                     await SupabaseService.client.auth.resend(
                       type: OtpType.signup,
@@ -642,6 +659,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<Map<String, int>> _loadStatistics(String userId) async {
     final localRepo = LocalProfileRepository();
+    final isOnline = await _isOnline();
+
+    if (!isOnline) {
+      final cached = await localRepo.getCachedStats(userId);
+      return cached ?? {'following': 0, 'followers': 0, 'saved': 0};
+    }
 
     try {
       final following = await FollowService.getFollowingCount(userId);
@@ -655,13 +678,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       };
 
       await localRepo.saveStats(userId, following, followers, saved);
-      print('✅ Stats saved: $stats');
       return stats;
     } catch (e) {
-
-      print('Stats fetch failed, loading from cache: $e');
       final cached = await localRepo.getCachedStats(userId);
-      print('📦 Cached stats: $cached');
       return cached ?? {'following': 0, 'followers': 0, 'saved': 0};
     }
   }
