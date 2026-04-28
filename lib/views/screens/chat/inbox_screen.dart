@@ -255,6 +255,11 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _isLoadingInboxData = true;
     try {
       final threads = await _inboxViewModel.loadInbox();
+      Set<int> pinnedConversationIds = _pinnedChats;
+      try {
+        pinnedConversationIds = await _inboxViewModel
+            .loadPinnedConversationIds();
+      } catch (_) {}
       final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
         threads.map((thread) => thread.id).toList(growable: false),
       );
@@ -318,6 +323,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _allConversations.clear();
           _allConversations.add(aiChat);
           _allConversations.addAll(mapped);
+          _pinnedChats = pinnedConversationIds;
           if (_selectedConversation >= _allConversations.length) {
             _selectedConversation = 0;
           }
@@ -372,13 +378,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   Future<void> _loadPinned() async {
     final prefs = await SharedPreferences.getInstance();
-    final pinnedRaw = prefs.getStringList('pinned_chats') ?? [];
-    final pinned = pinnedRaw.map(int.tryParse).whereType<int>().toSet();
     final unreadRaw = prefs.getStringList('manual_unread_chats') ?? [];
     final hiddenRaw = prefs.getStringList('hidden_chats') ?? [];
     final searchRaw = prefs.getStringList('chat_search_history') ?? [];
     setState(() {
-      _pinnedChats = pinned;
       _manuallyUnreadChats = unreadRaw
           .map(int.tryParse)
           .whereType<int>()
@@ -392,10 +395,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   Future<void> _saveConversationPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      'pinned_chats',
-      _pinnedChats.map((id) => id.toString()).toList(),
-    );
     await prefs.setStringList(
       'manual_unread_chats',
       _manuallyUnreadChats.map((id) => id.toString()).toList(),
@@ -475,14 +474,26 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _togglePin(int id) async {
-    setState(() {
-      if (_pinnedChats.contains(id)) {
-        _pinnedChats.remove(id);
-      } else {
-        _pinnedChats.add(id);
+    if (id <= 0) {
+      return;
+    }
+    final shouldPin = !_pinnedChats.contains(id);
+    try {
+      await _inboxViewModel.setConversationPinned(
+        chatId: id,
+        isPinned: shouldPin,
+      );
+      if (!mounted) {
+        return;
       }
-    });
-    await _saveConversationPrefs();
+      setState(() {
+        if (shouldPin) {
+          _pinnedChats.add(id);
+        } else {
+          _pinnedChats.remove(id);
+        }
+      });
+    } catch (_) {}
   }
 
   Future<void> _toggleManualUnread(int id) async {
@@ -497,6 +508,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _hideConversationForCurrentUser(int id) async {
+    if (_pinnedChats.contains(id)) {
+      try {
+        await _inboxViewModel.setConversationPinned(
+          chatId: id,
+          isPinned: false,
+        );
+      } catch (_) {}
+    }
     setState(() {
       _hiddenChats.add(id);
       _pinnedChats.remove(id);

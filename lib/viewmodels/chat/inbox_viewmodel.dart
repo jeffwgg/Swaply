@@ -123,6 +123,26 @@ class InboxViewModel extends ChangeNotifier {
     return _chatService.unreadCountsByChat(chatIds);
   }
 
+  Future<Set<int>> loadPinnedConversationIds() {
+    if (_isDisposed) {
+      return Future.value(const <int>{});
+    }
+    return _chatService.listPinnedConversationIds();
+  }
+
+  Future<void> setConversationPinned({
+    required int chatId,
+    required bool isPinned,
+  }) {
+    if (_isDisposed) {
+      return Future.value();
+    }
+    return _chatService.setConversationPinned(
+      chatId: chatId,
+      isPinned: isPinned,
+    );
+  }
+
   Future<void> editChatMessage({
     required int messageId,
     required String content,

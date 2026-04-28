@@ -8,12 +8,13 @@ class ChatsRepository {
   ChatsRepository();
 
   static const _table = 'chats';
+  static const _pinsTable = 'user_chat_pins';
   static const _withParticipantsSelect =
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
       'item:items(owner_id,name,image_urls)';
-    static const _withParticipantsSelectCompat =
+  static const _withParticipantsSelectCompat =
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
@@ -117,9 +118,7 @@ class ChatsRepository {
       );
     } on PostgrestException catch (error) {
       // Older databases may not have the RPC yet; fallback to direct table flow.
-      final shouldFallback =
-          error.code == 'PGRST202' ||
-          error.code == '22P02';
+      final shouldFallback = error.code == 'PGRST202' || error.code == '22P02';
       if (!shouldFallback) {
         rethrow;
       }
@@ -163,7 +162,11 @@ class ChatsRepository {
     try {
       final insertedResponse = await SupabaseService.client
           .from(_table)
-          .insert({'user1_id': lowUserId, 'user2_id': highUserId, 'item_id': itemId})
+          .insert({
+            'user1_id': lowUserId,
+            'user2_id': highUserId,
+            'item_id': itemId,
+          })
           .select(_withParticipantsSelect)
           .single();
 
@@ -361,5 +364,48 @@ class ChatsRepository {
       operation: 'list_pinned_messages_as_user',
     );
     return rows.map<ChatPinnedMessage>(ChatPinnedMessage.fromMap).toList();
+  }
+
+  Future<Set<int>> listPinnedChatIdsForUser(String userId) async {
+    final response = await SupabaseService.client
+        .from(_pinsTable)
+        .select('chat_id')
+        .eq('user_id', userId);
+    final rows = _requireListOfMaps(
+      response,
+      operation: 'listPinnedChatIdsForUser',
+    );
+    final ids = <int>{};
+    for (final row in rows) {
+      final chatId = parseNullableInt(
+        row['chat_id'],
+        fieldName: 'user_chat_pins.chat_id',
+      );
+      if (chatId != null && chatId > 0) {
+        ids.add(chatId);
+      }
+    }
+    return ids;
+  }
+
+  Future<void> setConversationPinned({
+    required String userId,
+    required int chatId,
+    required bool isPinned,
+  }) async {
+    if (isPinned) {
+      await SupabaseService.client.from(_pinsTable).upsert({
+        'user_id': userId,
+        'chat_id': chatId,
+        'pinned_at': DateTime.now().toUtc().toIso8601String(),
+      });
+      return;
+    }
+
+    await SupabaseService.client
+        .from(_pinsTable)
+        .delete()
+        .eq('user_id', userId)
+        .eq('chat_id', chatId);
   }
 }
