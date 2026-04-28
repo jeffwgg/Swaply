@@ -20,7 +20,7 @@ import 'package:swaply/models/checkout_flow_kind.dart';
 import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/profile_screen.dart';
-import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
+import 'package:swaply/views/screens/transaction/transaction_detail_screen.dart';
 import 'package:swaply/views/screens/transaction/checkout_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
 
@@ -184,7 +184,7 @@ class _TransactionTabState extends State<TransactionTab> {
                       price: c.tx.itemPrice,
                       listingType: 'sell',
                       ownerId: c.tx.sellerId,
-                      status: 'unknown',
+                      status: c.itemStatus ?? 'unknown',
                       category: c.itemCategory ?? '',
                       imageUrls: c.itemImageUrl == null ? [] : [c.itemImageUrl!],
                       preference: null,
@@ -203,7 +203,7 @@ class _TransactionTabState extends State<TransactionTab> {
                       price: null,
                       listingType: 'trade',
                       ownerId: c.tx.buyerId,
-                      status: 'unknown',
+                      status: c.tradedItemStatus ?? 'unknown',
                       category: c.tradedItemCategory ?? '',
                       imageUrls: c.tradedItemImageUrl == null
                           ? []
@@ -257,11 +257,13 @@ class _TransactionTabState extends State<TransactionTab> {
         itemImageUrl:
             (item != null && item.imageUrls.isNotEmpty) ? item.imageUrls.first : null,
         itemCategory: item?.category,
+        itemStatus: item?.status,
         tradedItemName: tradedItem?.name,
         tradedItemImageUrl: (tradedItem != null && tradedItem.imageUrls.isNotEmpty)
             ? tradedItem.imageUrls.first
             : null,
         tradedItemCategory: tradedItem?.category,
+        tradedItemStatus: tradedItem?.status,
       );
 
       rows.add(

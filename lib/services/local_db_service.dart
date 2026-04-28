@@ -25,9 +25,20 @@ class LocalDbService {
 
     final db = await openDatabase(
       fullPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await _createSchema(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _createSchema(db);
+        if (oldVersion < 2) {
+          await db.execute('''
+            ALTER TABLE transactions_cache ADD COLUMN item_status TEXT
+          ''').catchError((_) {});
+          await db.execute('''
+            ALTER TABLE transactions_cache ADD COLUMN traded_item_status TEXT
+          ''').catchError((_) {});
+        }
       },
       onOpen: (db) async {
         await _createSchema(db);
@@ -153,9 +164,11 @@ class LocalDbService {
         item_name TEXT,
         item_image_url TEXT,
         item_category TEXT,
+        item_status TEXT,
         traded_item_name TEXT,
         traded_item_image_url TEXT,
         traded_item_category TEXT,
+        traded_item_status TEXT,
 
         is_synced INTEGER NOT NULL DEFAULT 1,
         failed INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +177,14 @@ class LocalDbService {
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     ''');
+
+    // Forward-compatible columns for older DB installs.
+    await db.execute('''
+      ALTER TABLE transactions_cache ADD COLUMN item_status TEXT
+    ''').catchError((_) {});
+    await db.execute('''
+      ALTER TABLE transactions_cache ADD COLUMN traded_item_status TEXT
+    ''').catchError((_) {});
 
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_profile_items_cache_user_tab_updated
