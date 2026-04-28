@@ -1,4 +1,7 @@
+import 'dart:developer';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/app_user.dart';
@@ -10,13 +13,16 @@ import 'package:swaply/repositories/local/local_transactions_repository.dart';
 import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
+import 'package:swaply/repositories/local/local_profile_items_repository.dart';
+import 'package:swaply/services/network_service.dart';
 import 'package:swaply/models/checkout_flow_kind.dart';
 import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/profile_screen.dart';
-import 'package:swaply/views/screens/profile/transaction_detail_screen.dart';
+import 'package:swaply/views/screens/transaction/transaction_detail_screen.dart';
 import 'package:swaply/views/screens/transaction/checkout_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
+import 'package:swaply/repositories/favourite_repository.dart';
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
@@ -178,7 +184,7 @@ class _TransactionTabState extends State<TransactionTab> {
                       price: c.tx.itemPrice,
                       listingType: 'sell',
                       ownerId: c.tx.sellerId,
-                      status: 'unknown',
+                      status: c.itemStatus ?? 'unknown',
                       category: c.itemCategory ?? '',
                       imageUrls: c.itemImageUrl == null ? [] : [c.itemImageUrl!],
                       preference: null,
@@ -197,7 +203,7 @@ class _TransactionTabState extends State<TransactionTab> {
                       price: null,
                       listingType: 'trade',
                       ownerId: c.tx.buyerId,
-                      status: 'unknown',
+                      status: c.tradedItemStatus ?? 'unknown',
                       category: c.tradedItemCategory ?? '',
                       imageUrls: c.tradedItemImageUrl == null
                           ? []
@@ -251,11 +257,13 @@ class _TransactionTabState extends State<TransactionTab> {
         itemImageUrl:
             (item != null && item.imageUrls.isNotEmpty) ? item.imageUrls.first : null,
         itemCategory: item?.category,
+        itemStatus: item?.status,
         tradedItemName: tradedItem?.name,
         tradedItemImageUrl: (tradedItem != null && tradedItem.imageUrls.isNotEmpty)
             ? tradedItem.imageUrls.first
             : null,
         tradedItemCategory: tradedItem?.category,
+        tradedItemStatus: tradedItem?.status,
       );
 
       rows.add(
@@ -609,11 +617,12 @@ class _TxnThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 72.0;
     if (url == null || url!.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     if (url!.startsWith('http')) {
@@ -622,24 +631,26 @@ class _TxnThumb extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (_, __, ___) => Container(
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
+    return Image.network(
       url!,
       width: size,
       height: size,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/sample.jpeg',
+      errorBuilder: (_, __, ___) => Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }
@@ -655,32 +666,64 @@ class FavouriteTab extends StatefulWidget {
 }
 
 class  _FavouriteTabState extends State<FavouriteTab>{
-  List<ItemListing> _items = [];
-  bool _loading = true;
+  static const _cacheKey = 'favourite';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
+  StreamSubscription? _streamSub;
 
-  @override
   void initState() {
     super.initState();
-    _load(); // ← 这里调用
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
+
+    _streamSub = FavouriteRepository()
+        .watchFavouriteIds(widget.user.id)
+        .listen(
+          (_) {
+        print('🔥 Favourite stream triggered!');
+        _refreshRemoteItems();
+      },
+      onError: (e) => print('Favourite stream error: $e'),
+    );
   }
 
-  // ✅ 加在这里
-  Future<void> _load() async {
-    print("🔥 _load called");
-    setState(() => _loading = true);
-    final items = await ItemsRepository().getFavouriteItems(widget.user.id);
-    if (mounted) {
+  @override
+  void dispose() {
+    _streamSub?.cancel();
+    super.dispose();
+  }
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
+      final remoteItems = await ItemsRepository().getFavouriteItems(widget.user.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.user.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      if (!mounted) return;
       setState(() {
-        _items = items;
-        _loading = false;
+        _futureItems = Future.value(remoteItems);
       });
+    } catch (_) {
+      // Keep cached list when refresh fails.
     }
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getFavouriteItems(widget.user.id),
+      future: _futureItems,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -703,15 +746,17 @@ class  _FavouriteTabState extends State<FavouriteTab>{
           itemBuilder: (context, index) {
             final item = items[index];
             return GestureDetector(
-              onTap: () async {
-                await Navigator.push(
-                  context,
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
+                  return;
+                }
+                navigator.push(
                   MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(user: widget.user, item: item),
+                    builder: (_) => ItemDetailsScreen(loginUser: widget.user, item: item),
                   ),
                 );
-                _load();
-                },
+              },
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
@@ -796,10 +841,49 @@ class ItemTab extends StatefulWidget {
 }
 
 class _ItemTabState extends State<ItemTab> {
+  static const _cacheKey = 'your_item';
+  final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
+  late Future<List<ItemListing>> _futureItems;
+
+  @override
+  void initState() {
+    super.initState();
+    _futureItems = _loadCachedItems();
+    _refreshRemoteItems();
+  }
+
+  Future<List<ItemListing>> _loadCachedItems() async {
+    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
+  }
+
+  Future<void> _refreshRemoteItems() async {
+    try {
+      final remoteItems = await ItemsRepository().getUserItems(widget.profileUser.id);
+      await _cacheRepo.replaceItems(
+        userId: widget.profileUser.id,
+        tabKey: _cacheKey,
+        items: remoteItems,
+      );
+      if (!mounted) return;
+      setState(() {
+        _futureItems = Future.value(remoteItems);
+      });
+    } catch (_) {
+      // Keep cached list when refresh fails.
+    }
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Network error. Please check your connection.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
-      future: ItemsRepository().getUserItems(widget.profileUser.id),
+      future: _futureItems,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -819,25 +903,27 @@ class _ItemTabState extends State<ItemTab> {
           itemBuilder: (context, index) {
             final item = items[index];
             return GestureDetector(
-              onTap: () async {
-                ItemListing? repliedItem;
-                if (item.repliedTo != null) {
-                  repliedItem = await ItemsRepository().getById(
-                    item.repliedTo!,
-                  );
+              onTap: () {
+                final navigator = Navigator.maybeOf(context);
+                if (navigator == null) {
+                  return;
                 }
-                final result = await Navigator.push(
-                  context,
+                navigator.push(
                   MaterialPageRoute(
                     builder: (_) => ItemDetailsScreen(
-                      user: widget.loginUser, //widget.user = profile user ！= login user
-                      item: repliedItem ?? item,
+                      loginUser: widget.loginUser, //widget.user = profile user ！= login user
+                      item: item,
                     ),
                   ),
-                );
-                if (result == true) {
-                  setState(() {});
-                }
+                ).then((result) {
+                  if (!mounted) return;
+                  if (result == true) {
+                    setState(() {
+                      _futureItems = _loadCachedItems();
+                    });
+                  }
+                  _refreshRemoteItems();
+                });
               },
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -880,6 +966,8 @@ class _ItemTabState extends State<ItemTab> {
                                 padding: const EdgeInsets.only(right: 65),
                                 child: Text(
                                   item.name.toUpperCase(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,
@@ -1018,7 +1106,7 @@ Widget _buildImage(String? url) {
   if (url == null || url.isEmpty) {
     return Container(
       color: Colors.grey[200],
-      child: const Icon(Icons.image, color: Colors.grey),
+      child: const Icon(Icons.image_outlined, color: Colors.grey),
     );
   }
   if (url.startsWith('http')) {
@@ -1028,8 +1116,15 @@ Widget _buildImage(String? url) {
       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
     );
   }
-  return Image.asset(
-    url,
+  if (url.startsWith('assets/')) {
+    return Image.asset(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+    );
+  }
+  return Image.file(
+    File(url),
     fit: BoxFit.cover,
     errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
   );

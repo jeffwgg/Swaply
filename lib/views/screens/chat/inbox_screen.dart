@@ -32,7 +32,7 @@ import '../../../models/meetup_address_option.dart';
 import '../../../views/screens/transaction/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
-import '../../../views/screens/profile/transaction_detail_screen.dart';
+import '../transaction/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 import '../../../repositories/local/local_messages_repository.dart';
 import '../../../core/utils/app_snack_bars.dart';
@@ -448,7 +448,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
         ),
       );
     } catch (_) {
@@ -4118,7 +4118,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ItemDetailsScreen(user: currentUser, item: item),
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
         ),
       );
     } catch (_) {

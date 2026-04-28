@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
 
 import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
@@ -9,7 +10,11 @@ import '../../../models/transaction.dart';
 import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
-import 'profile_screen.dart';
+import '../../../repositories/local/local_transactions_repository.dart';
+import '../profile/profile_screen.dart';
+import 'qr_scan_screen.dart';
+import 'dart:convert';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   const TransactionDetailScreen({
@@ -50,17 +55,79 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   }
 
   Future<_TxDetailData> _load() async {
-    final latestTx =
-        await _txRepo.getById(widget.tx.transactionId) ?? widget.tx;
-    final item = await _itemsRepo.getById(latestTx.itemId);
-    final traded = latestTx.tradedItemId == null
-        ? null
-        : await _itemsRepo.getById(latestTx.tradedItemId!);
-    return _TxDetailData(
-      tx: latestTx,
-      item: item ?? widget.item,
-      tradedItem: traded ?? widget.tradedItem,
-    );
+    try {
+      final latestTx =
+          await _txRepo.getById(widget.tx.transactionId) ?? widget.tx;
+      final item = await _itemsRepo.getById(latestTx.itemId);
+      final traded = latestTx.tradedItemId == null
+          ? null
+          : await _itemsRepo.getById(latestTx.tradedItemId!);
+      return _TxDetailData(
+        tx: latestTx,
+        item: item ?? widget.item,
+        tradedItem: traded ?? widget.tradedItem,
+      );
+    } catch (_) {
+      final cached = await LocalTransactionsRepository()
+          .getById(widget.tx.transactionId);
+      if (cached == null) {
+        return _TxDetailData(
+          tx: widget.tx,
+          item: widget.item,
+          tradedItem: widget.tradedItem,
+        );
+      }
+
+      final offlineItem = widget.item ??
+          ItemListing(
+            id: cached.tx.itemId,
+            name: cached.itemName ?? 'Item #${cached.tx.itemId}',
+            description: '',
+            price: cached.tx.itemPrice,
+            listingType: 'sell',
+            ownerId: cached.tx.sellerId,
+            status: cached.itemStatus ?? 'unknown',
+            category: cached.itemCategory ?? '',
+            imageUrls:
+                cached.itemImageUrl == null ? [] : [cached.itemImageUrl!],
+            preference: null,
+            repliedTo: null,
+            createdAt: cached.tx.createdAt,
+            address: null,
+            latitude: null,
+            longitude: null,
+          );
+
+      final offlineTraded = cached.tx.tradedItemId == null
+          ? widget.tradedItem
+          : (widget.tradedItem ??
+              ItemListing(
+                id: cached.tx.tradedItemId ?? 0,
+                name:
+                    cached.tradedItemName ?? 'Item #${cached.tx.tradedItemId}',
+                description: '',
+                price: null,
+                listingType: 'trade',
+                ownerId: cached.tx.buyerId,
+                status: cached.tradedItemStatus ?? 'unknown',
+                category: cached.tradedItemCategory ?? '',
+                imageUrls: cached.tradedItemImageUrl == null
+                    ? []
+                    : [cached.tradedItemImageUrl!],
+                preference: null,
+                repliedTo: null,
+                createdAt: cached.tx.createdAt,
+                address: null,
+                latitude: null,
+                longitude: null,
+              ));
+
+      return _TxDetailData(
+        tx: cached.tx,
+        item: offlineItem,
+        tradedItem: offlineTraded,
+      );
+    }
   }
 
   void _reload() {
@@ -146,6 +213,127 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
       if (!context.mounted) return;
       AppSnackBars.error(context, 'Failed to mark received: $e');
     }
+  }
+
+  Future<void> _showMyTradeQr({
+    required BuildContext context,
+    required Transaction tx,
+  }) async {
+    final role = widget.viewer.id == tx.buyerId ? 'buyer' : 'seller';
+    final payload = TradeQrPayload(
+      transactionId: tx.transactionId,
+      role: role,
+      uid: widget.viewer.id,
+    );
+    final raw = jsonEncode(payload.toJson());
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Your meet-up QR',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE9D5FF)),
+                  color: const Color(0xFFF8F5FF),
+                ),
+                child: QrImageView(
+                  data: raw,
+                  size: 240,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Let the other party scan this QR.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await _scanTradeQrAndConfirm(context: context, tx: tx);
+                      },
+                      child: const Text('Scan QR'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _scanTradeQrAndConfirm({
+    required BuildContext context,
+    required Transaction tx,
+  }) async {
+    final raw = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const QrScanScreen(title: 'Scan meet-up QR'),
+      ),
+    );
+    if (!mounted || raw == null || raw.trim().isEmpty) return;
+
+    final parsed = TradeQrPayload.tryParse(raw.trim());
+    if (parsed == null) {
+      if (!context.mounted) return;
+      AppSnackBars.error(context, 'Invalid QR code.');
+      return;
+    }
+
+    if (parsed.transactionId != tx.transactionId) {
+      if (!context.mounted) return;
+      AppSnackBars.error(context, 'This QR is for a different transaction.');
+      return;
+    }
+
+    final myRole = widget.viewer.id == tx.buyerId ? 'buyer' : 'seller';
+    if (parsed.role == myRole) {
+      if (!context.mounted) return;
+      AppSnackBars.error(context, 'You cannot scan your own QR.');
+      return;
+    }
+
+    // Must match the counterparty identity for this transaction.
+    final expectedCounterpartyUid =
+        myRole == 'buyer' ? tx.sellerId : tx.buyerId;
+    final expectedCounterpartyRole =
+        myRole == 'buyer' ? 'seller' : 'buyer';
+    if (parsed.uid != expectedCounterpartyUid ||
+        parsed.role != expectedCounterpartyRole) {
+      if (!context.mounted) return;
+      AppSnackBars.error(context, 'This QR does not belong to your counterparty.');
+      return;
+    }
+
+    // Success: scanning partner QR counts as "Received" confirmation.
+    await _confirmReceived(context: context, tx: tx);
   }
 
   Future<void> _confirmCancel({
@@ -245,7 +433,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
               ? buyerReceived
               : (widget.viewer.id == tx.sellerId ? sellerReceived : false);
 
-          final showReceived = viewerIsParticipant &&
+          final canDoReceivedAction = viewerIsParticipant &&
               !viewerAlreadyReceived &&
               (isTrade ? status == 'confirmed' : status == 'pending');
           final showCancel = status == 'pending';
@@ -466,11 +654,33 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            if (showReceived)
+            if (canDoReceivedAction)
+              if (isTrade) ...[
+                FilledButton(
+                  onPressed: () => _showMyTradeQr(context: context, tx: tx),
+                  child: const Text('Generate QR Code'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () => _scanTradeQrAndConfirm(context: context, tx: tx),
+                  child: const Text('Scan QR'),
+                ),
+              ] else
+                FilledButton(
+                  onPressed: () => _confirmReceived(context: context, tx: tx),
+                  child: const Text('Received'),
+                )
+            else if (isTrade && viewerIsParticipant && status == 'confirmed') ...[
               FilledButton(
-                onPressed: () => _confirmReceived(context: context, tx: tx),
-                child: const Text('Received'),
+                onPressed: null,
+                child: const Text('Generate QR Code'),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: null,
+                child: const Text('Scan QR'),
+              ),
+            ],
             if (showCancel) ...[
               const SizedBox(height: 10),
               OutlinedButton(
@@ -572,11 +782,12 @@ class _Thumb extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 72.0;
     if (url == null || url!.isEmpty) {
-      return Image.asset(
-        'assets/sample.jpeg',
+      return Container(
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: Colors.grey),
       );
     }
     if (url!.startsWith('http')) {
@@ -585,24 +796,41 @@ class _Thumb extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Image.asset(
-          'assets/sample.jpeg',
+        errorBuilder: (_, __, ___) => Container(
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
         ),
       );
     }
-    return Image.asset(
-      url!,
-      width: size,
-      height: size,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/sample.jpeg',
+    if (url!.startsWith('assets/')) {
+      return Image.asset(
+        url!,
         width: size,
         height: size,
         fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: size,
+          height: size,
+          color: Colors.grey[200],
+          alignment: Alignment.center,
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      );
+    }
+    return Image.file(
+      File(url!),
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        width: size,
+        height: size,
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: const Icon(Icons.broken_image, color: Colors.grey),
       ),
     );
   }

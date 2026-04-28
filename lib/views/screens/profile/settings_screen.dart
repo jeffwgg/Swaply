@@ -55,20 +55,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // ⚙️ PREFERENCES
-          _SectionTitle("Preferences"),
-
-          SwitchListTile(
-            title: const Text("Notifications"),
-            value: notifications,
-            activeColor: Colors.purple,
-            onChanged: (value) {
-              setState(() => notifications = value);
-            },
-          ),
-
-          const SizedBox(height: 20),
-
           // ❓ SUPPORT
           _SectionTitle("Support"),
           _Tile(Icons.help_outline, "Help Center", onTap: () {

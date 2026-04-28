@@ -25,9 +25,20 @@ class LocalDbService {
 
     final db = await openDatabase(
       fullPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await _createSchema(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _createSchema(db);
+        if (oldVersion < 2) {
+          await db.execute('''
+            ALTER TABLE transactions_cache ADD COLUMN item_status TEXT
+          ''').catchError((_) {});
+          await db.execute('''
+            ALTER TABLE transactions_cache ADD COLUMN traded_item_status TEXT
+          ''').catchError((_) {});
+        }
       },
       onOpen: (db) async {
         await _createSchema(db);
@@ -121,59 +132,17 @@ class LocalDbService {
     ''');
 
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS item_draft (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        name TEXT,
-        description TEXT,
-        price REAL,
-        listing_type TEXT,
-        owner_id TEXT,
-        category TEXT,
-        image_urls TEXT,
-        preference TEXT,
-        replied_to INTEGER,
-        address TEXT,
-        latitude REAL,
-        longitude REAL,
-  
-        is_pending_upload INTEGER DEFAULT 0,
-        retry_count INTEGER DEFAULT 0,
-        sync_error TEXT,
-      
-        updated_at TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-  ''');
-
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS item_draft_images (
+      CREATE TABLE IF NOT EXISTS profile_items_cache (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        draft_id INTEGER NOT NULL,
-        image_bytes BLOB NOT NULL,
-        image_ext TEXT,
-        sort_order INTEGER NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        user_id TEXT NOT NULL,
+        tab_key TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, tab_key, item_id)
       )
     ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_item_draft_images_draft_sort
-      ON item_draft_images(draft_id, sort_order)
-    ''');
-
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS search_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        query TEXT NOT NULL UNIQUE,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_search_history_updated_at
-      ON search_history(updated_at DESC)
-    ''');
-
+    
     await db.execute('''
       CREATE TABLE IF NOT EXISTS transactions_cache (
         transaction_id INTEGER PRIMARY KEY,
@@ -195,9 +164,11 @@ class LocalDbService {
         item_name TEXT,
         item_image_url TEXT,
         item_category TEXT,
+        item_status TEXT,
         traded_item_name TEXT,
         traded_item_image_url TEXT,
         traded_item_category TEXT,
+        traded_item_status TEXT,
 
         is_synced INTEGER NOT NULL DEFAULT 1,
         failed INTEGER NOT NULL DEFAULT 0,
@@ -207,9 +178,33 @@ class LocalDbService {
       )
     ''');
 
+    // Forward-compatible columns for older DB installs.
+    await db.execute('''
+      ALTER TABLE transactions_cache ADD COLUMN item_status TEXT
+    ''').catchError((_) {});
+    await db.execute('''
+      ALTER TABLE transactions_cache ADD COLUMN traded_item_status TEXT
+    ''').catchError((_) {});
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_profile_items_cache_user_tab_updated
+      ON profile_items_cache(user_id, tab_key, updated_at DESC)
+    ''');
+
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_transactions_cache_user_created
       ON transactions_cache(buyer_id, seller_id, created_at)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        id TEXT PRIMARY KEY,
+        username TEXT,
+        full_name TEXT,
+        bio TEXT,
+        profile_image TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
     ''');
   }
 }

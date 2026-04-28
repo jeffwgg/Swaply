@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:swaply/views/screens/profile/profile_tabs.dart';
+import 'package:swaply/repositories/favourite_repository.dart';
 import '/services/supabase_service.dart';
 import '/services/profile_service.dart';
-import '/services/stats_notifier.dart';
 import '/services/follow_service.dart';
-import '/services/saved_items_service.dart';
 import '../auth/login_screen.dart';
 import 'settings_screen.dart';
 import '../../../models/app_user.dart';
@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'followers_screen.dart';
 import 'following_screen.dart';
+import '../../../repositories/local/local_profile_repository.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? viewingUserId; // If null, show current user's profile
@@ -30,6 +31,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<Map<String, int>>? _statsFuture;
   String? _profileUserId;
 
+  StreamSubscription? _followingStream;
+  StreamSubscription? _followersStream;
+  StreamSubscription? _favouritesStream;
+
   @override
   void initState() {
     super.initState();
@@ -37,13 +42,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _profileUserId = widget.viewingUserId ?? user?.id;
       if (_profileUserId != null) {
         _statsFuture = _loadStatistics(_profileUserId!);
+        _isOnline().then((online) {
+          if (online && mounted) _setupFollowStreams();
+        });
       }
     _checkFollowStatus();
-    StatsNotifier.refreshTrigger.addListener(_onStatsRefresh);
   }
-  
-  void _onStatsRefresh() {
-    _refreshStats();
+  void _setupFollowStreams() async{
+    if (_profileUserId == null) return;
+
+    final online = await _isOnline();
+    if (!online) {
+      print('📴 Offline - skipping follow streams');
+      _refreshStats();
+      return;
+    }
+
+    try{
+      _followingStream = SupabaseService.client
+          .from('follows')
+          .stream(primaryKey: ['id'])
+          .eq('follower_id', _profileUserId!)
+          .handleError((e) => print('Following stream error: $e'))
+          .listen((_) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) _refreshStats();
+        });
+      });
+
+      _followersStream = SupabaseService.client
+          .from('follows')
+          .stream(primaryKey: ['id'])
+          .eq('followee_id', _profileUserId!)
+          .handleError((e) => print('Followers stream error: $e'))
+          .listen((_) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) _refreshStats();
+        });
+      });
+
+      _favouritesStream = SupabaseService.client
+          .from('favourites')
+          .stream(primaryKey: ['id'])
+          .handleError((e) => print('Favourites stream error: $e'))
+          .listen(
+            (_) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _refreshStats();
+          });
+        },
+        onError: (e) => print('Favourites stream error: $e'),
+      );
+    }catch(e) {
+      print('Stream setup error: $e');
+    }
   }
 
   void _refreshStats() {
@@ -53,9 +105,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
+  Future<bool> _isOnline() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   void dispose() {
-    StatsNotifier.refreshTrigger.removeListener(_onStatsRefresh); 
+    _followingStream?.cancel();
+    _followersStream?.cancel();
+    _favouritesStream?.cancel();
     super.dispose();
   }
 
@@ -178,7 +241,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 32),
               GestureDetector(
                 onTap: () async {
-                  // 重新发送验证邮件
                   try {
                     await SupabaseService.client.auth.resend(
                       type: OtpType.signup,
@@ -223,300 +285,356 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = SupabaseService.client.auth.currentUser;
     final profileUserId = widget.viewingUserId ?? user!.id;
     final isOwnProfile = profileUserId == user!.id;
-    print("🔥 THIS SCREEN BUILdsdweD");
+    final localRepo = LocalProfileRepository();
+
     return FutureBuilder<AppUser?>(
-      future: ProfileService.getProfile(profileUserId),
+      future: localRepo.getCachedProfile(profileUserId),
+      builder: (context, cacheSnapshot) {
+        return StreamBuilder<AppUser?>(
+          stream: ProfileService.watchProfile(profileUserId),
+          builder: (context, networkSnapshot) {
+            if (networkSnapshot.hasData && networkSnapshot.data != null) {
+              localRepo.saveProfile(networkSnapshot.data!);
 
-        
-      builder: (context, snapshot) {  
+              final imgUrl = networkSnapshot.data!.profileImage;
+              if (imgUrl != null && imgUrl.isNotEmpty) {
+                localRepo.cacheProfileImage(profileUserId, imgUrl).then((path){
+              });
+              }
+            }
 
-          print("STATE: ${snapshot.connectionState}");
-          print("ERROR: ${snapshot.error}");
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+            final profile = networkSnapshot.data ?? cacheSnapshot.data;
 
-        // ❌ Error
-        if (snapshot.hasError) {
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 60, color: Colors.red),
-                  const SizedBox(height: 16),
-                  const Text("Failed to load profile"),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text("Go Back"),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
+            if (profile == null &&
+                networkSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
 
-        final profile = snapshot.data;
-
-        if (profile == null) {
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.person_outline, size: 60, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  const Text("Profile not found"),
-                ],
-              ),
-            ),
-          );
-        }
-
-        // ✅ Data loaded successfully
-        final fullName = profile.fullName ?? 'User';
-        final username = profile.username ?? 'user';
-        final bio = profile.bio ?? 'No bio yet';
-
-          return Scaffold(
-          body: SafeArea(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  // 🔝 TOP BAR
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // ✅ Swaply 左边，跟 home screen 一样
-                        const Text(
-                          'Swaply',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5A2CA0),
-                          ),
-                        ),
-                        // ✅ 右边：自己显示设置，别人显示返回
-                        if (isOwnProfile)
-                          IconButton(
-                            icon: const Icon(Icons.settings_outlined, color: Color(0xFF5A2CA0)),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                              );
-                            },
-                          )
-                        else
-                          GestureDetector(
-                            onTap: () {
-                              if (Navigator.canPop(context)) Navigator.pop(context);
-                            },
-                            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF5A2CA0)),
-                          ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // 👤 PROFILE SECTION
-                  Column(
+            if (networkSnapshot.hasError && profile == null) {
+              return Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Stack(
-                        children: [
-                          CircleAvatar(
-                            radius: 45,
-                            backgroundColor: Colors.purple,
-                            backgroundImage: profile.profileImage != null
-                                ? NetworkImage('${profile.profileImage!}?t=${DateTime.now().millisecondsSinceEpoch}')
-                                : null,
-                            child: profile.profileImage == null
-                                ? Text(
-                                    profile.username[0].toUpperCase(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          if (isOwnProfile)
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: GestureDetector(
-                                onTap: _showImagePickerBottomSheet,
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.purple,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.camera_alt,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        fullName,
-                        style:
-                            const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "@$username",
-                        style: const TextStyle(color: Colors.grey, fontSize: 14),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        bio,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      const Icon(
+                          Icons.error_outline, size: 60, color: Colors.red),
+                      const SizedBox(height: 16),
+                      const Text("Failed to load profile"),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Go Back"),
                       ),
                     ],
                   ),
+                ),
+              );
+            }
 
-                  const SizedBox(height: 20),
-
-                  // 📊 STATISTICS ROW (Following, Followers, Saved Items)
-                  FutureBuilder<Map<String, int>>(
-                     future: _statsFuture,
-                    builder: (context, statsSnapshot) {
-                      if (!statsSnapshot.hasData) {
-                        return const SizedBox(height: 80);
-                      }
-
-                      final stats = statsSnapshot.data!;
-
-                      return Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.grey.withOpacity(0.2)),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.purple.withOpacity(0.05),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _StatColumn(
-                              value: stats['following'].toString(),
-                              label: 'Following',
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(  
-                                    builder: (_) => FollowingScreen(
-                                      userId: profileUserId,
-                                      userName: fullName,
-                                    ),
-                                  ),
-                                ).then((_) => _refreshStats());                
-                              },
-                            ),
-                            Container(width: 1, height: 40, color: Colors.grey[300]),
-                            _StatColumn(
-                              value: stats['followers'].toString(),
-                              label: 'Followers',
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => FollowersScreen(
-                                      userId: profileUserId,
-                                      userName: fullName,
-                                    ),
-                                  ),
-                                ).then((_) => _refreshStats());  
-                              },
-                            ),
-                            Container(width: 1, height: 40, color: Colors.grey[300]),
-                            _StatColumn(
-                              value: stats['saved'].toString(),
-                              label: 'Total Saved',
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+            if (profile == null) {
+              return Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                          Icons.person_outline, size: 60, color: Colors.grey),
+                      const SizedBox(height: 16),
+                      const Text("Profile not found"),
+                    ],
                   ),
+                ),
+              );
+            }
 
-                  const SizedBox(height: 16),
+            final fullName = profile.fullName ?? 'User';
+            final username = profile.username ?? 'user';
+            final bio = profile.bio ?? 'No bio yet';
 
-                  // ➕ FOLLOW/UNFOLLOW BUTTON (if viewing another user's profile)
-                  if (!isOwnProfile)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed:
-                              _isLoadingFollow ? null : _toggleFollowUser,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isFollowing
-                                ? Colors.grey[300]
-                                : const Color(0xFF5A2CA0),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          child: _isLoadingFollow
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Text(
-                                  _isFollowing ? 'Following ✓' : 'Follow +',
-                                  style: TextStyle(
-                                    color: _isFollowing
-                                        ? Colors.black87
-                                        : Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+            return Scaffold(
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      // 🔝 TOP BAR
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20,
+                            vertical: 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            if(isOwnProfile)
+                              const Text(
+                                'Swaply',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF5A2CA0),
                                 ),
+                              )
+                            else
+                              GestureDetector(
+                                onTap: () {
+                                  if (Navigator.canPop(context)) Navigator.pop(
+                                      context);
+                                },
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                      vertical: 8.0, horizontal: 4.0), // 增加点击区域
+                                  child: Icon(Icons.arrow_back_ios_new,
+                                      color: Color(0xFF5A2CA0)),
+                                ),
+                              ),
+
+                            if (isOwnProfile)
+                              IconButton(
+                                icon: const Icon(Icons.settings_outlined,
+                                    color: Color(0xFF5A2CA0)),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => const SettingsScreen()),
+                                  );
+                                },
+                              )
+                            else
+                              const SizedBox(width: 48),
+                          ],
                         ),
                       ),
-                    ),
-                  const SizedBox(height: 20),
 
-                  //tabs
-                  SizedBox(
-                    height: 400,
-                    child: ProfileTabs(
-                      userId: profileUserId,
-                      isOwnProfile: isOwnProfile,
-                    ),
+                      const SizedBox(height: 8),
+
+                      // 👤 PROFILE SECTION
+                      Column(
+                        children: [
+                          Stack(
+                            children: [
+                              FutureBuilder<String?>(
+                                future: localRepo.getCachedImagePath(profileUserId),
+                                builder: (context, imgSnapshot) {
+                                  final localPath = imgSnapshot.data;
+                                  final networkUrl = profile.profileImage;
+
+                                  return FutureBuilder<bool>(
+                                    future: _isOnline(),
+                                    builder: (context, onlineSnapshot) {
+                                      final isOnline = onlineSnapshot.data ?? true;
+
+                                      ImageProvider? imageProvider;
+                                      if (isOnline && networkUrl != null && networkUrl.isNotEmpty) {
+                                        imageProvider = NetworkImage(
+                                          '$networkUrl?t=${DateTime.now().millisecondsSinceEpoch}',
+                                        );
+                                      } else if (localPath != null) {
+                                        imageProvider = FileImage(File(localPath));
+                                      }
+
+                                      return CircleAvatar(
+                                        radius: 45,
+                                        backgroundColor: Colors.purple,
+                                        backgroundImage: imageProvider,
+                                        child: imageProvider == null
+                                            ? Text(
+                                          profile.username[0].toUpperCase(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        )
+                                            : null,
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                              if (isOwnProfile)
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: GestureDetector(
+                                    onTap: _showImagePickerBottomSheet,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.purple,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.camera_alt,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            fullName,
+                            style:
+                            const TextStyle(
+                                fontSize: 20, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "@$username",
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 14),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            bio,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 13),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // 📊 STATISTICS ROW (Following, Followers, Saved Items)
+                      FutureBuilder<Map<String, int>>(
+                        future: _statsFuture,
+                        builder: (context, statsSnapshot) {
+                          if (!statsSnapshot.hasData) {
+                            return const SizedBox(height: 80);
+                          }
+
+                          final stats = statsSnapshot.data!;
+
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: Colors.grey.withOpacity(0.2)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.purple.withOpacity(0.05),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _StatColumn(
+                                  value: stats['following'].toString(),
+                                  label: 'Following',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            FollowingScreen(
+                                              userId: profileUserId,
+                                              userName: fullName,
+                                            ),
+                                      ),
+                                    ).then((_) => _refreshStats());
+                                  },
+                                ),
+                                Container(width: 1,
+                                    height: 40,
+                                    color: Colors.grey[300]),
+                                _StatColumn(
+                                  value: stats['followers'].toString(),
+                                  label: 'Followers',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            FollowersScreen(
+                                              userId: profileUserId,
+                                              userName: fullName,
+                                            ),
+                                      ),
+                                    ).then((_) => _refreshStats());
+                                  },
+                                ),
+                                Container(width: 1,
+                                    height: 40,
+                                    color: Colors.grey[300]),
+                                _StatColumn(
+                                  value: stats['saved'].toString(),
+                                  label: 'Total Saved',
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // ➕ FOLLOW/UNFOLLOW BUTTON (if viewing another user's profile)
+                      if (!isOwnProfile)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                              _isLoadingFollow ? null : _toggleFollowUser,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isFollowing
+                                    ? Colors.grey[300]
+                                    : const Color(0xFF5A2CA0),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12),
+                              ),
+                              child: _isLoadingFollow
+                                  ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                                  : Text(
+                                _isFollowing ? 'Following ✓' : 'Follow +',
+                                style: TextStyle(
+                                  color: _isFollowing
+                                      ? Colors.black87
+                                      : Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+
+                      //tabs
+                      SizedBox(
+                        height: 400,
+                        child: ProfileTabs(
+                          userId: profileUserId,
+                          isOwnProfile: isOwnProfile,
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+                    ],
                   ),
-
-                  const SizedBox(height: 20),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -540,15 +658,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<Map<String, int>> _loadStatistics(String userId) async {
-    final following = await FollowService.getFollowingCount(userId);
-    final followers = await FollowService.getFollowerCount(userId);
-    final saved = await SavedItemsService.getTotalSavedCount(userId);
+    final localRepo = LocalProfileRepository();
+    final isOnline = await _isOnline();
 
-    return {
-      'following': following,
-      'followers': followers,
-      'saved': saved,
-    };
+    if (!isOnline) {
+      final cached = await localRepo.getCachedStats(userId);
+      return cached ?? {'following': 0, 'followers': 0, 'saved': 0};
+    }
+
+    try {
+      final following = await FollowService.getFollowingCount(userId);
+      final followers = await FollowService.getFollowerCount(userId);
+      final saved = await FavouriteRepository().getTotalSavedForSeller(userId);
+
+      final stats = {
+        'following': following,
+        'followers': followers,
+        'saved': saved,
+      };
+
+      await localRepo.saveStats(userId, following, followers, saved);
+      return stats;
+    } catch (e) {
+      final cached = await localRepo.getCachedStats(userId);
+      return cached ?? {'following': 0, 'followers': 0, 'saved': 0};
+    }
   }
 
   void _showImagePickerBottomSheet() {

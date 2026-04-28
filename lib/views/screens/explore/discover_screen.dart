@@ -1,14 +1,16 @@
 import 'dart:developer';
 import 'dart:async';
 import 'dart:io';
-
+import '../../../services/supabase_service.dart';
 import 'package:flutter/material.dart';
 import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
+import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../services/item_service.dart';
+import '../../../services/network_service.dart';
 import '../item/item_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
@@ -28,6 +30,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   List<String> _recentSearches = [];
   bool _showSearchHistory = false;
   int _reloadToken = 0;
+  StreamSubscription? _favStream;
 
   final List<String> _categories = const [
     'All',
@@ -52,10 +55,22 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             _searchController.text.trim().isEmpty;
       });
     });
+    if (widget.user != null) {
+      _favStream = SupabaseService.client
+          .from('favourites')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', widget.user!.id)
+          .listen((_) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) _reloadDiscover();
+        });
+      });
+    }
   }
 
   @override
   void dispose() {
+    _favStream?.cancel();
     _searchHistoryDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -78,6 +93,10 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     setState(() {
       _reloadToken++;
     });
+  }
+
+  Future<void> _reloadDiscoverAsync() async {
+    _reloadDiscover();
   }
 
   void _saveSearchHistory(String query) {
@@ -208,6 +227,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                                 searchQuery: _searchQuery,
                                 reloadToken: _reloadToken,
                                 onRefreshParent: _reloadDiscover,
+                                onPullToRefresh: _reloadDiscoverAsync,
                               ),
                             )
                             .toList(),
@@ -314,11 +334,13 @@ class NestedTabBar extends StatefulWidget {
   final String searchQuery;
   final int reloadToken;
   final VoidCallback? onRefreshParent;
+  final Future<void> Function()? onPullToRefresh;
   const NestedTabBar({
     required this.outerTab,
     required this.searchQuery,
     required this.reloadToken,
     this.onRefreshParent,
+    this.onPullToRefresh,
     this.user,
     super.key,
   });
@@ -428,64 +450,80 @@ class _NestedTabBarState extends State<NestedTabBar>
                   }
 
                   if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}'));
+                    return const Center(
+                      child: Text('Could not load items right now. Please try again.'),
+                    );
                   }
 
                   final items = snapshot.data ?? [];
 
                   if (items.isEmpty) {
-                    return Container(
-                      margin: const EdgeInsets.only(top: 18),
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE9D5FF)),
-                      ),
-                      child: const Column(
-                        mainAxisSize: MainAxisSize.min,
+                    return RefreshIndicator(
+                      onRefresh: widget.onPullToRefresh ?? () async {},
+                      color: accent,
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         children: [
-                          Icon(Icons.search_off, size: 38, color: accent),
-                          SizedBox(height: 10),
-                          Text(
-                            'No items found',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: accent,
+                          Container(
+                            margin: const EdgeInsets.only(top: 18),
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: const Color(0xFFE9D5FF)),
                             ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Try changing category or search words.',
-                            style: TextStyle(color: Color(0xFF7C3AED)),
-                            textAlign: TextAlign.center,
+                            child: const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.search_off, size: 38, color: accent),
+                                SizedBox(height: 10),
+                                Text(
+                                  'No items found',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: accent,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Try changing category or search words.',
+                                  style: TextStyle(color: Color(0xFF7C3AED)),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     );
                   }
 
-                  return GridView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 16.0),
-                    itemCount: items.length,
-                    gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.75,
+                  return RefreshIndicator(
+                    onRefresh: widget.onPullToRefresh ?? () async {},
+                    color: accent,
+                    child: GridView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 16.0),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: items.length,
+                      gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 0.75,
+                      ),
+                      itemBuilder: (context, index) =>
+                          ItemCard(
+                            user: widget.user,
+                            item: items[index],
+                            onRefresh: () {
+                              widget.onRefreshParent?.call();
+                              setState(() {
+                                _loadItems();
+                              });
+                            },
+                          ),
                     ),
-                    itemBuilder: (context, index) =>
-                        ItemCard(
-                          user: widget.user, 
-                          item: items[index],
-                          onRefresh: () {
-                            widget.onRefreshParent?.call();
-                            setState(() {
-                              _loadItems();
-                            });
-                          },
-                        ),
                   );
                 },
               );
@@ -514,23 +552,31 @@ class _ItemCardState extends State<ItemCard> {
   @override
   void initState() {
     super.initState();
-    if ((widget.item.ownerUsername ?? '').trim().isEmpty) {
-      _ownerFuture = UsersRepository().getById(widget.item.ownerId);
-    }
+    _ownerFuture = UsersRepository().getById(widget.item.ownerId);
+  }
+
+  void _showNetworkError() {
+    if (!mounted) return;
+    AppSnackBars.error(context, 'You seem to be offline. Please check your internet and try again.');
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () async {
-        await Navigator.push(
-          context,
+        if (!mounted) return;
+        final navigator = Navigator.maybeOf(context);
+        if (navigator == null) {
+          return;
+        }
+        await navigator.push(
           MaterialPageRoute(
             builder: (_) =>
-                ItemDetailsScreen(user: widget.user, item: widget.item),
+                ItemDetailsScreen(loginUser: widget.user, item: widget.item),
           ),
         );
-        
+        if (!mounted) return;
+
         // Refresh the card UI when returning from details screen
         // widget.item is updated inside ItemDetailsScreen
         setState(() {});
@@ -659,10 +705,13 @@ class _ItemCardState extends State<ItemCard> {
                               ? (image.startsWith('http')
                                     ? NetworkImage(image)
                                     : AssetImage(image) as ImageProvider)
-                              : const AssetImage('assets/sample.jpeg');
+                              : null;
                           return CircleAvatar(
                             radius: 9,
                             backgroundImage: avatar,
+                            child: avatar == null
+                                ? const Icon(Icons.person, size: 10)
+                                : null,
                           );
                         },
                       ),

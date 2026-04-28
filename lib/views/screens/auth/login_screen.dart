@@ -3,6 +3,7 @@ import '../../../core/utils/app_snack_bars.dart';
 import 'register_step1_screen.dart';
 import '/services/supabase_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../../../repositories/local/local_profile_repository.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,7 +17,24 @@ class _LoginScreenState extends State<LoginScreen> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   bool isLoading = false;
+  bool _rememberMe = false;
+  final _localProfile = LocalProfileRepository();
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmail();
+  }
+
+  Future<void> _loadSavedEmail() async {
+    final email = await _localProfile.getSavedEmail();
+    if (email != null) {
+      setState(() {
+        emailController.text = email;
+        _rememberMe = true;
+      });
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -98,6 +116,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 hint: "Enter your password",
                 controller: passwordController,
                 isPassword: true,
+              ),
+
+              const SizedBox(height: 6),
+
+              Row(
+                children: [
+                  Checkbox(
+                    value: _rememberMe,
+                    activeColor: const Color(0xFF5A2CA0),
+                    onChanged: (val) => setState(() => _rememberMe = val ?? false),
+                  ),
+                  const Text('Remember Me'),
+                ],
               ),
 
               const SizedBox(height: 24),
@@ -291,6 +322,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.user != null) {
         print("✅ Login successful for ${response.user!.email}");
+        if (_rememberMe) {
+          await _localProfile.saveRememberMe(emailController.text.trim());
+        } else {
+          await _localProfile.clearRememberMe();
+        }
 
         // ✅ 登录成功
         if (mounted) {
