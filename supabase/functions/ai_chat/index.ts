@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const OPENROUTER_TIMEOUT_MS = 35000
+const OPENROUTER_TIMEOUT_MS = 50000
 const FALLBACK_AI_MESSAGE =
   "I'm sorry, I'm having trouble connecting right now. Please try again in a moment."
 const RAG_ITEMS_MARKER = '[[rag_items_json]]'
@@ -346,13 +346,19 @@ function formatMatchedSummaryForUser(items: any[]): string {
   }
 
   const n = items.length
-  const templates = [
-    `I found ${n} item${n > 1 ? 's' : ''} for you.`,
-    `I found ${n} option${n > 1 ? 's' : ''} that match what you are looking for.`,
-    `I found ${n} relevant listing${n > 1 ? 's' : ''} for you.`,
-  ]
-  const selected = templates[Math.floor(Math.random() * templates.length)]
-  return `${selected}\n\nTap the item below to check it out.`
+  const topItems = items.slice(0, 3)
+  const lines = topItems.map((item) => {
+    const title = typeof item?.title === 'string' && item.title.trim().length > 0
+      ? item.title.trim()
+      : 'Untitled item'
+    const priceLabel =
+      item?.price == null || String(item.price).trim().length === 0
+        ? 'price not listed'
+        : `RM ${item.price}`
+    return `- ${title} (${priceLabel})`
+  })
+  const moreSuffix = n > topItems.length ? ` and ${n - topItems.length} more` : ''
+  return `I found ${n} matching listing${n > 1 ? 's' : ''}${moreSuffix}:\n${lines.join('\n')}`
 }
 
 function trimGuidance(text: string): string {
@@ -803,7 +809,7 @@ Help users quickly understand and use Swaply while maintaining a natural and use
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: 'nvidia/nemotron-3-super-120b-a12b:free',
+              model: 'nvidia/nemotron-3-nano-30b-a3b:free',
               messages: [modelSystemMessage, retrievalMessage, ...modelHistoryMessages]
             }),
             signal: timeoutSignal,
@@ -860,9 +866,14 @@ Help users quickly understand and use Swaply while maintaining a natural and use
           })()
 
     const finalUserMessage = hasMatches
-      ? (guidanceText.length > 0
-          ? guidanceText
-          : formatMatchedSummaryForUser(matchedItems))
+      ? (() => {
+          const summary = formatMatchedSummaryForUser(matchedItems)
+          const nextStep =
+            guidanceText.length > 0
+              ? guidanceText
+              : 'Tap any listing card below to view details.'
+          return `${summary}\n${nextStep}`
+        })()
       : noMatchText
 
     // Use service role for inserting the AI's response if necessary, or the current user's client

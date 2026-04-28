@@ -3,12 +3,12 @@ import '../models/chat_pinned_message.dart';
 import '../services/supabase_service.dart';
 import '../core/utils/parsing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatsRepository {
   ChatsRepository();
 
   static const _table = 'chats';
-  static const _pinsTable = 'user_chat_pins';
   static const _withParticipantsSelect =
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
@@ -366,26 +366,15 @@ class ChatsRepository {
     return rows.map<ChatPinnedMessage>(ChatPinnedMessage.fromMap).toList();
   }
 
+  Future<List<int>> listPinnedChatIdsForUserOrdered(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> pinnedList = prefs.getStringList('pinned_chats_$userId') ?? [];
+    return pinnedList.map((e) => int.tryParse(e)).whereType<int>().toList();
+  }
+
   Future<Set<int>> listPinnedChatIdsForUser(String userId) async {
-    final response = await SupabaseService.client
-        .from(_pinsTable)
-        .select('chat_id')
-        .eq('user_id', userId);
-    final rows = _requireListOfMaps(
-      response,
-      operation: 'listPinnedChatIdsForUser',
-    );
-    final ids = <int>{};
-    for (final row in rows) {
-      final chatId = parseNullableInt(
-        row['chat_id'],
-        fieldName: 'user_chat_pins.chat_id',
-      );
-      if (chatId != null && chatId > 0) {
-        ids.add(chatId);
-      }
-    }
-    return ids;
+    final ordered = await listPinnedChatIdsForUserOrdered(userId);
+    return ordered.toSet();
   }
 
   Future<void> setConversationPinned({
@@ -393,19 +382,15 @@ class ChatsRepository {
     required int chatId,
     required bool isPinned,
   }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'pinned_chats_$userId';
+    final List<String> pinnedList = prefs.getStringList(key) ?? [];
     if (isPinned) {
-      await SupabaseService.client.from(_pinsTable).upsert({
-        'user_id': userId,
-        'chat_id': chatId,
-        'pinned_at': DateTime.now().toUtc().toIso8601String(),
-      });
-      return;
+      pinnedList.remove(chatId.toString());
+      pinnedList.insert(0, chatId.toString());
+    } else {
+      pinnedList.remove(chatId.toString());
     }
-
-    await SupabaseService.client
-        .from(_pinsTable)
-        .delete()
-        .eq('user_id', userId)
-        .eq('chat_id', chatId);
+    await prefs.setStringList(key, pinnedList);
   }
 }

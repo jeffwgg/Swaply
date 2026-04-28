@@ -130,6 +130,13 @@ class InboxViewModel extends ChangeNotifier {
     return _chatService.listPinnedConversationIds();
   }
 
+  Future<List<int>> loadPinnedConversationIdsOrdered() {
+    if (_isDisposed) {
+      return Future.value(const <int>[]);
+    }
+    return _chatService.listPinnedConversationIdsOrdered();
+  }
+
   Future<void> setConversationPinned({
     required int chatId,
     required bool isPinned,

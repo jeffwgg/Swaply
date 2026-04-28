@@ -60,11 +60,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   int _selectedFilter = 0;
   int _selectedConversation = 0;
+  int? _selectedConversationId;
   bool _showMobileChat = false;
   bool _isLoading = true;
   String _searchQuery = '';
   List<String> _recentSearchQueries = const [];
   Set<int> _pinnedChats = {};
+  List<int> _pinnedChatOrder = const [];
   Set<int> _manuallyUnreadChats = {};
   Set<int> _hiddenChats = {};
 
@@ -195,6 +197,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
     setState(() {
       _selectedConversation = 0;
+      _selectedConversationId = null;
       _showMobileChat = false;
       _isLoading = true;
       _replyingTo = null;
@@ -256,9 +259,11 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     try {
       final threads = await _inboxViewModel.loadInbox();
       Set<int> pinnedConversationIds = _pinnedChats;
+      List<int> pinnedConversationOrder = _pinnedChatOrder;
       try {
-        pinnedConversationIds = await _inboxViewModel
-            .loadPinnedConversationIds();
+        pinnedConversationOrder = await _inboxViewModel
+            .loadPinnedConversationIdsOrdered();
+        pinnedConversationIds = pinnedConversationOrder.toSet();
       } catch (_) {}
       final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
         threads.map((thread) => thread.id).toList(growable: false),
@@ -324,6 +329,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _allConversations.add(aiChat);
           _allConversations.addAll(mapped);
           _pinnedChats = pinnedConversationIds;
+          _pinnedChatOrder = pinnedConversationOrder;
           if (_selectedConversation >= _allConversations.length) {
             _selectedConversation = 0;
           }
@@ -474,7 +480,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _togglePin(int id) async {
-    if (id <= 0) {
+    if (id == 0) {
       return;
     }
     final shouldPin = !_pinnedChats.contains(id);
@@ -483,17 +489,21 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         chatId: id,
         isPinned: shouldPin,
       );
+      final orderedPins = await _inboxViewModel.loadPinnedConversationIdsOrdered();
       if (!mounted) {
         return;
       }
       setState(() {
-        if (shouldPin) {
-          _pinnedChats.add(id);
-        } else {
-          _pinnedChats.remove(id);
-        }
+        _pinnedChatOrder = orderedPins;
+        _pinnedChats = orderedPins.toSet();
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error toggling conversation pin: $e');
+      if (!mounted) {
+        return;
+      }
+      _showSnack('Unable to update pin. Please try again.');
+    }
   }
 
   Future<void> _toggleManualUnread(int id) async {
@@ -522,6 +532,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _manuallyUnreadChats.remove(id);
       if (_selectedConversation >= _conversations.length - 1) {
         _selectedConversation = 0;
+        _selectedConversationId = null;
       }
       _showMobileChat = false;
     });
@@ -946,6 +957,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     setState(() {
       _searchQuery = result.query;
       _selectedConversation = 0;
+      _selectedConversationId = null;
     });
 
     if (result.query.isNotEmpty) {
@@ -984,16 +996,64 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return true;
     }).toList();
 
-    // Sort pinned to top
+    // Sort pinned to top, then by most recent message
     filtered.sort((a, b) {
       final aPinned = _pinnedChats.contains(a.id);
       final bPinned = _pinnedChats.contains(b.id);
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) {
+        final aIdx = _pinnedChatOrder.indexOf(a.id);
+        final bIdx = _pinnedChatOrder.indexOf(b.id);
+        if (aIdx != -1 && bIdx != -1 && aIdx != bIdx) {
+          return aIdx.compareTo(bIdx);
+        }
+      }
+
+      DateTime getTime(_Conversation c) {
+        DateTime highest =
+            c.chatThread?.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        if (c.id == -1 && c.messages.isEmpty) {
+          // Keep AI chat high up if unused
+          highest = DateTime.now().add(const Duration(days: 365 * 100));
+        }
+        for (final m in c.messages) {
+          if (m.createdAt.isAfter(highest)) {
+            highest = m.createdAt;
+          }
+        }
+        return highest;
+      }
+
+      final aTime = getTime(a);
+      final bTime = getTime(b);
+      final timeCmp = bTime.compareTo(aTime);
+      if (timeCmp != 0) return timeCmp;
+
       return 0; // fallback to original order
     });
 
     return filtered;
+  }
+
+  int get _resolvedSelectedIndex {
+    final list = _conversations;
+    if (list.isEmpty) return 0;
+    if (_selectedConversationId != null) {
+      final idx = list.indexWhere((c) => c.id == _selectedConversationId);
+      if (idx != -1) return idx;
+    }
+    if (_activeChatId != null) {
+      final idx = list.indexWhere((c) => c.id == _activeChatId);
+      if (idx != -1) return idx;
+    }
+    return _selectedConversation < list.length ? _selectedConversation : 0;
+  }
+
+  _Conversation? get _selectedConversationItem {
+    final list = _conversations;
+    if (list.isEmpty) return null;
+    return list[_resolvedSelectedIndex];
   }
 
   bool _isSellingConversation(_Conversation conv) {
@@ -1017,6 +1077,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     setState(() {
       _selectedFilter = index;
       _selectedConversation = 0;
+      _selectedConversationId = null;
       if (_conversations.isEmpty) {
         _showMobileChat = false;
       }
@@ -1028,6 +1089,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final selected = _conversations[index];
     setState(() {
       _selectedConversation = index;
+      _selectedConversationId = selected.id;
       _replyingTo = null;
       _manuallyUnreadChats.remove(selected.id);
       _voiceDraftPath = null;
@@ -1042,11 +1104,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   void _subscribeToSelectedConversationMessages() {
-    final selected = _conversations.isNotEmpty
-        ? _conversations[_selectedConversation < _conversations.length
-              ? _selectedConversation
-              : 0]
-        : null;
+    final selected = _selectedConversationItem;
 
     if (selected == null) {
       _messagesSubscription?.cancel();
@@ -2496,11 +2554,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       }
       widget.onConversationViewChanged?.call(!isWide && _showMobileChat);
       final hasChatOpen = isWide || _showMobileChat;
-      final selected = _conversations.isNotEmpty
-          ? _conversations[_selectedConversation < _conversations.length
-                ? _selectedConversation
-                : 0]
-          : null;
+      final selected = _selectedConversationItem;
       final activeChatId = hasChatOpen && selected != null && selected.id > 0
           ? selected.id
           : null;
@@ -2530,11 +2584,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 950;
-              final selected = _conversations.isNotEmpty
-                  ? _conversations[_selectedConversation < _conversations.length
-                        ? _selectedConversation
-                        : 0]
-                  : null;
+              final selected = _selectedConversationItem;
               final pins = selected == null
                   ? const <ChatPinnedMessage>[]
                   : (_chatPins[selected.id] ?? const <ChatPinnedMessage>[]);
@@ -2560,7 +2610,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                         conversations: _conversations,
                         filters: _filters,
                         selectedFilter: _selectedFilter,
-                        selectedIndex: _selectedConversation,
+                        selectedIndex: _resolvedSelectedIndex,
                         onFilterSelected: _onFilterSelected,
                         onConversationSelected: (index) =>
                             _onConversationSelected(index),
@@ -2675,7 +2725,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 conversations: _conversations,
                 filters: _filters,
                 selectedFilter: _selectedFilter,
-                selectedIndex: _selectedConversation,
+                selectedIndex: _resolvedSelectedIndex,
                 onFilterSelected: _onFilterSelected,
                 onConversationSelected: (index) =>
                     _onConversationSelected(index, openMobile: true),
