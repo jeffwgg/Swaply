@@ -19,12 +19,10 @@ import '../../../repositories/transactions_repository.dart';
 import '../../../services/chat_service.dart';
 import '../../../services/item_service.dart';
 import '../../../services/notification_service.dart';
-import '../../../services/network_service.dart';
 import '../auth/login_screen.dart';
 import '../transaction/checkout_screen.dart';
 import 'create_item_screen.dart';
 import '../profile/profile_screen.dart';
-import '../../../services/supabase_service.dart';
 import '../../../services/follow_service.dart';
 
 class ItemDetailsScreen extends StatefulWidget {
@@ -97,10 +95,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _checkIfFavourite() async {
-    if (widget.user == null) return;
+    if (widget.loginUser == null) return;
     try {
       final isFav = await FavouriteRepository().isFavourited(
-        widget.user!.id,
+        widget.loginUser!.id,
         widget.item.id,
       );
       if (mounted) {
@@ -858,15 +856,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
                   try {
                     if (_isFollowing) {
-                      await FollowService.unfollowUser(currentUser.id, targetUserId);
+                      await FollowService.unfollowUser(loginUser.id, targetUserId);
                       setState(() => _isFollowing = false);
                     } else {
-                      await FollowService.followUser(currentUser.id, targetUserId);
+                      await FollowService.followUser(loginUser.id, targetUserId);
                       setState(() => _isFollowing = true);
                     }
-
-                    StatsNotifier.refresh();
-
                           if (mounted) {
                             ScaffoldMessenger.of(context).hideCurrentSnackBar();
                             _isFollowing
