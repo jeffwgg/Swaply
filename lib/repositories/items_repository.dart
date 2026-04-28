@@ -221,15 +221,15 @@ class ItemsRepository {
   }
 
   Future<List<ItemListing>> getSwipeList({String? userId}) async {
+    print('🔥 [DEBUG] getSwipeList 运行, currentUserId: $userId');
     try {
-      // 1. 构建基础查询：只要是 available 的主商品就行
+
       var queryBuilder = SupabaseService.client
           .from(_table)
           .select('*, users(username)')
           .eq('status', 'available')
           .filter('replied_to', 'is', null);
 
-      // 2. 只有在用户【已登录】的情况下，才去过滤“自己的”和“已点赞的”
       if (userId != null) {
         // Condition 1: 不显示自己的物品
         queryBuilder = queryBuilder.neq('owner_id', userId);
