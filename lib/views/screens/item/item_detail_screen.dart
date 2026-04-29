@@ -923,8 +923,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.share, color: Color(0xFF5B21B6)),
+            icon: const Icon(Icons.chat, color: Color(0xFF5B21B6)),
             onPressed: _composeAndStartItemConversation,
+            tooltip: 'Start Conversation',
+            padding: EdgeInsets.symmetric(horizontal: 5),
           ),
         ],
       ),
@@ -1402,236 +1404,251 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     reply.ownerId != loginUser?.id) {
                   return Container();
                 }
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFE9D5FF)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.deepPurple.withOpacity(0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ItemDetailsScreen(
+                          loginUser: loginUser,
+                          item: reply,
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: reply.imageUrls.isNotEmpty
-                                  ? _buildImage(
-                                      reply.imageUrls[0],
-                                      height: 100,
-                                      width: 100,
-                                    )
-                                  : const Icon(Icons.image, size: 100),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 60,
-                                            ),
-                                            child: Text(
-                                              reply.name.toUpperCase(),
-                                              style: const TextStyle(
-                                                fontSize: 18,
-                                                color: Color(0xFF5B21B6),
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    GestureDetector(
-                                      onTap: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => ProfileScreen(
-                                              viewingUserId: reply.ownerId,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
+                    );
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE9D5FF)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.deepPurple.withOpacity(0.06),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: reply.imageUrls.isNotEmpty
+                                    ? _buildImage(
+                                        reply.imageUrls[0],
+                                        height: 100,
+                                        width: 100,
+                                      )
+                                    : const Icon(Icons.image, size: 100),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 16),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Builder(
-                                            builder: (context) {
-                                              final replyOwner =
-                                                  _replyOwners[reply.id];
-                                              final replyAvatar =
-                                                  _resolveAvatarImage(
-                                                    replyOwner?.profileImage,
-                                                  );
-                                              return CircleAvatar(
-                                                radius: 12,
-                                                backgroundImage: replyAvatar,
-                                                child: replyAvatar == null
-                                                    ? const Icon(
-                                                        Icons.person,
-                                                        size: 12,
-                                                      )
-                                                    : null,
-                                              );
-                                            },
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              0,
-                                              0,
-                                              16,
-                                              0,
-                                            ),
-                                            child: Text(
-                                              _replyOwnerNames[reply.id]!,
-                                              style: const TextStyle(
-                                                fontSize: 16,
-                                                color: Color(0xFF7C3AED),
-                                                fontWeight: FontWeight.w600,
+                                          Expanded(
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 60,
                                               ),
-                                              overflow: TextOverflow.ellipsis,
+                                              child: Text(
+                                                reply.name.toUpperCase(),
+                                                style: const TextStyle(
+                                                  fontSize: 18,
+                                                  color: Color(0xFF5B21B6),
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.access_time,
-                                          size: 12,
-                                          color: Colors.grey,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          DateFormat(
-                                            'MMM d, yyyy',
-                                          ).format(reply.createdAt),
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 10),
-                                    if (item.status != 'dropped')
-                                      if (loginUser != null &&
-                                          loginUser.id == item.ownerId &&
-                                          reply.status == 'pending')
-                                        Row(
+                                      GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  ProfileScreen(
+                                                    viewingUserId:
+                                                        reply.ownerId,
+                                                  ),
+                                            ),
+                                          );
+                                        },
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Expanded(
-                                              child: TextButton(
-                                                onPressed: () {
-                                                  _acceptReply(reply.id);
-                                                },
-                                                style: TextButton.styleFrom(
-                                                  backgroundColor: const Color(
-                                                    0xFF5B21B6,
-                                                  ),
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        vertical: 10,
-                                                      ),
-                                                ),
-                                                child: const Text(
-                                                  'Accept',
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                              ),
+                                            Builder(
+                                              builder: (context) {
+                                                final replyOwner =
+                                                    _replyOwners[reply.id];
+                                                final replyAvatar =
+                                                    _resolveAvatarImage(
+                                                      replyOwner?.profileImage,
+                                                    );
+                                                return CircleAvatar(
+                                                  radius: 12,
+                                                  backgroundImage: replyAvatar,
+                                                  child: replyAvatar == null
+                                                      ? const Icon(
+                                                          Icons.person,
+                                                          size: 12,
+                                                        )
+                                                      : null,
+                                                );
+                                              },
                                             ),
                                             const SizedBox(width: 8),
-                                            Expanded(
-                                              child: TextButton(
-                                                onPressed: () {
-                                                  _rejectReply(reply.id);
-                                                },
-                                                style: TextButton.styleFrom(
-                                                  backgroundColor: const Color(
-                                                    0xFFE9E1FE,
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                    0,
+                                                    0,
+                                                    16,
+                                                    0,
                                                   ),
-                                                  foregroundColor: accent,
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        vertical: 10,
-                                                      ),
+                                              child: Text(
+                                                _replyOwnerNames[reply.id]!,
+                                                style: const TextStyle(
+                                                  fontSize: 16,
+                                                  color: Color(0xFF7C3AED),
+                                                  fontWeight: FontWeight.w600,
                                                 ),
-                                                child: const Text(
-                                                  'Reject',
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    color: Color(0xFF5B21B6),
-                                                  ),
-                                                ),
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                           ],
                                         ),
-                                  ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.access_time,
+                                            size: 12,
+                                            color: Colors.grey,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            DateFormat(
+                                              'MMM d, yyyy',
+                                            ).format(reply.createdAt),
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      if (item.status != 'dropped')
+                                        if (loginUser != null &&
+                                            loginUser.id == item.ownerId &&
+                                            reply.status == 'pending')
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextButton(
+                                                  onPressed: () {
+                                                    _acceptReply(reply.id);
+                                                  },
+                                                  style: TextButton.styleFrom(
+                                                    backgroundColor:
+                                                        const Color(0xFF5B21B6),
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            10,
+                                                          ),
+                                                    ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 10,
+                                                        ),
+                                                  ),
+                                                  child: const Text(
+                                                    'Accept',
+                                                    style: TextStyle(
+                                                      fontSize: 16,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: TextButton(
+                                                  onPressed: () {
+                                                    _rejectReply(reply.id);
+                                                  },
+                                                  style: TextButton.styleFrom(
+                                                    backgroundColor:
+                                                        const Color(0xFFE9E1FE),
+                                                    foregroundColor: accent,
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            10,
+                                                          ),
+                                                    ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 10,
+                                                        ),
+                                                  ),
+                                                  child: const Text(
+                                                    'Reject',
+                                                    style: TextStyle(
+                                                      fontSize: 16,
+                                                      color: Color(0xFF5B21B6),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: _StatusBadge(status: reply.status),
-                      ),
-                      if (loginUser != null &&
-                          loginUser.id == reply.ownerId &&
-                          reply.status == 'pending')
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: Colors.red,
-                            ),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => _dropReply(reply.id),
+                            ],
                           ),
                         ),
-                    ],
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: _StatusBadge(status: reply.status),
+                        ),
+                        if (loginUser != null &&
+                            loginUser.id == reply.ownerId &&
+                            reply.status == 'pending')
+                          Positioned(
+                            bottom: 8,
+                            right: 8,
+                            child: IconButton(
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: Colors.red,
+                              ),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _dropReply(reply.id),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 );
               }).toList(),
