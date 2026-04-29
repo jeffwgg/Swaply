@@ -1,9 +1,9 @@
 class AppConfig {
   AppConfig._();
 
-  static const String supabaseUrl = 'https://rxcpoebnwtgpwfgkhloo.supabase.co';
-  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4Y3BvZWJud3RncHdmZ2tobG9vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzMjA1MTUsImV4cCI6MjA4OTg5NjUxNX0.AnJimznrr6dUrUdacY2ymD-Np52ol4tc7eWXja7fIAg';
-
+  static const String supabaseUrl = 'https://wskhobkhabicpgzphjox.supabase.co';
+  static const String supabaseAnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indza2hvYmtoYWJpY3BnenBoam94Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjAzNTQsImV4cCI6MjA5MzAzNjM1NH0.CMt8QZXhWeagwpLxJipL6zTfiklvOl6LQi6gyMw4ZeY';
   /// Stripe publishable key (test `pk_test_...`). Pass with:
   /// `flutter run --dart-define=STRIPE_PUBLISHABLE_KEY=pk_test_...`
   static const String stripePublishableKey = String.fromEnvironment(
