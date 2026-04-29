@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
@@ -32,6 +31,7 @@ import '../../../models/meetup_address_option.dart';
 import '../../../views/screens/transaction/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
+import '../transaction/map_location_picker.dart';
 import '../transaction/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 import '../../../repositories/local/local_messages_repository.dart';
@@ -73,11 +73,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   final InboxViewModel _inboxViewModel = InboxViewModel();
   dynamic _inboxSubscription;
+  RealtimeChannel? _unreadCountsSubscription;
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<AiMessage>>? _aiMessagesSubscription;
   Timer? _inboxSubscriptionRetryTimer;
+  Timer? _unreadCountsRefreshDebounce;
   bool _isLoadingInboxData = false;
+  bool _isRefreshingUnreadCounts = false;
   int? _activeChatId;
   final Map<int, List<ChatMessage>> _rawMessagesByChat = {};
   final Map<int, List<_Message>> _messagesByChat = {};
@@ -127,8 +130,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _authSubscription?.cancel();
     _messagesSubscription?.cancel();
     _aiMessagesSubscription?.cancel();
+    _unreadCountsRefreshDebounce?.cancel();
     if (_inboxSubscription != null) {
       _inboxViewModel.unsubscribeInboxChanges(_inboxSubscription);
+    }
+    final unreadCountsSubscription = _unreadCountsSubscription;
+    if (unreadCountsSubscription != null) {
+      unawaited(SupabaseService.client.removeChannel(unreadCountsSubscription));
+      _unreadCountsSubscription = null;
     }
     _composerController.dispose();
     NotificationService.instance.setActiveChatContext(
@@ -168,7 +177,18 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _inboxSubscription = null;
     }
 
+    try {
+      final unreadCountsSubscription = _unreadCountsSubscription;
+      if (unreadCountsSubscription != null) {
+        await SupabaseService.client.removeChannel(unreadCountsSubscription);
+        _unreadCountsSubscription = null;
+      }
+    } catch (_) {
+      _unreadCountsSubscription = null;
+    }
+
     _ensureInboxRealtimeSubscription();
+    _ensureUnreadCountsRealtimeSubscription();
 
     // Rebind selected chat stream to avoid stale realtime listeners after
     // app background/foreground transitions.
@@ -188,6 +208,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
       _inboxSubscription = null;
     }
+    final unreadCountsSubscription = _unreadCountsSubscription;
+    if (unreadCountsSubscription != null) {
+      unawaited(SupabaseService.client.removeChannel(unreadCountsSubscription));
+      _unreadCountsSubscription = null;
+    }
+    _unreadCountsRefreshDebounce?.cancel();
+    _unreadCountsRefreshDebounce = null;
     _messagesSubscription?.cancel();
     _messagesSubscription = null;
     _aiMessagesSubscription?.cancel();
@@ -210,6 +237,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _composerController.clear();
     _loadInbox();
     _ensureInboxRealtimeSubscription();
+    _ensureUnreadCountsRealtimeSubscription();
   }
 
   void _ensureInboxRealtimeSubscription() {
@@ -217,6 +245,92 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return;
     }
     unawaited(_ensureInboxRealtimeSubscriptionAsync());
+  }
+
+  void _ensureUnreadCountsRealtimeSubscription() {
+    if (_unreadCountsSubscription != null ||
+        !SupabaseService.isConfigured ||
+        SupabaseService.client.auth.currentUser == null) {
+      return;
+    }
+
+    final channel = SupabaseService.client.channel('inbox-unread-counts');
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'messages',
+      callback: (payload) {
+        if (!mounted) {
+          return;
+        }
+
+        final row = payload.newRecord.isNotEmpty
+            ? payload.newRecord
+            : payload.oldRecord;
+        final chatIdRaw = row['chat_id'];
+        final chatId = chatIdRaw is int
+            ? chatIdRaw
+            : int.tryParse(chatIdRaw?.toString() ?? '');
+        if (chatId != null &&
+            chatId > 0 &&
+            !_allConversations.any(
+              (conversation) => conversation.id == chatId,
+            )) {
+          return;
+        }
+
+        _scheduleUnreadCountsRefresh();
+      },
+    );
+    channel.subscribe();
+    _unreadCountsSubscription = channel;
+  }
+
+  void _scheduleUnreadCountsRefresh() {
+    _unreadCountsRefreshDebounce?.cancel();
+    _unreadCountsRefreshDebounce = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(_refreshUnreadCountsForLoadedChats()),
+    );
+  }
+
+  Future<void> _refreshUnreadCountsForLoadedChats() async {
+    if (_isRefreshingUnreadCounts || !mounted) {
+      return;
+    }
+
+    final chatIds = _allConversations
+        .map((conversation) => conversation.id)
+        .where((id) => id > 0)
+        .toList(growable: false);
+    if (chatIds.isEmpty) {
+      return;
+    }
+
+    _isRefreshingUnreadCounts = true;
+    try {
+      final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
+        chatIds,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        for (var i = 0; i < _allConversations.length; i++) {
+          final conversation = _allConversations[i];
+          if (conversation.id <= 0) {
+            continue;
+          }
+          _allConversations[i] = conversation.copyWith(
+            unreadCount: unreadCountsByChat[conversation.id] ?? 0,
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('Error refreshing unread counts: $e');
+    } finally {
+      _isRefreshingUnreadCounts = false;
+    }
   }
 
   Future<void> _ensureInboxRealtimeSubscriptionAsync() async {
@@ -340,6 +454,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       unawaited(_initializeAiConversationIfNeeded());
       _tryFocusConversationFromExternalRequest();
       _subscribeToSelectedConversationMessages();
+      _ensureUnreadCountsRealtimeSubscription();
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -490,7 +605,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         chatId: id,
         isPinned: shouldPin,
       );
-      final orderedPins = await _inboxViewModel.loadPinnedConversationIdsOrdered();
+      final orderedPins = await _inboxViewModel
+          .loadPinnedConversationIdsOrdered();
       if (!mounted) {
         return;
       }
@@ -659,6 +775,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _SearchMatch(
             conversationId: conversation.id,
             conversationName: conversation.name,
+            avatarUrl: conversation.avatarUrl,
             snippet: snippet,
             messageId: matchedMessageId,
           ),
@@ -717,7 +834,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
-              title: Text(onlyThisChat ? 'Search in this chat' : 'Search chats'),
+              title: Text(
+                onlyThisChat ? 'Search in this chat' : 'Search chats',
+              ),
               content: SizedBox(
                 width: 420,
                 child: Column(
@@ -806,7 +925,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                           conversationId: historyMatches
                                               .first
                                               .conversationId,
-                                          messageId: historyMatches.first.messageId,
+                                          messageId:
+                                              historyMatches.first.messageId,
                                         ),
                                       );
                                       return;
@@ -890,18 +1010,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                       ),
                                       child: Row(
                                         children: [
-                                          Container(
-                                            width: 34,
-                                            height: 34,
-                                            decoration: const BoxDecoration(
-                                              color: Color(0xFFF1EBFF),
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(
-                                              Icons.history_rounded,
-                                              size: 18,
-                                              color: Color(0xFF7A54FF),
-                                            ),
+                                          _AvatarBubble(
+                                            name: item.conversationName,
+                                            imageUrl: item.avatarUrl,
+                                            colors: const [
+                                              Color(0xFFE7DFFF),
+                                              Color(0xFFC18EFF),
+                                            ],
+                                            size: 34,
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
@@ -1000,9 +1116,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         return false;
       }
 
+      final normalizedSearch = _searchQuery.toLowerCase();
       final matchesSearch =
-          conv.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          conv.preview.toLowerCase().contains(_searchQuery.toLowerCase());
+          conv.name.toLowerCase().contains(normalizedSearch) ||
+          conv.preview.toLowerCase().contains(normalizedSearch) ||
+          conv.messages.any(
+            (message) => message.text.toLowerCase().contains(normalizedSearch),
+          );
       if (!matchesSearch) return false;
 
       if (conv.id == -1) {
@@ -1456,6 +1576,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _AiRagItem(
             id: itemId,
             title: title,
+            imageUrl: _firstNonEmptyString([
+              map['image_url'],
+              if (map['image_urls'] is List &&
+                  (map['image_urls'] as List).isNotEmpty)
+                (map['image_urls'] as List).first,
+            ]),
             price: price,
             listingType: map['listing_type']?.toString(),
             condition: map['condition']?.toString(),
@@ -1468,6 +1594,16 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     } catch (_) {
       return (visibleText: visibleText, items: const []);
     }
+  }
+
+  static String? _firstNonEmptyString(List<dynamic> values) {
+    for (final value in values) {
+      final text = value?.toString().trim();
+      if (text != null && text.isNotEmpty) {
+        return text;
+      }
+    }
+    return null;
   }
 
   void _applyAiMessages(List<AiMessage> aiMessages) {
@@ -2189,127 +2325,24 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<String?> _promptManualLocationMessage() async {
-    final latController = TextEditingController();
-    final lngController = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Choose location'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: latController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Latitude'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: lngController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Longitude'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final lat = double.tryParse(latController.text.trim());
-                final lng = double.tryParse(lngController.text.trim());
-                if (lat == null || lng == null) {
-                  return;
-                }
-                Navigator.of(context).pop(
-                  '[Location] https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}',
-                );
-              },
-              child: const Text('Send'),
-            ),
-          ],
-        );
-      },
-    );
-    latController.dispose();
-    lngController.dispose();
-    return result;
-  }
-
   Future<void> _sendLocation(_Conversation conversation) async {
-    final option = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Wrap(
-            children: [
-              ListTile(
-                leading: const Icon(Icons.my_location_rounded),
-                title: const Text('Send current location'),
-                onTap: () => Navigator.of(context).pop('current'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.place_rounded),
-                title: const Text('Choose location manually'),
-                onTap: () => Navigator.of(context).pop('manual'),
-              ),
-            ],
-          ),
-        );
-      },
+    final picked = await Navigator.of(context).push<MapLocationPickerResult>(
+      MaterialPageRoute(
+        builder: (_) => const MapLocationPicker(title: 'Choose location'),
+      ),
     );
-
-    if (option == null) {
+    if (!mounted || picked == null) {
       return;
     }
 
-    if (option == 'manual') {
-      final manualMessage = await _promptManualLocationMessage();
-      if (manualMessage != null) {
-        await _sendQuickMessage(conversation, manualMessage);
-      }
-      return;
-    }
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showSnack('Location service is disabled on this device.');
-        return;
-      }
-
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        _showSnack('Location permission is required to share location.');
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition();
-      final lat = position.latitude.toStringAsFixed(6);
-      final lng = position.longitude.toStringAsFixed(6);
-      await _sendQuickMessage(
-        conversation,
-        '[Location] https://maps.google.com/?q=$lat,$lng',
-      );
-    } catch (e) {
-      debugPrint('Error fetching current location: $e');
-      _showSnack('Unable to get current location.');
-    }
+    final lat = picked.latitude.toStringAsFixed(6);
+    final lng = picked.longitude.toStringAsFixed(6);
+    final address = picked.address.trim();
+    final mapsUrl = 'https://maps.google.com/?q=$lat,$lng';
+    await _sendQuickMessage(
+      conversation,
+      address.isEmpty ? '[Location] $mapsUrl' : '[Location] $address\n$mapsUrl',
+    );
   }
 
   Future<void> _startVoiceRecording() async {
@@ -3263,7 +3296,12 @@ class _ChatPanelState extends State<_ChatPanel> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToLatest();
+      final jumpToMessageId = widget.jumpToMessageId;
+      if (jumpToMessageId != null) {
+        _scrollToMessage(jumpToMessageId);
+        return;
+      }
+      _scheduleScrollToLatest();
     });
   }
 
@@ -3277,10 +3315,9 @@ class _ChatPanelState extends State<_ChatPanel> {
     if (chatChanged && _showAttachmentOptions) {
       _showAttachmentOptions = false;
     }
-    if (chatChanged || messageCountChanged) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToLatest(animated: !chatChanged);
-      });
+    if ((chatChanged || messageCountChanged) &&
+        widget.jumpToMessageId == null) {
+      _scheduleScrollToLatest(animated: !chatChanged);
     }
     if (oldWidget.jumpToMessageId != widget.jumpToMessageId &&
         widget.jumpToMessageId != null) {
@@ -3389,6 +3426,10 @@ class _ChatPanelState extends State<_ChatPanel> {
             itemBuilder: (context, index) {
               final msg = widget.pinnedMessages[index];
               return ListTile(
+                onTap: () {
+                  Navigator.pop(context);
+                  _scrollToMessage(msg.id);
+                },
                 leading: const Icon(
                   Icons.push_pin_rounded,
                   color: Color(0xFF7A54FF),
@@ -3438,6 +3479,29 @@ class _ChatPanelState extends State<_ChatPanel> {
     _scrollController.jumpTo(target);
   }
 
+  void _scheduleScrollToLatest({bool animated = false, int attempts = 4}) {
+    void scheduleAttempt(int remaining) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || widget.jumpToMessageId != null) {
+          return;
+        }
+
+        _scrollToLatest(animated: animated && remaining == attempts);
+        if (remaining <= 1) {
+          return;
+        }
+
+        Future<void>.delayed(const Duration(milliseconds: 80), () {
+          if (mounted) {
+            scheduleAttempt(remaining - 1);
+          }
+        });
+      });
+    }
+
+    scheduleAttempt(attempts);
+  }
+
   void _scrollToMessage(int messageId) {
     final key = _messageKeys[messageId];
     final context = key?.currentContext;
@@ -3448,6 +3512,11 @@ class _ChatPanelState extends State<_ChatPanel> {
         return;
       }
       _jumpRetryCount++;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _scrollToMessage(messageId);
+        }
+      });
       return;
     }
     _jumpRetryCount = 0;
@@ -3649,7 +3718,8 @@ class _ChatPanelState extends State<_ChatPanel> {
           Container(height: 1, color: const Color(0xFFE7DFFF)),
           if (widget.pinnedMessages.isNotEmpty)
             InkWell(
-              onTap: _showPinnedMessagesSheet,
+              onTap: () => _scrollToMessage(widget.pinnedMessages.first.id),
+              onLongPress: _showPinnedMessagesSheet,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -4378,91 +4448,183 @@ class _MessageBubbleState extends State<_MessageBubble> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
       child: InkWell(
-        //   onTap: () => _openRagItemDetails(ragItem),
+        onTap: () => _openRagItemDetails(ragItem),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      ragItem.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+              _buildRagItemThumbnail(ragItem),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            ragItem.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1F2740),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Icon(
+                          Icons.open_in_new_rounded,
+                          size: 18,
+                          color: Color(0xFF7A54FF),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _formatPrice(ragItem.price),
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2740),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  const Icon(
-                    Icons.open_in_new_rounded,
-                    size: 18,
-                    color: Color(0xFF7A54FF),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _formatPrice(ragItem.price),
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Color(0xFF7A54FF),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (shortDescription.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  shortDescription,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF5C6B89),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (listingType.isNotEmpty) _buildTag(listingType),
-                  if (listingType.isNotEmpty && condition.isNotEmpty)
-                    const SizedBox(width: 6),
-                  if (condition.isNotEmpty) _buildTag(condition),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF7A54FF),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text(
-                      'View Listing',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
+                        fontSize: 15,
+                        color: Color(0xFF7A54FF),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ),
-                ],
+                    if (shortDescription.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        shortDescription,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF5C6B89),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        if (listingType.isNotEmpty) _buildTag(listingType),
+                        if (listingType.isNotEmpty && condition.isNotEmpty)
+                          const SizedBox(width: 6),
+                        if (condition.isNotEmpty) _buildTag(condition),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF7A54FF),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'View Listing',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildRagItemThumbnail(_AiRagItem ragItem) {
+    final imageUrl = ragItem.imageUrl?.trim();
+    final placeholder = Container(
+      width: 74,
+      height: 74,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEDE5FF), Color(0xFFF8F4FF)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: const Icon(
+        Icons.inventory_2_rounded,
+        color: Color(0xFF7A54FF),
+        size: 28,
+      ),
+    );
+
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return FutureBuilder<String?>(
+        future: _loadRagItemImageUrl(ragItem.id),
+        builder: (context, snapshot) {
+          final loadedUrl = snapshot.data?.trim();
+          if (loadedUrl == null || loadedUrl.isEmpty) {
+            return placeholder;
+          }
+          return _buildRagNetworkImage(loadedUrl, placeholder);
+        },
+      );
+    }
+
+    return _buildRagNetworkImage(imageUrl, placeholder);
+  }
+
+  Widget _buildRagNetworkImage(String imageUrl, Widget placeholder) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Image.network(
+        imageUrl,
+        width: 74,
+        height: 74,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => placeholder,
+      ),
+    );
+  }
+
+  Future<String?> _loadRagItemImageUrl(int itemId) async {
+    final item = await ItemsRepository().getById(itemId);
+    if (item == null || item.imageUrls.isEmpty) {
+      return null;
+    }
+    return item.imageUrls.first;
+  }
+
+  Future<void> _openRagItemDetails(_AiRagItem ragItem) async {
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+
+      final item = await ItemsRepository().getById(ragItem.id);
+      if (!mounted || item == null) {
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
   }
 
   @override
@@ -5526,6 +5688,7 @@ class _Message {
 class _AiRagItem {
   final int id;
   final String title;
+  final String? imageUrl;
   final String? price;
   final String? listingType;
   final String? condition;
@@ -5534,6 +5697,7 @@ class _AiRagItem {
   const _AiRagItem({
     required this.id,
     required this.title,
+    this.imageUrl,
     this.price,
     this.listingType,
     this.condition,
@@ -5556,12 +5720,14 @@ class _OfferCardData {
 class _SearchMatch {
   final int conversationId;
   final String conversationName;
+  final String? avatarUrl;
   final String snippet;
   final int? messageId;
 
   const _SearchMatch({
     required this.conversationId,
     required this.conversationName,
+    this.avatarUrl,
     required this.snippet,
     this.messageId,
   });

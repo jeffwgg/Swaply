@@ -264,6 +264,11 @@ function normalizeItemsForPrompt(rows: any[]): any[] {
       return {
         id,
         title,
+        image_url: Array.isArray(row?.image_urls) && row.image_urls.length > 0
+          ? String(row.image_urls[0])
+          : typeof row?.image_url === 'string' && row.image_url.trim().length > 0
+          ? row.image_url.trim()
+          : null,
         price,
         listing_type:
           typeof row?.listing_type === 'string' ? row.listing_type : null,
@@ -581,7 +586,7 @@ Deno.serve(async (req: Request) => {
     let retrievalPath = 'query'
     let itemsResult = await runItemsQuery({
       selectClause:
-        'id,title,name,description,price,listing_type,status,category',
+        'id,title,name,description,price,listing_type,status,category,image_urls',
       includeTitle: true,
       includeName: true,
     })
@@ -592,7 +597,7 @@ Deno.serve(async (req: Request) => {
         retrievalPath = 'query_fallback_title'
         itemsResult = await runItemsQuery({
           selectClause:
-            'id,title,description,price,listing_type,status,category',
+            'id,title,description,price,listing_type,status,category,image_urls',
           includeTitle: true,
           includeName: false,
         })
@@ -600,7 +605,7 @@ Deno.serve(async (req: Request) => {
         retrievalPath = 'query_fallback_name'
         itemsResult = await runItemsQuery({
           selectClause:
-            'id,name,description,price,listing_type,status,category',
+            'id,name,description,price,listing_type,status,category,image_urls',
           includeTitle: false,
           includeName: true,
         })
@@ -619,7 +624,7 @@ Deno.serve(async (req: Request) => {
       let broadRows: any[] = []
       const broadResult = await supabaseClient
         .from('items')
-        .select('id,title,name,description,price,listing_type,status,category,created_at')
+        .select('id,title,name,description,price,listing_type,status,category,image_urls,created_at')
         .eq('status', 'available')
         .order('created_at', { ascending: false })
         .limit(120)
@@ -629,7 +634,7 @@ Deno.serve(async (req: Request) => {
         if (broadErrorMessage.includes('column items.title does not exist')) {
           const broadNameResult = await supabaseClient
             .from('items')
-            .select('id,name,description,price,listing_type,status,category,created_at')
+            .select('id,name,description,price,listing_type,status,category,image_urls,created_at')
             .eq('status', 'available')
             .order('created_at', { ascending: false })
             .limit(120)
@@ -639,7 +644,7 @@ Deno.serve(async (req: Request) => {
         } else if (broadErrorMessage.includes('column items.name does not exist')) {
           const broadTitleResult = await supabaseClient
             .from('items')
-            .select('id,title,description,price,listing_type,status,category,created_at')
+            .select('id,title,description,price,listing_type,status,category,image_urls,created_at')
             .eq('status', 'available')
             .order('created_at', { ascending: false })
             .limit(120)
