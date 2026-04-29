@@ -720,9 +720,8 @@ class _ItemCardState extends State<ItemCard> {
                         child: FutureBuilder<AppUser?>(
                           future: _ownerFuture,
                           builder: (context, snapshot) {
-                            final fallbackName = widget.item.ownerUsername;
                             final ownerName =
-                                (snapshot.data?.username ?? fallbackName ?? 'Unknown')
+                                (snapshot.data?.username  ?? 'Unknown')
                                     .trim();
                             return Text(
                               ownerName.isEmpty ? 'Unknown' : ownerName,
