@@ -89,14 +89,6 @@ class ItemService {
     );
   }
 
-  Future<List<ItemListing>> loadUserItems(String userId) async {
-    return await _remote.getUserItems(userId);
-  }
-
-  // ========================
-  // FAVOURITES (REMOTE ONLY)
-  // ========================
-
   Future<bool> toggleFavourite(int itemId, String userId) async {
     return await _remoteFav.toggleFavourite(userId, itemId);
   }

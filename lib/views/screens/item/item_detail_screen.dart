@@ -854,14 +854,20 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
                         setState(() => _isLoadingFollow = true);
 
-                  try {
-                    if (_isFollowing) {
-                      await FollowService.unfollowUser(loginUser.id, targetUserId);
-                      setState(() => _isFollowing = false);
-                    } else {
-                      await FollowService.followUser(loginUser.id, targetUserId);
-                      setState(() => _isFollowing = true);
-                    }
+                        try {
+                          if (_isFollowing) {
+                            await FollowService.unfollowUser(
+                              loginUser.id,
+                              targetUserId,
+                            );
+                            setState(() => _isFollowing = false);
+                          } else {
+                            await FollowService.followUser(
+                              loginUser.id,
+                              targetUserId,
+                            );
+                            setState(() => _isFollowing = true);
+                          }
                           if (mounted) {
                             ScaffoldMessenger.of(context).hideCurrentSnackBar();
                             _isFollowing
@@ -1036,32 +1042,37 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       ],
                     ),
                   ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: _toggleFavourite,
-                        icon: Icon(
-                          _isFavourite ? Icons.favorite : Icons.favorite_border,
-                          color: _isFavourite ? Colors.red : Color(0xFF5B21B6),
-                          size: 28,
-                        ),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                      if (_favCount != null) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          '$_favCount',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5B21B6),
+                  if (_item.repliedTo == null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: _toggleFavourite,
+                          icon: Icon(
+                            _isFavourite
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: _isFavourite
+                                ? Colors.red
+                                : Color(0xFF5B21B6),
+                            size: 28,
                           ),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                         ),
+                        if (_favCount != null) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '$_favCount',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF5B21B6),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
+                    ),
                 ],
               ),
               Text(
@@ -1106,13 +1117,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: item.status == 'available'
+                        color:
+                            item.status == 'available' ||
+                                item.status == 'pending'
                             ? Color(0xFFE6FEE1)
                             : item.status == 'dropped'
                             ? Color(0xFFFFC0C4)
                             : Color(0xFFF2ECFF),
                         borderRadius: BorderRadius.circular(10),
-                        border: item.status == 'available'
+                        border:
+                            item.status == 'available' ||
+                                item.status == 'pending'
                             ? Border.all(color: const Color(0xFFAFF9B6))
                             : item.status == 'dropped'
                             ? Border.all(color: const Color(0xFFFFA0A2))
@@ -1127,7 +1142,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               'STATUS',
                               style: TextStyle(
                                 fontSize: 16,
-                                color: item.status == 'available'
+                                color:
+                                    item.status == 'available' ||
+                                        item.status == 'pending'
                                     ? Color(0xFF65BE4A)
                                     : item.status == 'dropped'
                                     ? Color(0xFFFF3E41)
@@ -1139,7 +1156,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   item.status.substring(1).toLowerCase(),
                               style: TextStyle(
                                 fontSize: 22,
-                                color: item.status == 'available'
+                                color:
+                                    item.status == 'available' ||
+                                        item.status == 'pending'
                                     ? const Color(0xFF2D7D26)
                                     : item.status == 'dropped'
                                     ? const Color(0xFFDE1518)
@@ -1206,7 +1225,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                 ),
               const SizedBox(height: 12),
-              if (item.listingType != 'sell')
+              if (item.repliedTo == null && item.listingType != 'sell')
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -1345,7 +1364,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ],
                 ),
               const SizedBox(height: 16),
-              if (item.listingType != 'sell')
+              if (item.listingType != 'sell' && item.repliedTo == null)
                 Row(
                   children: [
                     const Expanded(
@@ -1617,7 +1636,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 );
               }).toList(),
               const SizedBox(height: 14),
-              if (item.status == 'available') ...[
+              if (item.status == 'available' || item.status == 'pending') ...[
                 if (loginUser != null && loginUser.id == item.ownerId)
                   Row(
                     children: [
@@ -1678,7 +1697,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ],
                   )
                 else ...[
-                  if (item.listingType == 'both')
+                  if (item.repliedTo == null && item.listingType == 'both')
                     Row(
                       children: [
                         Expanded(
@@ -1759,7 +1778,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         ),
                       ],
                     )
-                  else if (item.listingType == 'sell')
+                  else if (item.repliedTo == null && item.listingType == 'sell')
                     SizedBox(
                       width: double.infinity,
                       child: TextButton(
@@ -1790,7 +1809,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         ),
                       ),
                     )
-                  else if (item.listingType == 'trade')
+                  else if (item.repliedTo == null &&
+                      item.listingType == 'trade')
                     SizedBox(
                       width: double.infinity,
                       child: TextButton(
@@ -1854,7 +1874,7 @@ class _StatusBadge extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'available':
-      case 'accepted':
+      case 'pending':
         color = Colors.green;
         break;
       case 'dropped':
@@ -1862,9 +1882,9 @@ class _StatusBadge extends StatelessWidget {
         color = Colors.red;
         break;
       case 'reserved':
-      case 'pending':
         color = Colors.orange;
         break;
+      case 'accepted':
       default:
         color = Colors.blue;
     }

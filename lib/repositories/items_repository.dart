@@ -184,7 +184,6 @@ class ItemsRepository {
         .from(_table)
         .select()
         .eq('owner_id', userId)
-        .neq('status', 'dropped')  // ✅ Exclude dropped items
         .order('created_at', ascending: false);
     
     final rows = _requireListOfMaps(response, operation: 'getUserItems');
