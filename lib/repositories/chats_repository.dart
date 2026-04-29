@@ -299,6 +299,16 @@ class ChatsRepository {
       },
     );
 
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'chat_pinned_messages',
+      callback: (_) {
+        // Refresh inbox/chat state when any participant pins/unpins a message.
+        emitInboxRefresh();
+      },
+    );
+
     channel.subscribe();
     return channel;
   }

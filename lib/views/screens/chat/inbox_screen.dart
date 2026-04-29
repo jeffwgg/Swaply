@@ -67,6 +67,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   List<String> _recentSearchQueries = const [];
   Set<int> _pinnedChats = {};
   List<int> _pinnedChatOrder = const [];
+  int? _pendingJumpMessageId;
   Set<int> _manuallyUnreadChats = {};
   Set<int> _hiddenChats = {};
 
@@ -623,7 +624,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     );
   }
 
-  List<_SearchMatch> _buildSearchMatches(String query) {
+  List<_SearchMatch> _buildSearchMatches(String query, {int? conversationId}) {
     final normalized = query.trim().toLowerCase();
     if (normalized.isEmpty) {
       return const [];
@@ -634,8 +635,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       if (_hiddenChats.contains(conversation.id)) {
         continue;
       }
+      if (conversationId != null && conversation.id != conversationId) {
+        continue;
+      }
 
       String? snippet;
+      int? matchedMessageId;
       if (conversation.preview.toLowerCase().contains(normalized)) {
         snippet = conversation.preview;
       }
@@ -644,6 +649,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         final text = message.text.toLowerCase();
         if (text.contains(normalized)) {
           snippet = message.text;
+          matchedMessageId = message.id;
           break;
         }
       }
@@ -654,6 +660,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             conversationId: conversation.id,
             conversationName: conversation.name,
             snippet: snippet,
+            messageId: matchedMessageId,
           ),
         );
       }
@@ -689,6 +696,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openSearchDialog({int? focusConversationId}) async {
+    final onlyThisChat = focusConversationId != null;
     final controller = TextEditingController(text: _searchQuery);
     final result = await showDialog<_SearchDialogResult>(
       context: context,
@@ -697,7 +705,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final results = _buildSearchMatches(localQuery);
+            final results = _buildSearchMatches(
+              localQuery,
+              conversationId: focusConversationId,
+            );
             final history = _recentSearchQueries;
 
             return AlertDialog(
@@ -706,7 +717,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
-              title: const Text('Search chats'),
+              title: Text(onlyThisChat ? 'Search in this chat' : 'Search chats'),
               content: SizedBox(
                 width: 420,
                 child: Column(
@@ -730,8 +741,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                       child: TextField(
                         controller: controller,
                         autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'Search by user or message',
+                        decoration: InputDecoration(
+                          hintText: onlyThisChat
+                              ? 'Search messages in this chat'
+                              : 'Search by user or message',
                           prefixIcon: Icon(
                             Icons.search_rounded,
                             color: Color(0xFF7A54FF),
@@ -783,6 +796,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                   onTap: () {
                                     final historyMatches = _buildSearchMatches(
                                       h,
+                                      conversationId: focusConversationId,
                                     );
                                     if (historyMatches.isNotEmpty) {
                                       Navigator.pop(
@@ -792,6 +806,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                           conversationId: historyMatches
                                               .first
                                               .conversationId,
+                                          messageId: historyMatches.first.messageId,
                                         ),
                                       );
                                       return;
@@ -864,6 +879,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                         _SearchDialogResult(
                                           query: localQuery,
                                           conversationId: item.conversationId,
+                                          messageId: item.messageId,
                                         ),
                                       );
                                     },
@@ -955,9 +971,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
 
     setState(() {
-      _searchQuery = result.query;
+      if (!onlyThisChat) {
+        _searchQuery = result.query;
+      }
       _selectedConversation = 0;
       _selectedConversationId = null;
+      _pendingJumpMessageId = result.messageId;
     });
 
     if (result.query.isNotEmpty) {
@@ -1115,15 +1134,17 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return;
     }
 
-    if (_activeChatId == selected.id &&
-        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
-      return;
-    }
-
+    // Always refresh pin list for the currently selected conversation.
+    // This keeps pin/unpin state realtime even when staying in the same chat.
     if (selected.id == -1) {
       _loadPinnedMessagesForAiChat();
     } else {
       _loadPinnedMessagesForChat(selected.id);
+    }
+
+    if (_activeChatId == selected.id &&
+        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
+      return;
     }
 
     _messagesSubscription?.cancel();
@@ -2669,6 +2690,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                   _showConversationActions(selected),
                               onOpenItemDetails: () =>
                                   _openConversationItemDetails(selected),
+                              jumpToMessageId: _pendingJumpMessageId,
+                              onJumpToMessageHandled: () {
+                                if (!mounted || _pendingJumpMessageId == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _pendingJumpMessageId = null;
+                                });
+                              },
                             )
                           : const Center(
                               child: Text(
@@ -2718,6 +2748,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                       _showConversationActions(selected),
                   onOpenItemDetails: () =>
                       _openConversationItemDetails(selected),
+                  jumpToMessageId: _pendingJumpMessageId,
+                  onJumpToMessageHandled: () {
+                    if (!mounted || _pendingJumpMessageId == null) {
+                      return;
+                    }
+                    setState(() {
+                      _pendingJumpMessageId = null;
+                    });
+                  },
                 );
               }
 
@@ -3172,6 +3211,8 @@ class _ChatPanel extends StatefulWidget {
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
   final VoidCallback onOpenItemDetails;
+  final int? jumpToMessageId;
+  final VoidCallback onJumpToMessageHandled;
 
   const _ChatPanel({
     required this.conversation,
@@ -3198,6 +3239,8 @@ class _ChatPanel extends StatefulWidget {
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
     required this.onOpenItemDetails,
+    required this.jumpToMessageId,
+    required this.onJumpToMessageHandled,
   });
 
   @override
@@ -3213,6 +3256,8 @@ class _ChatPanelState extends State<_ChatPanel> {
   String? _loadedVoiceDraftPath;
   bool _showEmojiKeyboard = false;
   bool _showAttachmentOptions = false;
+  final Map<int, GlobalKey> _messageKeys = {};
+  int _jumpRetryCount = 0;
 
   @override
   void initState() {
@@ -3235,6 +3280,18 @@ class _ChatPanelState extends State<_ChatPanel> {
     if (chatChanged || messageCountChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToLatest(animated: !chatChanged);
+      });
+    }
+    if (oldWidget.jumpToMessageId != widget.jumpToMessageId &&
+        widget.jumpToMessageId != null) {
+      _jumpRetryCount = 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToMessage(widget.jumpToMessageId!);
+      });
+    }
+    if (messageCountChanged && widget.jumpToMessageId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToMessage(widget.jumpToMessageId!);
       });
     }
 
@@ -3381,6 +3438,28 @@ class _ChatPanelState extends State<_ChatPanel> {
     _scrollController.jumpTo(target);
   }
 
+  void _scrollToMessage(int messageId) {
+    final key = _messageKeys[messageId];
+    final context = key?.currentContext;
+    if (context == null) {
+      if (_jumpRetryCount >= 8) {
+        _scrollToLatest(animated: true);
+        widget.onJumpToMessageHandled();
+        return;
+      }
+      _jumpRetryCount++;
+      return;
+    }
+    _jumpRetryCount = 0;
+    Scrollable.ensureVisible(
+      context,
+      alignment: 0.22,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+    widget.onJumpToMessageHandled();
+  }
+
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
@@ -3446,9 +3525,12 @@ class _ChatPanelState extends State<_ChatPanel> {
           widget.conversation.id != -1;
 
       widgets.add(
-        _MessageBubble(
-          message: message,
-          onLongPress: () => widget.onLongPressMessage(message),
+        KeyedSubtree(
+          key: _messageKeys.putIfAbsent(message.id, () => GlobalKey()),
+          child: _MessageBubble(
+            message: message,
+            onLongPress: () => widget.onLongPressMessage(message),
+          ),
         ),
       );
 
@@ -5475,17 +5557,24 @@ class _SearchMatch {
   final int conversationId;
   final String conversationName;
   final String snippet;
+  final int? messageId;
 
   const _SearchMatch({
     required this.conversationId,
     required this.conversationName,
     required this.snippet,
+    this.messageId,
   });
 }
 
 class _SearchDialogResult {
   final String query;
   final int? conversationId;
+  final int? messageId;
 
-  const _SearchDialogResult({required this.query, this.conversationId});
+  const _SearchDialogResult({
+    required this.query,
+    this.conversationId,
+    this.messageId,
+  });
 }
