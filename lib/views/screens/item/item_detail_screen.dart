@@ -308,10 +308,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   Future<void> _refreshItemDetails() async {
     final refreshedItem = await ItemsRepository().getById(_item.id);
+    final refreshedReplies = await ItemsRepository().getReplyList(_item.id);
     if (!mounted || refreshedItem == null) return;
     setState(() {
       _item = refreshedItem;
       _isFavourite = refreshedItem.isFavorite;
+      _replies = refreshedReplies;
     });
   }
 
@@ -923,12 +925,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.chat, color: Color(0xFF5B21B6)),
-            onPressed: _composeAndStartItemConversation,
-            tooltip: 'Start Conversation',
-            padding: EdgeInsets.symmetric(horizontal: 5),
-          ),
+          if (item.repliedTo == null)
+            IconButton(
+              icon: const Icon(Icons.chat, color: Color(0xFF5B21B6)),
+              onPressed: _composeAndStartItemConversation,
+              tooltip: 'Start Conversation',
+              padding: EdgeInsets.symmetric(horizontal: 5),
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -1671,7 +1674,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                               ),
                             );
                             if (result == true && mounted) {
-                              Navigator.pop(context, true);
+                              await _refreshItemDetails();
                             }
                           },
                           style: TextButton.styleFrom(
