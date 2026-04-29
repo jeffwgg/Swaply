@@ -39,7 +39,10 @@ class ProfileService {
   }
 
   /// Upload image to Supabase Storage and update user profile
-  static Future<String?> uploadProfilePicture(File imageFile, String userId) async {
+  static Future<String?> uploadProfilePicture(
+    File imageFile,
+    String userId,
+  ) async {
     try {
       final filePath = '$userId/profile.jpg';
       final fileBytes = await imageFile.readAsBytes();
@@ -50,10 +53,7 @@ class ProfileService {
           .uploadBinary(
             filePath,
             fileBytes,
-            fileOptions: const FileOptions(
-              cacheControl: '3600',
-              upsert: true,
-            ),
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
           );
 
       // Get public URL
@@ -78,7 +78,9 @@ class ProfileService {
   static Future<void> deleteOldAvatar(String userId) async {
     try {
       final filePath = '$userId/profile.jpg';
-      await SupabaseService.client.storage.from(_storageBucket).remove([filePath]);
+      await SupabaseService.client.storage.from(_storageBucket).remove([
+        filePath,
+      ]);
     } catch (e) {
       print('Note: Could not delete old avatar: $e');
     }
@@ -164,7 +166,7 @@ class ProfileService {
       return e.toString();
     }
   }
-  
+
   static Future<String?> changePassword({
     required String email,
     required String currentPassword,
@@ -182,7 +184,7 @@ class ProfileService {
     }
   }
 
-   static Future<String?> createProfile({
+  static Future<String?> createProfile({
     required String userId,
     required String email,
     required String username,
@@ -208,18 +210,26 @@ class ProfileService {
     final phoneTaken = await _repo.isPhoneTakenForCreate(phone);
     if (phoneTaken) return "PHONE_TAKEN";
 
-    // 💾 insert
-    await _repo.insertUser({
-      'id': userId,
-      'email': email,
-      'username': username,
-      'full_name': fullName,
-      'bio': bio,
-      'phone': phone,
-      'gender': gender,
-      'birthdate': birthdate.toIso8601String().split('T')[0],
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    try {
+      // 💾 insert
+      await _repo.insertUser({
+        'id': userId,
+        'email': email,
+        'username': username,
+        'full_name': fullName,
+        'bio': bio,
+        'phone': phone,
+        'gender': gender,
+        'birthdate': birthdate.toIso8601String().split('T')[0],
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } on PostgrestException catch (e) {
+      print("Create profile database error: ${e.message}");
+      return e.message;
+    } catch (e) {
+      print("Create profile error: $e");
+      return e.toString();
+    }
 
     return null;
   }
@@ -230,8 +240,8 @@ class ProfileService {
         .stream(primaryKey: ['id'])
         .eq('id', userId)
         .map((data) {
-      if (data.isEmpty) return null;
-      return AppUser.fromMap(data.first);
-    });
+          if (data.isEmpty) return null;
+          return AppUser.fromMap(data.first);
+        });
   }
 }

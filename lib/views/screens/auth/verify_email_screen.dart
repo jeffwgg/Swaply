@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '/services/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main_shell.dart';
@@ -7,10 +8,7 @@ import 'profile_setup_screen.dart';
 class VerifyEmailScreen extends StatefulWidget {
   final String email;
 
-  const VerifyEmailScreen({
-    super.key,
-    required this.email,
-  });
+  const VerifyEmailScreen({super.key, required this.email});
 
   @override
   State<VerifyEmailScreen> createState() => _VerifyEmailScreenState();
@@ -20,6 +18,8 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   bool isResending = false;
   bool hasResent = false;
   int resendCountdown = 0;
+  bool _handledVerifiedUser = false;
+  StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
@@ -28,27 +28,32 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     _setupAuthListener();
   }
 
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
   /// 📧 Listen for email verification changes
   void _setupAuthListener() {
-    SupabaseService.client.auth.onAuthStateChange.listen((data) async {
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen((
+      data,
+    ) async {
+      if (_handledVerifiedUser || !mounted) {
+        return;
+      }
+
       final session = data.session;
       final user = session?.user;
 
       if (user != null && user.emailConfirmedAt != null) {
+        _handledVerifiedUser = true;
         print("✅ Email verified! User: ${user.email}");
 
         if (!mounted) return;
 
-        // 🔄 Refresh session to ensure latest state
-        try {
-          await SupabaseService.client.auth.refreshSession();
-          print("✅ Session refreshed");
-        } catch (e) {
-          print("⚠️ Session refresh error: $e");
-        }
-
         // 📝 Check if user has a profile
-        _checkProfileAndNavigate(user.id);
+        await _checkProfileAndNavigate(user.id);
       }
     });
   }
@@ -79,9 +84,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
         // ✅ Profile exists → Navigate to MainShell
         print("✅ Profile found. Navigating to MainShell...");
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => MainShell(),
-          ),
+          MaterialPageRoute(builder: (_) => MainShell()),
           (route) => false,
         );
       }
@@ -89,10 +92,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       print("❌ Error checking profile: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error: $e"),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
         );
       }
     }
@@ -143,10 +143,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("❌ $errorMsg"),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text("❌ $errorMsg"), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -198,8 +195,8 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                 Text(
                   "Verify Your Email",
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                   textAlign: TextAlign.center,
                 ),
 
@@ -208,9 +205,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                 // Message
                 Text(
                   "We've sent a verification link to:",
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
 
@@ -270,7 +267,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
 
                 // Resend button
                 GestureDetector(
-                  onTap: (isResending || resendCountdown > 0) ? null : _resendVerificationEmail,
+                  onTap: (isResending || resendCountdown > 0)
+                      ? null
+                      : _resendVerificationEmail,
                   child: Container(
                     height: 56,
                     width: double.infinity,
@@ -279,7 +278,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                       gradient: LinearGradient(
                         colors: (isResending || resendCountdown > 0)
                             ? [Colors.grey, Colors.grey]
-                            : [const Color(0xFF7B61FF), const Color(0xFF5A3FFF)],
+                            : [
+                                const Color(0xFF7B61FF),
+                                const Color(0xFF5A3FFF),
+                              ],
                       ),
                     ),
                     child: Center(
@@ -296,8 +298,8 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                               resendCountdown > 0
                                   ? "Resend in ${resendCountdown}s"
                                   : hasResent
-                                      ? "Resend Email"
-                                      : "Didn't receive email? Resend",
+                                  ? "Resend Email"
+                                  : "Didn't receive email? Resend",
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -314,9 +316,9 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                 Text.rich(
                   TextSpan(
                     text: "After clicking the link, ",
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey),
                     children: [
                       TextSpan(
                         text: "the app will automatically update",
@@ -351,9 +353,8 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                       Expanded(
                         child: Text(
                           "Check your spam/promotional folder if you don't see the email",
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.orange.shade700,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.orange.shade700),
                         ),
                       ),
                     ],
@@ -388,12 +389,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 14),
-          ),
-        ),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
       ],
     );
   }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
 import '../main_shell.dart';
 import '../../../services/profile_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -12,9 +13,7 @@ class ProfileSetupScreen extends StatefulWidget {
   State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
 }
 
-
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
-
   final usernameController = TextEditingController();
   final phoneController = TextEditingController();
   final addressController = TextEditingController();
@@ -59,10 +58,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
+
   void _showSuccess(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -71,15 +71,26 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   Future<void> _saveProfile() async {
+    if (isSaving) {
+      return;
+    }
     setState(() => isSaving = true);
 
     try {
       final user = SupabaseService.client.auth.currentUser;
-      if (user == null) throw Exception("User session not found");
+      if (user == null) {
+        _showError("Your sign-in session expired. Please log in again.");
+        return;
+      }
+      final email = user.email;
+      if (email == null || email.trim().isEmpty) {
+        _showError("Your account email is unavailable. Please log in again.");
+        return;
+      }
 
       final error = await ProfileService.createProfile(
         userId: user.id,
-        email: user.email!,
+        email: email,
         username: usernameController.text.trim(),
         fullName: fullNameController.text.trim(),
         bio: bioController.text.trim(),
@@ -103,15 +114,23 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       );
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => MainShell()),
+        MaterialPageRoute(builder: (_) => const MainShell()),
         (route) => false,
       );
+    } on AuthException catch (e) {
+      debugPrint("Profile setup auth error: ${e.message}");
+      _showError(e.message);
+    } on PostgrestException catch (e) {
+      debugPrint("Profile setup database error: ${e.message}");
+      _showError(e.message);
     } catch (e) {
-      _showError("Something went wrong");
+      debugPrint("Profile setup error: $e");
+      _showError("Something went wrong: $e");
     } finally {
       if (mounted) setState(() => isSaving = false);
     }
   }
+
   // ✅ 验证输入
   Future<void> _validateAndContinue() async {
     String fullName = fullNameController.text.trim();
@@ -168,7 +187,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     await _saveProfile();
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -178,7 +196,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
             children: [
-
               const SizedBox(height: 10),
 
               // 🔙 Back
@@ -227,10 +244,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           shape: BoxShape.circle,
                         ),
                         padding: const EdgeInsets.all(6),
-                        child: const Icon(Icons.camera_alt,
-                            color: Colors.white, size: 16),
+                        child: const Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -240,18 +260,41 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               // 📦 CARD
               Container(
                 padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                ),
                 child: Column(
                   children: [
-                    _InputField(controller: usernameController, icon: Icons.person, hint: "Username"),
+                    _InputField(
+                      controller: usernameController,
+                      icon: Icons.person,
+                      hint: "Username",
+                    ),
                     const SizedBox(height: 12),
-                    _InputField(controller: fullNameController, icon: Icons.badge, hint: "Full Name"),
+                    _InputField(
+                      controller: fullNameController,
+                      icon: Icons.badge,
+                      hint: "Full Name",
+                    ),
                     const SizedBox(height: 12),
-                    _InputField(controller: bioController, icon: Icons.edit, hint: "Bio"),
+                    _InputField(
+                      controller: bioController,
+                      icon: Icons.edit,
+                      hint: "Bio",
+                    ),
                     const SizedBox(height: 12),
-                    _InputField(controller: phoneController, icon: Icons.phone, hint: "Phone Number"),
+                    _InputField(
+                      controller: phoneController,
+                      icon: Icons.phone,
+                      hint: "Phone Number",
+                    ),
                     const SizedBox(height: 12),
-                    _InputField(controller: addressController, icon: Icons.location_on, hint: "Address"),
+                    _InputField(
+                      controller: addressController,
+                      icon: Icons.location_on,
+                      hint: "Address",
+                    ),
                     const SizedBox(height: 12),
 
                     // 生日选择
@@ -283,20 +326,20 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   child: Center(
                     child: isSaving
                         ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
                         : const Text(
-                      "Complete Profile",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                            "Complete Profile",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -313,15 +356,23 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildAvatarSection() {
     return Stack(
       children: [
-        CircleAvatar(radius: 50, backgroundColor: Colors.grey[300], child: const Icon(Icons.person, size: 50)),
+        CircleAvatar(
+          radius: 50,
+          backgroundColor: Colors.grey[300],
+          child: const Icon(Icons.person, size: 50),
+        ),
         Positioned(
-          bottom: 0, right: 0,
+          bottom: 0,
+          right: 0,
           child: Container(
             padding: const EdgeInsets.all(6),
-            decoration: const BoxDecoration(color: Colors.purple, shape: BoxShape.circle),
+            decoration: const BoxDecoration(
+              color: Colors.purple,
+              shape: BoxShape.circle,
+            ),
             child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
           ),
-        )
+        ),
       ],
     );
   }
@@ -331,12 +382,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       onTap: () => _pickDate(context),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-        decoration: BoxDecoration(color: const Color(0xFFF7F7FB), borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F7FB),
+          borderRadius: BorderRadius.circular(14),
+        ),
         child: Row(
           children: [
             const Icon(Icons.calendar_today),
             const SizedBox(width: 10),
-            Text(selectedDate == null ? "Select Birthdate" : "${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}"),
+            Text(
+              selectedDate == null
+                  ? "Select Birthdate"
+                  : "${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}",
+            ),
           ],
         ),
       ),
@@ -346,9 +404,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildGenderPicker() {
     return Row(
       children: [
-        _GenderOption(label: "Male", selected: gender == "Male", onTap: () => setState(() => gender = "Male")),
+        _GenderOption(
+          label: "Male",
+          selected: gender == "Male",
+          onTap: () => setState(() => gender = "Male"),
+        ),
         const SizedBox(width: 10),
-        _GenderOption(label: "Female", selected: gender == "Female", onTap: () => setState(() => gender = "Female")),
+        _GenderOption(
+          label: "Female",
+          selected: gender == "Female",
+          onTap: () => setState(() => gender = "Female"),
+        ),
       ],
     );
   }
@@ -409,9 +475,7 @@ class _GenderOption extends StatelessWidget {
           child: Center(
             child: Text(
               label,
-              style: TextStyle(
-                color: selected ? Colors.white : Colors.purple,
-              ),
+              style: TextStyle(color: selected ? Colors.white : Colors.purple),
             ),
           ),
         ),
