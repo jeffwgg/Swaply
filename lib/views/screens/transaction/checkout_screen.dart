@@ -53,6 +53,7 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   String? _selectedMeetupId;
+  final TextEditingController _meetupAddressController = TextEditingController();
   final TextEditingController _shippingAddressController = TextEditingController();
   final StripePaymentService _stripe = StripePaymentService();
   final TransactionsRepository _transactions = TransactionsRepository();
@@ -62,6 +63,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Timer? _shipDebounce;
   bool _shipSearching = false;
   List<dynamic> _shipResults = const [];
+
+  Timer? _meetDebounce;
+  bool _meetSearching = false;
+  List<dynamic> _meetResults = const [];
 
   bool _agreedToTerms = false;
   bool _busy = false;
@@ -92,6 +97,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void dispose() {
     _shipDebounce?.cancel();
+    _meetDebounce?.cancel();
+    _meetupAddressController.dispose();
     _shippingAddressController.dispose();
     super.dispose();
   }
@@ -117,7 +124,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   bool _locationReady() {
     if (_fulfillment == _Fulfillment.meetup) {
-      return _hasMeetupChoices && _selectedMeetupId != null;
+      // If seller provided meet-up options, require a selection.
+      // Otherwise allow the user to input their own meet-up address.
+      return (_hasMeetupChoices && _selectedMeetupId != null) ||
+          _meetupAddressController.text.trim().isNotEmpty;
     }
     return _shippingAddressController.text.trim().isNotEmpty;
   }
@@ -141,6 +151,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     setState(() {
       _shippingAddressController.text = result.address;
     });
+  }
+
+  Future<void> _onUseMeetupGpsPressed() async {
+    final initialText = _meetupAddressController.text.trim();
+    final result = await Navigator.of(context).push<MapLocationPickerResult>(
+      MaterialPageRoute(
+        builder: (_) => MapLocationPicker(
+          title: 'Meet-up location',
+          initialAddress: initialText.isEmpty ? null : initialText,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+    setState(() {
+      _meetupAddressController.text = result.address;
+    });
+  }
+
+  String _resolveMeetupAddress() {
+    if (_hasMeetupChoices && _selectedMeetupId != null) {
+      return widget.sellerMeetupOptions
+          .firstWhere((o) => o.id == _selectedMeetupId)
+          .fullAddress;
+    }
+    return _meetupAddressController.text.trim();
   }
 
   Future<List<dynamic>> _searchPlaces(String query) async {
@@ -203,6 +239,40 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
   }
 
+  void _onMeetupQueryChanged(String value) {
+    _meetDebounce?.cancel();
+    _meetDebounce = Timer(const Duration(milliseconds: 600), () async {
+      final q = value.trim();
+      if (q.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _meetResults = const [];
+          _meetSearching = false;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() => _meetSearching = true);
+      final results = await _searchPlaces(q);
+      if (!mounted) return;
+      setState(() {
+        _meetResults = results;
+        _meetSearching = false;
+      });
+    });
+  }
+
+  void _pickMeetupSuggestion(dynamic place) {
+    final addr = place is Map ? place['display_name']?.toString() : null;
+    if (addr == null || addr.trim().isEmpty) return;
+    setState(() {
+      _meetupAddressController.text = addr;
+      _meetResults = const [];
+      _meetSearching = false;
+    });
+  }
+
   Future<void> _onCheckoutPressed() async {
     if (!_agreedToTerms) {
       AppSnackBars.warning(context, 'Please agree to the transaction instructions.');
@@ -212,7 +282,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       AppSnackBars.warning(
         context,
         _fulfillment == _Fulfillment.meetup
-            ? 'Select a meet-up address from the seller.'
+            ? (_hasMeetupChoices
+                ? 'Select a meet-up address from the seller.'
+                : 'Enter your meet-up address.')
             : 'Enter your shipping address.',
       );
       return;
@@ -228,9 +300,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             'primaryItemId=${widget.primaryItem.id}, swapItemId=${widget.swapItem?.id}, '
             'selectedMeetupId=$_selectedMeetupId, meetupOptions=${widget.sellerMeetupOptions.length}',
           );
-          final address = widget.sellerMeetupOptions
-              .firstWhere((o) => o.id == _selectedMeetupId)
-              .fullAddress;
+          final address = _resolveMeetupAddress();
           debugPrint('[CheckoutScreen trade confirm] address="$address"');
           await _transactions.updateMeetupAndStatus(
             transactionId: widget.tradeTransactionId!,
@@ -294,9 +364,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final fulfillment = _fulfillment == _Fulfillment.shipping ? 'shipping' : 'meetup';
       final address = _fulfillment == _Fulfillment.shipping
           ? _shippingAddressController.text.trim()
-          : (widget.sellerMeetupOptions
-                  .firstWhere((o) => o.id == _selectedMeetupId)
-                  .fullAddress);
+          : _resolveMeetupAddress();
 
       Transaction createdTx;
       try {
@@ -314,6 +382,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             totalAmount: _grandTotal,
             fulfillmentMethod: fulfillment,
             address: address,
+            cancelledBy: null,
             createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
           ),
         );
@@ -414,13 +483,34 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ),
                   const SizedBox(height: 12),
                   if (_fulfillment == _Fulfillment.meetup)
-                    _MeetupSection(
-                      options: widget.sellerMeetupOptions,
-                      selectedId: _selectedMeetupId,
-                      onSelect: (id) => setState(() => _selectedMeetupId = id),
-                    )
+                    (widget.sellerMeetupOptions.isNotEmpty
+                        ? _MeetupOptionsSection(
+                            options: widget.sellerMeetupOptions,
+                            selectedId: _selectedMeetupId,
+                            onSelect: (id) => setState(() {
+                              _selectedMeetupId = id;
+                              _meetupAddressController.clear();
+                              _meetResults = const [];
+                              _meetSearching = false;
+                            }),
+                          )
+                        : _AddressSection(
+                            title: 'Meet-Up Location',
+                            hintText: 'Enter meet-up address',
+                            controller: _meetupAddressController,
+                            searching: _meetSearching,
+                            results: _meetResults,
+                            onQueryChanged: (v) {
+                              setState(() {});
+                              _onMeetupQueryChanged(v);
+                            },
+                            onPickSuggestion: _pickMeetupSuggestion,
+                            onViewOnMap: _busy ? null : _onUseMeetupGpsPressed,
+                          ))
                   else if (!widget.meetUpOnly)
-                    _ShippingSection(
+                    _AddressSection(
+                      title: 'Shipping Address',
+                      hintText: 'Add shipping address',
                       controller: _shippingAddressController,
                       searching: _shipSearching,
                       results: _shipResults,
@@ -540,7 +630,9 @@ class _FulfillmentToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget chip(String label, _Fulfillment mode) {
       final selected = value == mode;
-      final canSelectMeetup = meetupEnabled || mode == _Fulfillment.shipping;
+      // Always allow selecting "Meet-Up".
+      // If seller doesn't provide meet-up addresses, user can input one manually.
+      final canSelectMeetup = true;
       return Expanded(
         child: Material(
           color: selected ? const Color(0xFFE9E1FE) : Colors.white,
@@ -562,11 +654,9 @@ class _FulfillmentToggle extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: !canSelectMeetup && mode == _Fulfillment.meetup
-                      ? const Color(0xFFBDBACE)
-                      : selected
-                          ? AppColors.primary
-                          : const Color(0xFF7A7890),
+                  color: selected
+                      ? AppColors.primary
+                      : const Color(0xFF7A7890),
                 ),
               ),
             ),
@@ -588,7 +678,7 @@ class _FulfillmentToggle extends StatelessWidget {
         if (!meetupEnabled) ...[
           const SizedBox(height: 8),
           Text(
-            'This seller has not added a meet-up address on the listing. Delivery is shipping only.',
+            'Seller has not provided meet-up addresses. You can enter one manually.',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
           ),
         ],
@@ -597,8 +687,8 @@ class _FulfillmentToggle extends StatelessWidget {
   }
 }
 
-class _MeetupSection extends StatelessWidget {
-  const _MeetupSection({
+class _MeetupOptionsSection extends StatelessWidget {
+  const _MeetupOptionsSection({
     required this.options,
     required this.selectedId,
     required this.onSelect,
@@ -622,15 +712,7 @@ class _MeetupSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        if (options.isEmpty)
-          _CardShell(
-            child: Text(
-              'The seller has not added any meet-up addresses yet.',
-              style: TextStyle(color: Colors.grey.shade700),
-            ),
-          )
-        else
-          ...options.map((o) {
+        ...options.map((o) {
             final selected = o.id == selectedId;
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -704,8 +786,10 @@ class _MeetupSection extends StatelessWidget {
   }
 }
 
-class _ShippingSection extends StatelessWidget {
-  const _ShippingSection({
+class _AddressSection extends StatelessWidget {
+  const _AddressSection({
+    required this.title,
+    required this.hintText,
     required this.controller,
     required this.searching,
     required this.results,
@@ -714,6 +798,8 @@ class _ShippingSection extends StatelessWidget {
     required this.onViewOnMap,
   });
 
+  final String title;
+  final String hintText;
   final TextEditingController controller;
   final bool searching;
   final List<dynamic> results;
@@ -726,9 +812,9 @@ class _ShippingSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Shipping Address',
-          style: TextStyle(
+        Text(
+          title,
+          style: const TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
             color: Color(0xFF1B1340),
@@ -758,7 +844,7 @@ class _ShippingSection extends StatelessWidget {
                       onChanged: onQueryChanged,
                       maxLines: 4,
                       decoration: InputDecoration(
-                        hintText: 'Add shipping address',
+                        hintText: hintText,
                         border: InputBorder.none,
                         isDense: true,
                         suffixIcon: searching

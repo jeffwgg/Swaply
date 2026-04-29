@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -36,7 +37,9 @@ class CreateItemScreen extends StatefulWidget {
 }
 
 class _CreateItemScreenState extends State<CreateItemScreen> {
-  late final AppUser? user = widget.user;
+  AppUser? user;
+  ItemListing? item;
+  int? repliedTo;
 
   bool _isLoading = false;
   bool _isSearching = false;
@@ -83,10 +86,14 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   void initState() {
     super.initState();
 
+    user = widget.user;
+    item = widget.item;
+    repliedTo = widget.repliedTo ?? item?.repliedTo;
+
     _init();
 
     // if create reply item
-    if (widget.repliedTo != null) {
+    if (isReplyItem) {
       _enableSelling = false;
       _enableTrading = false;
     }
@@ -100,8 +107,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     checkStatus();
   }
 
+  bool get isReplyItem => repliedTo != null;
+  bool get isEditItem => item != null;
+
   Future<void> _init() async {
-    if (widget.repliedTo != null) {
+    // edit item / edit reply item
+    if (isEditItem) {
       _loadItemIfEditing();
       return;
     }
@@ -110,11 +121,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     if (!mounted) return;
 
-    // Only show dialog if not editing existing item
-    if (draft != null && widget.item == null && (widget.repliedTo == null || widget.repliedTo == draft.repliedTo)) {
+    // Only show draft dialog if not editing existing item
+    if (draft != null && (!isReplyItem || repliedTo == draft.repliedTo)) {
       _showDraftDialog(draft);
-    } else {
-      _loadItemIfEditing();
     }
   }
 
@@ -122,8 +131,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     String message = "You have an unsaved draft.";
 
     if (draft.repliedTo != null) {
+      var repliedItem = await ItemsRepository().getById(draft.repliedTo!);
       message =
-      "You have an unfinished trade offer for item ID ${draft.repliedTo}.\n\nDo you want to continue editing it?";
+          "You have an unfinished trade offer for item ${repliedItem?.name.toUpperCase()}.\n\nDo you want to continue editing it?";
     } else {
       message = "You have an unfinished item draft.\n\nContinue editing?";
     }
@@ -153,11 +163,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     } else {
       _skipDraftAutosave = true;
       await ItemService().clearDraft();
-      _loadItemIfEditing();
     }
   }
 
   void _applyDraft(ItemDraft draft) {
+    repliedTo = draft.repliedTo;
+
     _nameCtrl.text = draft.name ?? '';
     _descCtrl.text = draft.description ?? '';
     _priceCtrl.text = draft.price?.toStringAsFixed(0) ?? '';
@@ -187,42 +198,42 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
     _selectedCategory = draft.category;
 
-    _enableSelling =
-        draft.listingType == 'sell' || draft.listingType == 'both';
+    _enableSelling = draft.listingType == 'sell' || draft.listingType == 'both';
     _enableTrading =
         draft.listingType == 'trade' || draft.listingType == 'both';
 
     setState(() {});
+
+    if (isReplyItem) {
+      _enableSelling = false;
+      _enableTrading = false;
+    }
   }
 
   void _loadItemIfEditing() {
-    if (widget.item == null) return;
 
-    final item = widget.item!;
+    _nameCtrl.text = item!.name;
+    _descCtrl.text = item!.description;
+    _priceCtrl.text = item!.price?.toStringAsFixed(0) ?? '';
+    _prefCtrl.text = item!.preference ?? '';
+    _addressCtrl.text = item!.address ?? '';
 
-    _nameCtrl.text = item.name;
-    _descCtrl.text = item.description;
-    _priceCtrl.text = item.price?.toStringAsFixed(0) ?? '';
-    _prefCtrl.text = item.preference ?? '';
-    _addressCtrl.text = item.address ?? '';
-
-    _latitude = item.latitude;
-    _longitude = item.longitude;
+    _latitude = item!.latitude;
+    _longitude = item!.longitude;
 
     if (_latitude != null && _longitude != null) {
       selectedLocation = LatLng(_latitude!, _longitude!);
-      selectedAddress = item.address;
+      selectedAddress = item!.address;
     }
 
-    _existingImageUrls = List.from(item.imageUrls);
-    _selectedCategory = item.category;
+    _existingImageUrls = List.from(item!.imageUrls);
+    _selectedCategory = item!.category;
 
-    _enableSelling =
-        item.listingType == 'sell' || item.listingType == 'both';
+    _enableSelling = item!.listingType == 'sell' || item!.listingType == 'both';
     _enableTrading =
-        item.listingType == 'trade' || item.listingType == 'both';
+        item!.listingType == 'trade' || item!.listingType == 'both';
 
-    if (widget.repliedTo != null) {
+    if (isReplyItem) {
       _enableSelling = false;
       _enableTrading = false;
     }
@@ -501,7 +512,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   // draft
 
   void _onDraftChanged() {
-    if (widget.repliedTo != null) return;
     if (_skipDraftAutosave) return;
     if (_draftDebounce?.isActive ?? false) {
       _draftDebounce!.cancel();
@@ -513,7 +523,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Future<void> _saveDraft() async {
-    if (widget.repliedTo != null) return;
     if (_skipDraftAutosave) return;
 
     final hasContent =
@@ -543,14 +552,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           : _enableSelling
           ? 'sell'
           : 'trade',
-      ownerId: widget.user.id,
+      ownerId: user!.id,
       category: _selectedCategory,
-      imageUrls: [
-        ..._existingImageUrls,
-        ..._images.map((image) => image.path),
-      ],
+      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
       preference: _prefCtrl.text.trim(),
-      repliedTo: widget.repliedTo,
+      repliedTo: repliedTo,
       address: _addressCtrl.text.trim(),
       latitude: _latitude,
       longitude: _longitude,
@@ -562,7 +568,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Future<void> _savePendingSubmitDraft() async {
-    if (widget.repliedTo != null) return;
+    if (isReplyItem) return;
 
     final draft = ItemDraft(
       id: 1,
@@ -574,14 +580,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           : _enableSelling
           ? 'sell'
           : 'trade',
-      ownerId: widget.user.id,
+      ownerId: user!.id,
       category: _selectedCategory,
-      imageUrls: [
-        ..._existingImageUrls,
-        ..._images.map((image) => image.path),
-      ],
+      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
       preference: _prefCtrl.text.trim(),
-      repliedTo: widget.repliedTo,
+      repliedTo: repliedTo,
       address: _addressCtrl.text.trim(),
       latitude: _latitude,
       longitude: _longitude,
@@ -657,42 +660,44 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
 
       String listingType = 'both';
-      if (widget.repliedTo != null) {
+      if (isReplyItem) {
         listingType = 'trade';
       } else {
         if (!_enableSelling && !_enableTrading) {
-          throw Exception('Please turn on selling or trading before submitting.');
+          throw Exception(
+            'Please turn on selling or trading before submitting.',
+          );
         }
         if (_enableSelling && !_enableTrading) listingType = 'sell';
         if (!_enableSelling && _enableTrading) listingType = 'trade';
       }
 
-      if (_enableSelling) {
+      if (!isReplyItem && _enableSelling) {
         if (price == null) {
           throw Exception('Please enter a valid price to sell this item.');
         }
       }
 
-      if (_enableTrading) {
+      if (!isReplyItem && _enableTrading) {
         if (preference.isEmpty) {
           throw Exception('Please tell others what you want in exchange.');
         }
       }
 
-      if (widget.item != null) {
+      if (isEditItem) {
         final updatedItem = ItemListing(
-          id: widget.item!.id,
+          id: item!.id,
           name: name,
           description: desc,
           price: _enableSelling ? price : null,
           listingType: listingType,
-          ownerId: widget.item!.ownerId,
-          status: widget.item!.status,
+          ownerId: item!.ownerId,
+          status: item!.status,
           category: category,
           imageUrls: finalImageUrls,
           preference: _enableTrading ? preference : '',
-          repliedTo: widget.item!.repliedTo,
-          createdAt: widget.item!.createdAt,
+          repliedTo: item!.repliedTo,
+          createdAt: item!.createdAt,
           address: address,
           latitude: _latitude,
           longitude: _longitude,
@@ -703,9 +708,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         final lastId = await ItemsRepository().getLastId();
         int nextIdNum = (lastId ?? 0) + 1;
         ItemListing? repliedItem;
-        if (widget.repliedTo != null) {
-          repliedItem = await ItemsRepository().getById(widget.repliedTo!);
-        }
 
         final newItem = ItemListing(
           id: nextIdNum,
@@ -713,12 +715,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           description: desc,
           price: _enableSelling ? price : null,
           listingType: listingType,
-          ownerId: widget.user.id,
-          status: widget.repliedTo == null ? 'available' : 'pending',
+          ownerId: user!.id,
+          status: !isReplyItem ? 'available' : 'pending',
           category: category,
           imageUrls: finalImageUrls,
           preference: _enableTrading ? preference : 'None',
-          repliedTo: widget.repliedTo,
+          repliedTo: repliedTo,
           createdAt: DateTime.now(),
           address: address,
           latitude: _latitude,
@@ -727,12 +729,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
         await ItemsRepository().create(newItem);
 
-        if (widget.repliedTo != null && repliedItem != null) {
+        // for notification
+        if (isReplyItem) {
+          repliedItem = await ItemsRepository().getById(repliedTo!);
+        }
+
+        if (isReplyItem && repliedItem != null) {
           await NotificationService.instance.sendNotificationToUser(
             recipientId: repliedItem.ownerId,
             title: 'New Trade Offer',
             body:
-                '${widget.user.username} offered "${newItem.name}" for your item "${repliedItem.name}". Message: ${newItem.description}',
+                '${user!.username} offered "${newItem.name}" for your item "${repliedItem.name}". Message: ${newItem.description}',
             type: 'trade',
             data: {
               'action': 'open_item',
@@ -746,7 +753,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       if (mounted) {
         AppSnackBars.success(
           context,
-          widget.item != null ? 'Item updated!' : 'Item created!',
+          isEditItem ? 'Item updated!' : 'Item created!',
         );
         _skipDraftAutosave = true;
         await ItemService().clearDraft();
@@ -761,13 +768,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       }
       _images.clear();
     } catch (e) {
-      if (widget.item == null) {
+      if (!isEditItem) {
         await _savePendingSubmitDraft();
       }
       if (mounted) {
         AppSnackBars.error(
           context,
-          widget.item == null
+          !isEditItem
               ? 'We could not submit your item. Your draft is saved, so you can retry later.'
               : 'We could not update this item right now. Please try again.',
         );
@@ -794,23 +801,22 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     super.dispose();
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     const accent = Color(0xFF5B21B6);
     const fieldFill = Color(0xFFF3E8FF);
     String title = 'Create Item';
-    if (widget.item != null) title = 'Edit Item';
-    if (widget.repliedTo != null) title = 'Offer Trade';
+    if (isEditItem) title = 'Edit Item';
+    if (isEditItem && isReplyItem) title = 'Edit Offered Item';
+    if (isReplyItem) title = 'Offer Trade';
 
     String buttonText = 'Create Item';
-    if (widget.item != null) buttonText = 'Update Item';
-    if (widget.repliedTo != null) buttonText = 'Offer Trade';
+    if (isEditItem) buttonText = 'Update Item';
+    if (isReplyItem) buttonText = 'Offer Trade';
 
     return WillPopScope(
       onWillPop: () async {
-        if (widget.repliedTo == null) {
+        if (!isReplyItem) {
           await _saveDraft();
         }
         return true;
@@ -1196,7 +1202,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
                 const SizedBox(height: 20),
 
-                if (widget.repliedTo == null) ...[
+                if (!isReplyItem) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [

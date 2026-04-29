@@ -13,6 +13,7 @@ class Transaction {
   final double? totalAmount;
   final String? fulfillmentMethod;
   final String? address;
+  final String? cancelledBy; // 'buyer' | 'seller'
   final DateTime createdAt;
 
   const Transaction({
@@ -28,6 +29,7 @@ class Transaction {
     required this.totalAmount,
     required this.fulfillmentMethod,
     required this.address,
+    required this.cancelledBy,
     required this.createdAt,
   });
 
@@ -72,6 +74,10 @@ class Transaction {
         fieldName: 'transactions.fulfillment_method',
       ),
       address: parseNullableString(map['address'], fieldName: 'transactions.address'),
+      cancelledBy: parseNullableString(
+        map['cancelled_by'],
+        fieldName: 'transactions.cancelled_by',
+      ),
       createdAt: parseDateTime(
         map['created_at'],
         fieldName: 'transactions.created_at',
@@ -93,6 +99,7 @@ class Transaction {
       'total_amount': totalAmount,
       'fulfillment_method': fulfillmentMethod,
       'address': address,
+      'cancelled_by': cancelledBy,
     };
   }
 }
