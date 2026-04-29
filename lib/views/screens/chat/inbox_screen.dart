@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
@@ -32,6 +31,7 @@ import '../../../models/meetup_address_option.dart';
 import '../../../views/screens/transaction/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
+import '../transaction/map_location_picker.dart';
 import '../transaction/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
 import '../../../repositories/local/local_messages_repository.dart';
@@ -60,21 +60,27 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   int _selectedFilter = 0;
   int _selectedConversation = 0;
+  int? _selectedConversationId;
   bool _showMobileChat = false;
   bool _isLoading = true;
   String _searchQuery = '';
   List<String> _recentSearchQueries = const [];
   Set<int> _pinnedChats = {};
+  List<int> _pinnedChatOrder = const [];
+  int? _pendingJumpMessageId;
   Set<int> _manuallyUnreadChats = {};
   Set<int> _hiddenChats = {};
 
   final InboxViewModel _inboxViewModel = InboxViewModel();
   dynamic _inboxSubscription;
+  RealtimeChannel? _unreadCountsSubscription;
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<AiMessage>>? _aiMessagesSubscription;
   Timer? _inboxSubscriptionRetryTimer;
+  Timer? _unreadCountsRefreshDebounce;
   bool _isLoadingInboxData = false;
+  bool _isRefreshingUnreadCounts = false;
   int? _activeChatId;
   final Map<int, List<ChatMessage>> _rawMessagesByChat = {};
   final Map<int, List<_Message>> _messagesByChat = {};
@@ -124,8 +130,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _authSubscription?.cancel();
     _messagesSubscription?.cancel();
     _aiMessagesSubscription?.cancel();
+    _unreadCountsRefreshDebounce?.cancel();
     if (_inboxSubscription != null) {
       _inboxViewModel.unsubscribeInboxChanges(_inboxSubscription);
+    }
+    final unreadCountsSubscription = _unreadCountsSubscription;
+    if (unreadCountsSubscription != null) {
+      unawaited(SupabaseService.client.removeChannel(unreadCountsSubscription));
+      _unreadCountsSubscription = null;
     }
     _composerController.dispose();
     NotificationService.instance.setActiveChatContext(
@@ -165,7 +177,18 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _inboxSubscription = null;
     }
 
+    try {
+      final unreadCountsSubscription = _unreadCountsSubscription;
+      if (unreadCountsSubscription != null) {
+        await SupabaseService.client.removeChannel(unreadCountsSubscription);
+        _unreadCountsSubscription = null;
+      }
+    } catch (_) {
+      _unreadCountsSubscription = null;
+    }
+
     _ensureInboxRealtimeSubscription();
+    _ensureUnreadCountsRealtimeSubscription();
 
     // Rebind selected chat stream to avoid stale realtime listeners after
     // app background/foreground transitions.
@@ -185,6 +208,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       unawaited(_inboxViewModel.unsubscribeInboxChanges(_inboxSubscription));
       _inboxSubscription = null;
     }
+    final unreadCountsSubscription = _unreadCountsSubscription;
+    if (unreadCountsSubscription != null) {
+      unawaited(SupabaseService.client.removeChannel(unreadCountsSubscription));
+      _unreadCountsSubscription = null;
+    }
+    _unreadCountsRefreshDebounce?.cancel();
+    _unreadCountsRefreshDebounce = null;
     _messagesSubscription?.cancel();
     _messagesSubscription = null;
     _aiMessagesSubscription?.cancel();
@@ -195,6 +225,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
     setState(() {
       _selectedConversation = 0;
+      _selectedConversationId = null;
       _showMobileChat = false;
       _isLoading = true;
       _replyingTo = null;
@@ -206,6 +237,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _composerController.clear();
     _loadInbox();
     _ensureInboxRealtimeSubscription();
+    _ensureUnreadCountsRealtimeSubscription();
   }
 
   void _ensureInboxRealtimeSubscription() {
@@ -213,6 +245,92 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return;
     }
     unawaited(_ensureInboxRealtimeSubscriptionAsync());
+  }
+
+  void _ensureUnreadCountsRealtimeSubscription() {
+    if (_unreadCountsSubscription != null ||
+        !SupabaseService.isConfigured ||
+        SupabaseService.client.auth.currentUser == null) {
+      return;
+    }
+
+    final channel = SupabaseService.client.channel('inbox-unread-counts');
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'messages',
+      callback: (payload) {
+        if (!mounted) {
+          return;
+        }
+
+        final row = payload.newRecord.isNotEmpty
+            ? payload.newRecord
+            : payload.oldRecord;
+        final chatIdRaw = row['chat_id'];
+        final chatId = chatIdRaw is int
+            ? chatIdRaw
+            : int.tryParse(chatIdRaw?.toString() ?? '');
+        if (chatId != null &&
+            chatId > 0 &&
+            !_allConversations.any(
+              (conversation) => conversation.id == chatId,
+            )) {
+          return;
+        }
+
+        _scheduleUnreadCountsRefresh();
+      },
+    );
+    channel.subscribe();
+    _unreadCountsSubscription = channel;
+  }
+
+  void _scheduleUnreadCountsRefresh() {
+    _unreadCountsRefreshDebounce?.cancel();
+    _unreadCountsRefreshDebounce = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(_refreshUnreadCountsForLoadedChats()),
+    );
+  }
+
+  Future<void> _refreshUnreadCountsForLoadedChats() async {
+    if (_isRefreshingUnreadCounts || !mounted) {
+      return;
+    }
+
+    final chatIds = _allConversations
+        .map((conversation) => conversation.id)
+        .where((id) => id > 0)
+        .toList(growable: false);
+    if (chatIds.isEmpty) {
+      return;
+    }
+
+    _isRefreshingUnreadCounts = true;
+    try {
+      final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
+        chatIds,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        for (var i = 0; i < _allConversations.length; i++) {
+          final conversation = _allConversations[i];
+          if (conversation.id <= 0) {
+            continue;
+          }
+          _allConversations[i] = conversation.copyWith(
+            unreadCount: unreadCountsByChat[conversation.id] ?? 0,
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('Error refreshing unread counts: $e');
+    } finally {
+      _isRefreshingUnreadCounts = false;
+    }
   }
 
   Future<void> _ensureInboxRealtimeSubscriptionAsync() async {
@@ -255,6 +373,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _isLoadingInboxData = true;
     try {
       final threads = await _inboxViewModel.loadInbox();
+      Set<int> pinnedConversationIds = _pinnedChats;
+      List<int> pinnedConversationOrder = _pinnedChatOrder;
+      try {
+        pinnedConversationOrder = await _inboxViewModel
+            .loadPinnedConversationIdsOrdered();
+        pinnedConversationIds = pinnedConversationOrder.toSet();
+      } catch (_) {}
       final unreadCountsByChat = await _inboxViewModel.loadUnreadCountsByChat(
         threads.map((thread) => thread.id).toList(growable: false),
       );
@@ -318,6 +443,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _allConversations.clear();
           _allConversations.add(aiChat);
           _allConversations.addAll(mapped);
+          _pinnedChats = pinnedConversationIds;
+          _pinnedChatOrder = pinnedConversationOrder;
           if (_selectedConversation >= _allConversations.length) {
             _selectedConversation = 0;
           }
@@ -327,6 +454,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       unawaited(_initializeAiConversationIfNeeded());
       _tryFocusConversationFromExternalRequest();
       _subscribeToSelectedConversationMessages();
+      _ensureUnreadCountsRealtimeSubscription();
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -372,13 +500,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   Future<void> _loadPinned() async {
     final prefs = await SharedPreferences.getInstance();
-    final pinnedRaw = prefs.getStringList('pinned_chats') ?? [];
-    final pinned = pinnedRaw.map(int.tryParse).whereType<int>().toSet();
     final unreadRaw = prefs.getStringList('manual_unread_chats') ?? [];
     final hiddenRaw = prefs.getStringList('hidden_chats') ?? [];
     final searchRaw = prefs.getStringList('chat_search_history') ?? [];
     setState(() {
-      _pinnedChats = pinned;
       _manuallyUnreadChats = unreadRaw
           .map(int.tryParse)
           .whereType<int>()
@@ -392,10 +517,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   Future<void> _saveConversationPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      'pinned_chats',
-      _pinnedChats.map((id) => id.toString()).toList(),
-    );
     await prefs.setStringList(
       'manual_unread_chats',
       _manuallyUnreadChats.map((id) => id.toString()).toList(),
@@ -475,14 +596,31 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _togglePin(int id) async {
-    setState(() {
-      if (_pinnedChats.contains(id)) {
-        _pinnedChats.remove(id);
-      } else {
-        _pinnedChats.add(id);
+    if (id == 0) {
+      return;
+    }
+    final shouldPin = !_pinnedChats.contains(id);
+    try {
+      await _inboxViewModel.setConversationPinned(
+        chatId: id,
+        isPinned: shouldPin,
+      );
+      final orderedPins = await _inboxViewModel
+          .loadPinnedConversationIdsOrdered();
+      if (!mounted) {
+        return;
       }
-    });
-    await _saveConversationPrefs();
+      setState(() {
+        _pinnedChatOrder = orderedPins;
+        _pinnedChats = orderedPins.toSet();
+      });
+    } catch (e) {
+      debugPrint('Error toggling conversation pin: $e');
+      if (!mounted) {
+        return;
+      }
+      _showSnack('Unable to update pin. Please try again.');
+    }
   }
 
   Future<void> _toggleManualUnread(int id) async {
@@ -497,12 +635,21 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _hideConversationForCurrentUser(int id) async {
+    if (_pinnedChats.contains(id)) {
+      try {
+        await _inboxViewModel.setConversationPinned(
+          chatId: id,
+          isPinned: false,
+        );
+      } catch (_) {}
+    }
     setState(() {
       _hiddenChats.add(id);
       _pinnedChats.remove(id);
       _manuallyUnreadChats.remove(id);
       if (_selectedConversation >= _conversations.length - 1) {
         _selectedConversation = 0;
+        _selectedConversationId = null;
       }
       _showMobileChat = false;
     });
@@ -593,7 +740,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     );
   }
 
-  List<_SearchMatch> _buildSearchMatches(String query) {
+  List<_SearchMatch> _buildSearchMatches(String query, {int? conversationId}) {
     final normalized = query.trim().toLowerCase();
     if (normalized.isEmpty) {
       return const [];
@@ -604,8 +751,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       if (_hiddenChats.contains(conversation.id)) {
         continue;
       }
+      if (conversationId != null && conversation.id != conversationId) {
+        continue;
+      }
 
       String? snippet;
+      int? matchedMessageId;
       if (conversation.preview.toLowerCase().contains(normalized)) {
         snippet = conversation.preview;
       }
@@ -614,6 +765,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         final text = message.text.toLowerCase();
         if (text.contains(normalized)) {
           snippet = message.text;
+          matchedMessageId = message.id;
           break;
         }
       }
@@ -623,7 +775,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _SearchMatch(
             conversationId: conversation.id,
             conversationName: conversation.name,
+            avatarUrl: conversation.avatarUrl,
             snippet: snippet,
+            messageId: matchedMessageId,
           ),
         );
       }
@@ -659,6 +813,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openSearchDialog({int? focusConversationId}) async {
+    final onlyThisChat = focusConversationId != null;
     final controller = TextEditingController(text: _searchQuery);
     final result = await showDialog<_SearchDialogResult>(
       context: context,
@@ -667,7 +822,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final results = _buildSearchMatches(localQuery);
+            final results = _buildSearchMatches(
+              localQuery,
+              conversationId: focusConversationId,
+            );
             final history = _recentSearchQueries;
 
             return AlertDialog(
@@ -676,7 +834,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
-              title: const Text('Search chats'),
+              title: Text(
+                onlyThisChat ? 'Search in this chat' : 'Search chats',
+              ),
               content: SizedBox(
                 width: 420,
                 child: Column(
@@ -700,8 +860,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                       child: TextField(
                         controller: controller,
                         autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'Search by user or message',
+                        decoration: InputDecoration(
+                          hintText: onlyThisChat
+                              ? 'Search messages in this chat'
+                              : 'Search by user or message',
                           prefixIcon: Icon(
                             Icons.search_rounded,
                             color: Color(0xFF7A54FF),
@@ -753,6 +915,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                   onTap: () {
                                     final historyMatches = _buildSearchMatches(
                                       h,
+                                      conversationId: focusConversationId,
                                     );
                                     if (historyMatches.isNotEmpty) {
                                       Navigator.pop(
@@ -762,6 +925,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                           conversationId: historyMatches
                                               .first
                                               .conversationId,
+                                          messageId:
+                                              historyMatches.first.messageId,
                                         ),
                                       );
                                       return;
@@ -834,6 +999,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                         _SearchDialogResult(
                                           query: localQuery,
                                           conversationId: item.conversationId,
+                                          messageId: item.messageId,
                                         ),
                                       );
                                     },
@@ -844,18 +1010,14 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                       ),
                                       child: Row(
                                         children: [
-                                          Container(
-                                            width: 34,
-                                            height: 34,
-                                            decoration: const BoxDecoration(
-                                              color: Color(0xFFF1EBFF),
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(
-                                              Icons.history_rounded,
-                                              size: 18,
-                                              color: Color(0xFF7A54FF),
-                                            ),
+                                          _AvatarBubble(
+                                            name: item.conversationName,
+                                            imageUrl: item.avatarUrl,
+                                            colors: const [
+                                              Color(0xFFE7DFFF),
+                                              Color(0xFFC18EFF),
+                                            ],
+                                            size: 34,
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
@@ -925,8 +1087,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
 
     setState(() {
-      _searchQuery = result.query;
+      if (!onlyThisChat) {
+        _searchQuery = result.query;
+      }
       _selectedConversation = 0;
+      _selectedConversationId = null;
+      _pendingJumpMessageId = result.messageId;
     });
 
     if (result.query.isNotEmpty) {
@@ -950,9 +1116,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         return false;
       }
 
+      final normalizedSearch = _searchQuery.toLowerCase();
       final matchesSearch =
-          conv.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          conv.preview.toLowerCase().contains(_searchQuery.toLowerCase());
+          conv.name.toLowerCase().contains(normalizedSearch) ||
+          conv.preview.toLowerCase().contains(normalizedSearch) ||
+          conv.messages.any(
+            (message) => message.text.toLowerCase().contains(normalizedSearch),
+          );
       if (!matchesSearch) return false;
 
       if (conv.id == -1) {
@@ -965,16 +1135,64 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return true;
     }).toList();
 
-    // Sort pinned to top
+    // Sort pinned to top, then by most recent message
     filtered.sort((a, b) {
       final aPinned = _pinnedChats.contains(a.id);
       final bPinned = _pinnedChats.contains(b.id);
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) {
+        final aIdx = _pinnedChatOrder.indexOf(a.id);
+        final bIdx = _pinnedChatOrder.indexOf(b.id);
+        if (aIdx != -1 && bIdx != -1 && aIdx != bIdx) {
+          return aIdx.compareTo(bIdx);
+        }
+      }
+
+      DateTime getTime(_Conversation c) {
+        DateTime highest =
+            c.chatThread?.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        if (c.id == -1 && c.messages.isEmpty) {
+          // Keep AI chat high up if unused
+          highest = DateTime.now().add(const Duration(days: 365 * 100));
+        }
+        for (final m in c.messages) {
+          if (m.createdAt.isAfter(highest)) {
+            highest = m.createdAt;
+          }
+        }
+        return highest;
+      }
+
+      final aTime = getTime(a);
+      final bTime = getTime(b);
+      final timeCmp = bTime.compareTo(aTime);
+      if (timeCmp != 0) return timeCmp;
+
       return 0; // fallback to original order
     });
 
     return filtered;
+  }
+
+  int get _resolvedSelectedIndex {
+    final list = _conversations;
+    if (list.isEmpty) return 0;
+    if (_selectedConversationId != null) {
+      final idx = list.indexWhere((c) => c.id == _selectedConversationId);
+      if (idx != -1) return idx;
+    }
+    if (_activeChatId != null) {
+      final idx = list.indexWhere((c) => c.id == _activeChatId);
+      if (idx != -1) return idx;
+    }
+    return _selectedConversation < list.length ? _selectedConversation : 0;
+  }
+
+  _Conversation? get _selectedConversationItem {
+    final list = _conversations;
+    if (list.isEmpty) return null;
+    return list[_resolvedSelectedIndex];
   }
 
   bool _isSellingConversation(_Conversation conv) {
@@ -998,6 +1216,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     setState(() {
       _selectedFilter = index;
       _selectedConversation = 0;
+      _selectedConversationId = null;
       if (_conversations.isEmpty) {
         _showMobileChat = false;
       }
@@ -1009,6 +1228,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final selected = _conversations[index];
     setState(() {
       _selectedConversation = index;
+      _selectedConversationId = selected.id;
       _replyingTo = null;
       _manuallyUnreadChats.remove(selected.id);
       _voiceDraftPath = null;
@@ -1023,11 +1243,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   }
 
   void _subscribeToSelectedConversationMessages() {
-    final selected = _conversations.isNotEmpty
-        ? _conversations[_selectedConversation < _conversations.length
-              ? _selectedConversation
-              : 0]
-        : null;
+    final selected = _selectedConversationItem;
 
     if (selected == null) {
       _messagesSubscription?.cancel();
@@ -1038,15 +1254,17 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return;
     }
 
-    if (_activeChatId == selected.id &&
-        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
-      return;
-    }
-
+    // Always refresh pin list for the currently selected conversation.
+    // This keeps pin/unpin state realtime even when staying in the same chat.
     if (selected.id == -1) {
       _loadPinnedMessagesForAiChat();
     } else {
       _loadPinnedMessagesForChat(selected.id);
+    }
+
+    if (_activeChatId == selected.id &&
+        (_messagesSubscription != null || _aiMessagesSubscription != null)) {
+      return;
     }
 
     _messagesSubscription?.cancel();
@@ -1358,6 +1576,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           _AiRagItem(
             id: itemId,
             title: title,
+            imageUrl: _firstNonEmptyString([
+              map['image_url'],
+              if (map['image_urls'] is List &&
+                  (map['image_urls'] as List).isNotEmpty)
+                (map['image_urls'] as List).first,
+            ]),
             price: price,
             listingType: map['listing_type']?.toString(),
             condition: map['condition']?.toString(),
@@ -1370,6 +1594,16 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     } catch (_) {
       return (visibleText: visibleText, items: const []);
     }
+  }
+
+  static String? _firstNonEmptyString(List<dynamic> values) {
+    for (final value in values) {
+      final text = value?.toString().trim();
+      if (text != null && text.isNotEmpty) {
+        return text;
+      }
+    }
+    return null;
   }
 
   void _applyAiMessages(List<AiMessage> aiMessages) {
@@ -2091,127 +2325,24 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<String?> _promptManualLocationMessage() async {
-    final latController = TextEditingController();
-    final lngController = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Choose location'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: latController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Latitude'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: lngController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                decoration: const InputDecoration(labelText: 'Longitude'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final lat = double.tryParse(latController.text.trim());
-                final lng = double.tryParse(lngController.text.trim());
-                if (lat == null || lng == null) {
-                  return;
-                }
-                Navigator.of(context).pop(
-                  '[Location] https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}',
-                );
-              },
-              child: const Text('Send'),
-            ),
-          ],
-        );
-      },
-    );
-    latController.dispose();
-    lngController.dispose();
-    return result;
-  }
-
   Future<void> _sendLocation(_Conversation conversation) async {
-    final option = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Wrap(
-            children: [
-              ListTile(
-                leading: const Icon(Icons.my_location_rounded),
-                title: const Text('Send current location'),
-                onTap: () => Navigator.of(context).pop('current'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.place_rounded),
-                title: const Text('Choose location manually'),
-                onTap: () => Navigator.of(context).pop('manual'),
-              ),
-            ],
-          ),
-        );
-      },
+    final picked = await Navigator.of(context).push<MapLocationPickerResult>(
+      MaterialPageRoute(
+        builder: (_) => const MapLocationPicker(title: 'Choose location'),
+      ),
     );
-
-    if (option == null) {
+    if (!mounted || picked == null) {
       return;
     }
 
-    if (option == 'manual') {
-      final manualMessage = await _promptManualLocationMessage();
-      if (manualMessage != null) {
-        await _sendQuickMessage(conversation, manualMessage);
-      }
-      return;
-    }
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showSnack('Location service is disabled on this device.');
-        return;
-      }
-
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        _showSnack('Location permission is required to share location.');
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition();
-      final lat = position.latitude.toStringAsFixed(6);
-      final lng = position.longitude.toStringAsFixed(6);
-      await _sendQuickMessage(
-        conversation,
-        '[Location] https://maps.google.com/?q=$lat,$lng',
-      );
-    } catch (e) {
-      debugPrint('Error fetching current location: $e');
-      _showSnack('Unable to get current location.');
-    }
+    final lat = picked.latitude.toStringAsFixed(6);
+    final lng = picked.longitude.toStringAsFixed(6);
+    final address = picked.address.trim();
+    final mapsUrl = 'https://maps.google.com/?q=$lat,$lng';
+    await _sendQuickMessage(
+      conversation,
+      address.isEmpty ? '[Location] $mapsUrl' : '[Location] $address\n$mapsUrl',
+    );
   }
 
   Future<void> _startVoiceRecording() async {
@@ -2477,11 +2608,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       }
       widget.onConversationViewChanged?.call(!isWide && _showMobileChat);
       final hasChatOpen = isWide || _showMobileChat;
-      final selected = _conversations.isNotEmpty
-          ? _conversations[_selectedConversation < _conversations.length
-                ? _selectedConversation
-                : 0]
-          : null;
+      final selected = _selectedConversationItem;
       final activeChatId = hasChatOpen && selected != null && selected.id > 0
           ? selected.id
           : null;
@@ -2511,11 +2638,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 950;
-              final selected = _conversations.isNotEmpty
-                  ? _conversations[_selectedConversation < _conversations.length
-                        ? _selectedConversation
-                        : 0]
-                  : null;
+              final selected = _selectedConversationItem;
               final pins = selected == null
                   ? const <ChatPinnedMessage>[]
                   : (_chatPins[selected.id] ?? const <ChatPinnedMessage>[]);
@@ -2541,7 +2664,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                         conversations: _conversations,
                         filters: _filters,
                         selectedFilter: _selectedFilter,
-                        selectedIndex: _selectedConversation,
+                        selectedIndex: _resolvedSelectedIndex,
                         onFilterSelected: _onFilterSelected,
                         onConversationSelected: (index) =>
                             _onConversationSelected(index),
@@ -2600,6 +2723,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                   _showConversationActions(selected),
                               onOpenItemDetails: () =>
                                   _openConversationItemDetails(selected),
+                              jumpToMessageId: _pendingJumpMessageId,
+                              onJumpToMessageHandled: () {
+                                if (!mounted || _pendingJumpMessageId == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _pendingJumpMessageId = null;
+                                });
+                              },
                             )
                           : const Center(
                               child: Text(
@@ -2649,6 +2781,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                       _showConversationActions(selected),
                   onOpenItemDetails: () =>
                       _openConversationItemDetails(selected),
+                  jumpToMessageId: _pendingJumpMessageId,
+                  onJumpToMessageHandled: () {
+                    if (!mounted || _pendingJumpMessageId == null) {
+                      return;
+                    }
+                    setState(() {
+                      _pendingJumpMessageId = null;
+                    });
+                  },
                 );
               }
 
@@ -2656,7 +2797,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 conversations: _conversations,
                 filters: _filters,
                 selectedFilter: _selectedFilter,
-                selectedIndex: _selectedConversation,
+                selectedIndex: _resolvedSelectedIndex,
                 onFilterSelected: _onFilterSelected,
                 onConversationSelected: (index) =>
                     _onConversationSelected(index, openMobile: true),
@@ -3103,6 +3244,8 @@ class _ChatPanel extends StatefulWidget {
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
   final VoidCallback onOpenItemDetails;
+  final int? jumpToMessageId;
+  final VoidCallback onJumpToMessageHandled;
 
   const _ChatPanel({
     required this.conversation,
@@ -3129,6 +3272,8 @@ class _ChatPanel extends StatefulWidget {
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
     required this.onOpenItemDetails,
+    required this.jumpToMessageId,
+    required this.onJumpToMessageHandled,
   });
 
   @override
@@ -3144,12 +3289,19 @@ class _ChatPanelState extends State<_ChatPanel> {
   String? _loadedVoiceDraftPath;
   bool _showEmojiKeyboard = false;
   bool _showAttachmentOptions = false;
+  final Map<int, GlobalKey> _messageKeys = {};
+  int _jumpRetryCount = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToLatest();
+      final jumpToMessageId = widget.jumpToMessageId;
+      if (jumpToMessageId != null) {
+        _scrollToMessage(jumpToMessageId);
+        return;
+      }
+      _scheduleScrollToLatest();
     });
   }
 
@@ -3163,9 +3315,20 @@ class _ChatPanelState extends State<_ChatPanel> {
     if (chatChanged && _showAttachmentOptions) {
       _showAttachmentOptions = false;
     }
-    if (chatChanged || messageCountChanged) {
+    if ((chatChanged || messageCountChanged) &&
+        widget.jumpToMessageId == null) {
+      _scheduleScrollToLatest(animated: !chatChanged);
+    }
+    if (oldWidget.jumpToMessageId != widget.jumpToMessageId &&
+        widget.jumpToMessageId != null) {
+      _jumpRetryCount = 0;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToLatest(animated: !chatChanged);
+        _scrollToMessage(widget.jumpToMessageId!);
+      });
+    }
+    if (messageCountChanged && widget.jumpToMessageId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToMessage(widget.jumpToMessageId!);
       });
     }
 
@@ -3263,6 +3426,10 @@ class _ChatPanelState extends State<_ChatPanel> {
             itemBuilder: (context, index) {
               final msg = widget.pinnedMessages[index];
               return ListTile(
+                onTap: () {
+                  Navigator.pop(context);
+                  _scrollToMessage(msg.id);
+                },
                 leading: const Icon(
                   Icons.push_pin_rounded,
                   color: Color(0xFF7A54FF),
@@ -3310,6 +3477,56 @@ class _ChatPanelState extends State<_ChatPanel> {
       return;
     }
     _scrollController.jumpTo(target);
+  }
+
+  void _scheduleScrollToLatest({bool animated = false, int attempts = 4}) {
+    void scheduleAttempt(int remaining) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || widget.jumpToMessageId != null) {
+          return;
+        }
+
+        _scrollToLatest(animated: animated && remaining == attempts);
+        if (remaining <= 1) {
+          return;
+        }
+
+        Future<void>.delayed(const Duration(milliseconds: 80), () {
+          if (mounted) {
+            scheduleAttempt(remaining - 1);
+          }
+        });
+      });
+    }
+
+    scheduleAttempt(attempts);
+  }
+
+  void _scrollToMessage(int messageId) {
+    final key = _messageKeys[messageId];
+    final context = key?.currentContext;
+    if (context == null) {
+      if (_jumpRetryCount >= 8) {
+        _scrollToLatest(animated: true);
+        widget.onJumpToMessageHandled();
+        return;
+      }
+      _jumpRetryCount++;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _scrollToMessage(messageId);
+        }
+      });
+      return;
+    }
+    _jumpRetryCount = 0;
+    Scrollable.ensureVisible(
+      context,
+      alignment: 0.22,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+    widget.onJumpToMessageHandled();
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
@@ -3377,9 +3594,12 @@ class _ChatPanelState extends State<_ChatPanel> {
           widget.conversation.id != -1;
 
       widgets.add(
-        _MessageBubble(
-          message: message,
-          onLongPress: () => widget.onLongPressMessage(message),
+        KeyedSubtree(
+          key: _messageKeys.putIfAbsent(message.id, () => GlobalKey()),
+          child: _MessageBubble(
+            message: message,
+            onLongPress: () => widget.onLongPressMessage(message),
+          ),
         ),
       );
 
@@ -3498,7 +3718,8 @@ class _ChatPanelState extends State<_ChatPanel> {
           Container(height: 1, color: const Color(0xFFE7DFFF)),
           if (widget.pinnedMessages.isNotEmpty)
             InkWell(
-              onTap: _showPinnedMessagesSheet,
+              onTap: () => _scrollToMessage(widget.pinnedMessages.first.id),
+              onLongPress: _showPinnedMessagesSheet,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -4227,91 +4448,183 @@ class _MessageBubbleState extends State<_MessageBubble> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       shadowColor: const Color(0xFF7A54FF).withValues(alpha: 0.14),
       child: InkWell(
-        //   onTap: () => _openRagItemDetails(ragItem),
+        onTap: () => _openRagItemDetails(ragItem),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      ragItem.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+              _buildRagItemThumbnail(ragItem),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            ragItem.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1F2740),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Icon(
+                          Icons.open_in_new_rounded,
+                          size: 18,
+                          color: Color(0xFF7A54FF),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _formatPrice(ragItem.price),
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2740),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  const Icon(
-                    Icons.open_in_new_rounded,
-                    size: 18,
-                    color: Color(0xFF7A54FF),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _formatPrice(ragItem.price),
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Color(0xFF7A54FF),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (shortDescription.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  shortDescription,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF5C6B89),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  if (listingType.isNotEmpty) _buildTag(listingType),
-                  if (listingType.isNotEmpty && condition.isNotEmpty)
-                    const SizedBox(width: 6),
-                  if (condition.isNotEmpty) _buildTag(condition),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF7A54FF),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text(
-                      'View Listing',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
+                        fontSize: 15,
+                        color: Color(0xFF7A54FF),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ),
-                ],
+                    if (shortDescription.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        shortDescription,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF5C6B89),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        if (listingType.isNotEmpty) _buildTag(listingType),
+                        if (listingType.isNotEmpty && condition.isNotEmpty)
+                          const SizedBox(width: 6),
+                        if (condition.isNotEmpty) _buildTag(condition),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF7A54FF),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'View Listing',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildRagItemThumbnail(_AiRagItem ragItem) {
+    final imageUrl = ragItem.imageUrl?.trim();
+    final placeholder = Container(
+      width: 74,
+      height: 74,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEDE5FF), Color(0xFFF8F4FF)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: const Icon(
+        Icons.inventory_2_rounded,
+        color: Color(0xFF7A54FF),
+        size: 28,
+      ),
+    );
+
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return FutureBuilder<String?>(
+        future: _loadRagItemImageUrl(ragItem.id),
+        builder: (context, snapshot) {
+          final loadedUrl = snapshot.data?.trim();
+          if (loadedUrl == null || loadedUrl.isEmpty) {
+            return placeholder;
+          }
+          return _buildRagNetworkImage(loadedUrl, placeholder);
+        },
+      );
+    }
+
+    return _buildRagNetworkImage(imageUrl, placeholder);
+  }
+
+  Widget _buildRagNetworkImage(String imageUrl, Widget placeholder) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Image.network(
+        imageUrl,
+        width: 74,
+        height: 74,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => placeholder,
+      ),
+    );
+  }
+
+  Future<String?> _loadRagItemImageUrl(int itemId) async {
+    final item = await ItemsRepository().getById(itemId);
+    if (item == null || item.imageUrls.isEmpty) {
+      return null;
+    }
+    return item.imageUrls.first;
+  }
+
+  Future<void> _openRagItemDetails(_AiRagItem ragItem) async {
+    try {
+      final authUser = SupabaseService.client.auth.currentUser;
+      AppUser? currentUser;
+      if (authUser != null) {
+        currentUser = await UsersRepository().getById(authUser.id);
+      }
+
+      final item = await ItemsRepository().getById(ragItem.id);
+      if (!mounted || item == null) {
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ItemDetailsScreen(loginUser: currentUser, item: item),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open item details.')),
+      );
+    }
   }
 
   @override
@@ -4758,6 +5071,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                           await TransactionsRepository().updateStatus(
                             transactionId: media.transactionId!,
                             transactionStatus: 'cancelled',
+                            cancelledBy: isBuyer ? 'buyer' : 'seller',
                           );
                           if (!mounted) return;
                           AppSnackBars.success(context, 'Offer cancelled.');
@@ -4805,8 +5119,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             final seller = await UsersRepository().getById(
                               media.sellerId!,
                             );
-                            final meetups = MeetupAddressOption.fromSellerItem(
-                              item,
+                            final meetups = MeetupAddressOption.fromTradeItems(
+                              sellerItem: item,
+                              offeredItem: offered,
                             );
 
                             if (!mounted) return;
@@ -5375,6 +5690,7 @@ class _Message {
 class _AiRagItem {
   final int id;
   final String title;
+  final String? imageUrl;
   final String? price;
   final String? listingType;
   final String? condition;
@@ -5383,6 +5699,7 @@ class _AiRagItem {
   const _AiRagItem({
     required this.id,
     required this.title,
+    this.imageUrl,
     this.price,
     this.listingType,
     this.condition,
@@ -5405,18 +5722,27 @@ class _OfferCardData {
 class _SearchMatch {
   final int conversationId;
   final String conversationName;
+  final String? avatarUrl;
   final String snippet;
+  final int? messageId;
 
   const _SearchMatch({
     required this.conversationId,
     required this.conversationName,
+    this.avatarUrl,
     required this.snippet,
+    this.messageId,
   });
 }
 
 class _SearchDialogResult {
   final String query;
   final int? conversationId;
+  final int? messageId;
 
-  const _SearchDialogResult({required this.query, this.conversationId});
+  const _SearchDialogResult({
+    required this.query,
+    this.conversationId,
+    this.messageId,
+  });
 }

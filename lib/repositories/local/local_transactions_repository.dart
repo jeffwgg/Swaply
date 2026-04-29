@@ -124,6 +124,7 @@ class LocalTransactionsRepository {
             r['total_amount'] is num ? (r['total_amount'] as num).toDouble() : null,
         fulfillmentMethod: r['fulfillment_method']?.toString(),
         address: r['address']?.toString(),
+        cancelledBy: null,
         createdAt: createdAt,
       );
 
@@ -174,6 +175,7 @@ class LocalTransactionsRepository {
       totalAmount: r['total_amount'] is num ? (r['total_amount'] as num).toDouble() : null,
       fulfillmentMethod: r['fulfillment_method']?.toString(),
       address: r['address']?.toString(),
+      cancelledBy: null,
       createdAt: createdAt,
     );
 

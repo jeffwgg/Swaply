@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:swaply/core/utils/app_snack_bars.dart';
 import 'package:swaply/models/app_user.dart';
 import 'package:swaply/models/item_listing.dart';
@@ -21,8 +23,9 @@ import 'package:swaply/views/screens/item/item_detail_screen.dart';
 import 'package:swaply/views/screens/profile/profile_screen.dart';
 import 'package:swaply/views/screens/transaction/transaction_detail_screen.dart';
 import 'package:swaply/views/screens/transaction/checkout_screen.dart';
+import 'package:swaply/views/screens/transaction/qr_scan_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
-import 'package:swaply/repositories/favourite_repository.dart';
+import 'package:swaply/repositories/favourite_repository.dart' hide debugPrint;
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
@@ -143,6 +146,7 @@ class TransactionTab extends StatefulWidget {
 
 class _TransactionTabState extends State<TransactionTab> {
   late Future<List<_TransactionRow>> _future;
+  bool _reloading = false;
 
   @override
   void initState() {
@@ -150,10 +154,28 @@ class _TransactionTabState extends State<TransactionTab> {
     _future = _loadRows();
   }
 
-  void _reload() {
+  void _triggerReload() {
+    if (!mounted) return;
     setState(() {
       _future = _loadRows();
     });
+  }
+
+  Future<void> _reload() async {
+    if (_reloading) return;
+    _reloading = true;
+    try {
+      final future = _loadRows();
+      if (!mounted) return;
+      setState(() {
+        _future = future;
+      });
+      await future;
+      if (!mounted) return;
+      setState(() {});
+    } finally {
+      _reloading = false;
+    }
   }
 
   Future<List<_TransactionRow>> _loadRows() async {
@@ -301,11 +323,13 @@ class _TransactionTabState extends State<TransactionTab> {
 
         return SafeArea(
           top: false,
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-          itemCount: rows.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, i) {
+          child: RefreshIndicator(
+            onRefresh: _reload,
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+              itemCount: rows.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
             final row = rows[i];
             final tx = row.tx;
             final item = row.item;
@@ -319,6 +343,103 @@ class _TransactionTabState extends State<TransactionTab> {
             final status = tx.transactionStatus ?? 'unknown';
             final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
             final isTrade = tx.tradedItemId != null;
+            final isMeetupPurchase =
+                !isTrade && (tx.fulfillmentMethod ?? '').toLowerCase() == 'meetup';
+
+            Future<void> onScanMeetupPurchaseQr() async {
+              final raw = await Navigator.of(context).push<String>(
+                MaterialPageRoute(
+                  builder: (_) => const QrScanScreen(title: 'Scan meet-up QR'),
+                ),
+              );
+              if (!context.mounted || raw == null || raw.trim().isEmpty) return;
+
+              final parsed = TradeQrPayload.tryParse(raw.trim());
+              if (parsed == null) {
+                AppSnackBars.error(context, 'Invalid QR code.');
+                return;
+              }
+
+              // Purchase meetup: only buyer scans seller QR.
+              if (parsed.transactionId != tx.transactionId ||
+                  parsed.role != 'seller' ||
+                  parsed.uid != tx.sellerId) {
+                AppSnackBars.error(context, 'This QR does not match the seller.');
+                return;
+              }
+
+              try {
+                await ItemsRepository().updateStatus('completed', tx.itemId);
+                await TransactionsRepository().updateStatus(
+                  transactionId: tx.transactionId,
+                  transactionStatus: 'completed',
+                );
+                AppSnackBars.success(context, 'Marked as received.');
+                await _reload();
+              } catch (e) {
+                AppSnackBars.error(context, 'Failed to mark received: $e');
+              }
+            }
+
+            Future<void> onGenerateMeetupPurchaseQr() async {
+              final payload = TradeQrPayload(
+                transactionId: tx.transactionId,
+                role: 'seller',
+                uid: widget.user.id,
+              );
+              final raw = jsonEncode(payload.toJson());
+
+              await showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                showDragHandle: true,
+                backgroundColor: Colors.white,
+                builder: (ctx) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Your meet-up QR',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFE9D5FF)),
+                            color: const Color(0xFFF8F5FF),
+                          ),
+                          child: QrImageView(
+                            data: raw,
+                            size: 240,
+                            backgroundColor: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Let the buyer scan this QR.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Close'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }
 
             Future<void> onReceived() async {
               final ok = await showDialog<bool>(
@@ -372,7 +493,10 @@ class _TransactionTabState extends State<TransactionTab> {
                 }
                 final seller =
                     row.seller ?? await UsersRepository().getById(tx.sellerId);
-                final meetups = MeetupAddressOption.fromSellerItem(latestPrimary);
+                final meetups = MeetupAddressOption.fromTradeItems(
+                  sellerItem: latestPrimary,
+                  offeredItem: latestOffered,
+                );
 
                 if (!context.mounted) return;
                 await Navigator.push<void>(
@@ -394,7 +518,7 @@ class _TransactionTabState extends State<TransactionTab> {
                   ),
                 );
                 if (!context.mounted) return;
-                _reload();
+                await _reload();
               } catch (e) {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -435,18 +559,26 @@ class _TransactionTabState extends State<TransactionTab> {
                 await TransactionsRepository().updateStatus(
                   transactionId: tx.transactionId,
                   transactionStatus: 'cancelled',
+                  cancelledBy: isBuyer ? 'buyer' : 'seller',
                 );
-                await PaymentsRepository().updateStatusForTransaction(
-                  transactionId: tx.transactionId,
-                  paymentStatus: 'refunded',
-                );
+                // Only attempt refund when there is a payment record (non-trade purchase).
+                // And only the buyer should trigger the refund (RLS usually restricts this).
+                if (!isTrade && row.payment != null && isBuyer) {
+                  await PaymentsRepository().updateStatusForTransaction(
+                    transactionId: tx.transactionId,
+                    paymentStatus: 'refunded',
+                  );
+                }
                 if (!context.mounted) return;
                 AppSnackBars.info(
                   context,
-                  'Cancelled. Refund will be issued in 3 working days.',
+                  (!isTrade && row.payment != null && isBuyer)
+                      ? 'Cancelled. Refund will be issued in 3 working days.'
+                      : 'Cancelled.',
                 );
-                _reload();
+                await _reload();
               } catch (e) {
+                debugPrint('[TransactionTab onCancel] Failed for tx=${tx.transactionId}: $e');
                 if (!context.mounted) return;
                 AppSnackBars.error(context, 'Failed to cancel: $e');
               }
@@ -479,11 +611,10 @@ class _TransactionTabState extends State<TransactionTab> {
                         seller: row.seller,
                         payment: row.payment,
                         isBuyer: isBuyer,
-                        onChanged: _reload,
+                        onChanged: _triggerReload,
                       ),
                     ),
                   );
-                  _reload();
                 },
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -560,7 +691,25 @@ class _TransactionTabState extends State<TransactionTab> {
                                 child: const Text('Cancel'),
                               ),
                             ),
-                            if (isBuyer && !isTrade) ...[
+                            if (!isBuyer && !isTrade && isMeetupPurchase) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onGenerateMeetupPurchaseQr,
+                                  child: const Text('Generate QR Code'),
+                                ),
+                              ),
+                            ],
+                            if (isBuyer && !isTrade && isMeetupPurchase) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onScanMeetupPurchaseQr,
+                                  child: const Text('Scan QR'),
+                                ),
+                              ),
+                            ],
+                            if (isBuyer && !isTrade && !isMeetupPurchase) ...[
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton(
@@ -586,6 +735,7 @@ class _TransactionTabState extends State<TransactionTab> {
               ),
             );
           },
+            ),
           ),
         );
       },
@@ -1066,11 +1216,14 @@ class _StatusBadge extends StatelessWidget {
       case 'accepted':
         color = Colors.green;
         break;
-      case 'pending':
+      case 'confirmed':
         color = Colors.green;
         break;
+      case 'pending':
+        color = Colors.grey[400]!;
+        break;
       case 'cancelled':
-        color = Colors.amber;
+        color = Colors.red;
         break;
       case 'dropped':
       case 'rejected':

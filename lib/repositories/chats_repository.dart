@@ -3,6 +3,7 @@ import '../models/chat_pinned_message.dart';
 import '../services/supabase_service.dart';
 import '../core/utils/parsing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatsRepository {
   ChatsRepository();
@@ -13,7 +14,7 @@ class ChatsRepository {
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
       'item:items(owner_id,name,image_urls)';
-    static const _withParticipantsSelectCompat =
+  static const _withParticipantsSelectCompat =
       'id,user1_id,user2_id,item_id,last_message,pinned_message_id,pinned_at,updated_at,'
       'user1:users!chats_user1_id_fkey(id,username,profile_image),'
       'user2:users!chats_user2_id_fkey(id,username,profile_image),'
@@ -117,9 +118,7 @@ class ChatsRepository {
       );
     } on PostgrestException catch (error) {
       // Older databases may not have the RPC yet; fallback to direct table flow.
-      final shouldFallback =
-          error.code == 'PGRST202' ||
-          error.code == '22P02';
+      final shouldFallback = error.code == 'PGRST202' || error.code == '22P02';
       if (!shouldFallback) {
         rethrow;
       }
@@ -163,7 +162,11 @@ class ChatsRepository {
     try {
       final insertedResponse = await SupabaseService.client
           .from(_table)
-          .insert({'user1_id': lowUserId, 'user2_id': highUserId, 'item_id': itemId})
+          .insert({
+            'user1_id': lowUserId,
+            'user2_id': highUserId,
+            'item_id': itemId,
+          })
           .select(_withParticipantsSelect)
           .single();
 
@@ -296,6 +299,16 @@ class ChatsRepository {
       },
     );
 
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'chat_pinned_messages',
+      callback: (_) {
+        // Refresh inbox/chat state when any participant pins/unpins a message.
+        emitInboxRefresh();
+      },
+    );
+
     channel.subscribe();
     return channel;
   }
@@ -361,5 +374,33 @@ class ChatsRepository {
       operation: 'list_pinned_messages_as_user',
     );
     return rows.map<ChatPinnedMessage>(ChatPinnedMessage.fromMap).toList();
+  }
+
+  Future<List<int>> listPinnedChatIdsForUserOrdered(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> pinnedList = prefs.getStringList('pinned_chats_$userId') ?? [];
+    return pinnedList.map((e) => int.tryParse(e)).whereType<int>().toList();
+  }
+
+  Future<Set<int>> listPinnedChatIdsForUser(String userId) async {
+    final ordered = await listPinnedChatIdsForUserOrdered(userId);
+    return ordered.toSet();
+  }
+
+  Future<void> setConversationPinned({
+    required String userId,
+    required int chatId,
+    required bool isPinned,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'pinned_chats_$userId';
+    final List<String> pinnedList = prefs.getStringList(key) ?? [];
+    if (isPinned) {
+      pinnedList.remove(chatId.toString());
+      pinnedList.insert(0, chatId.toString());
+    } else {
+      pinnedList.remove(chatId.toString());
+    }
+    await prefs.setStringList(key, pinnedList);
   }
 }

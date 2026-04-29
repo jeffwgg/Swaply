@@ -69,10 +69,15 @@ class TransactionsRepository {
   Future<void> updateStatus({
     required int transactionId,
     required String transactionStatus,
+    String? cancelledBy,
   }) async {
+    final update = <String, dynamic>{
+      'transaction_status': transactionStatus,
+      if (cancelledBy != null) 'cancelled_by': cancelledBy,
+    };
     final response = await SupabaseService.client
         .from(_table)
-        .update({'transaction_status': transactionStatus})
+        .update(update)
         .eq('transaction_id', transactionId)
         .select()
         .maybeSingle();
@@ -97,6 +102,7 @@ class TransactionsRepository {
     required int transactionId,
     required String transactionStatus,
     required String address,
+    String? cancelledBy,
   }) async {
     final response = await SupabaseService.client
         .from(_table)
@@ -104,6 +110,7 @@ class TransactionsRepository {
           'transaction_status': transactionStatus,
           'fulfillment_method': 'meetup',
           'address': address,
+          if (cancelledBy != null) 'cancelled_by': cancelledBy,
         })
         .eq('transaction_id', transactionId)
         .select()

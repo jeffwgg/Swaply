@@ -290,6 +290,33 @@ class ChatService {
     );
   }
 
+  Future<Set<int>> listPinnedConversationIds() async {
+    final userId = await _requireUserId();
+    return _chatsRepository.listPinnedChatIdsForUser(userId);
+  }
+
+  Future<List<int>> listPinnedConversationIdsOrdered() async {
+    final userId = await _requireUserId();
+    return _chatsRepository.listPinnedChatIdsForUserOrdered(userId);
+  }
+
+  Future<void> setConversationPinned({
+    required int chatId,
+    required bool isPinned,
+  }) async {
+    // Conversation pinning supports local AI chat id (-1) and normal chat ids (>0).
+    // Only 0 is invalid.
+    if (chatId == 0) {
+      throw ArgumentError.value(chatId, 'chatId', 'chatId must not be 0.');
+    }
+    final userId = await _requireUserId();
+    await _chatsRepository.setConversationPinned(
+      userId: userId,
+      chatId: chatId,
+      isPinned: isPinned,
+    );
+  }
+
   RealtimeChannel subscribeInboxChanges({required void Function() onChange}) {
     final userId = _cachedCurrentUserId;
     if (userId == null) {
