@@ -57,7 +57,8 @@ class _SwipeHomeScreenState extends State<SwipeHomeScreen>
   Future<void> _loadItems() async {
     setState(() => _loading = true);
     try {
-      final items = await ItemsRepository().getSwipeList(userId: widget.user?.id);
+      final currentUserId = SupabaseService.client.auth.currentUser?.id ?? widget.user?.id;
+      final items = await ItemsRepository().getSwipeList(userId: currentUserId);
       setState(() {
         _items = items;
         _loading = false;

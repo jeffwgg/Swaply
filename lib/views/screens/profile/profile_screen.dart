@@ -73,7 +73,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _followersStream = SupabaseService.client
           .from('follows')
           .stream(primaryKey: ['id'])
-          .eq('following_id', _profileUserId!)
+          .eq('followee_id', _profileUserId!)
           .handleError((e) => print('Followers stream error: $e'))
           .listen((_) {
         Future.delayed(const Duration(milliseconds: 300), () {
