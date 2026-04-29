@@ -1213,25 +1213,19 @@ class _StatusBadge extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'available':
-      case 'accepted':
-        color = Colors.green;
-        break;
-      case 'confirmed':
-        color = Colors.green;
-        break;
       case 'pending':
-        color = Colors.grey[400]!;
+        color = Colors.green;
         break;
       case 'cancelled':
-        color = Colors.red;
-        break;
-      case 'dropped':
       case 'rejected':
         color = Colors.red;
         break;
-      case 'reserved':
-        color = Colors.orange;
+      case 'dropped':
+        color = Colors.grey;
         break;
+      case 'reserved':
+      case 'accepted':
+      case 'confirmed':
       default:
         color = Colors.blue;
     }

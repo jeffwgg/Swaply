@@ -36,35 +36,30 @@ class ItemDetailsScreen extends StatefulWidget {
 
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   late final AppUser? loginUser;
+
+  // main item
   late ItemListing _item;
   AppUser? _owner;
-  List<ItemListing> _replies = [];
-  final Map<int, String> _replyOwnerNames = {};
-  final Map<int, AppUser?> _replyOwners = {};
-  int _currentImageIndex = 0;
   bool _isFollowing = false;
   bool _isFavourite = false;
   int? _favCount;
-  bool _isLoadingFollow = false;
-  final ChatService _chatService = ChatService();
 
-  ImageProvider? _resolveAvatarImage(String? imagePath) {
-    if (imagePath == null) return null;
-    final trimmed = imagePath.trim();
-    if (trimmed.isEmpty) return null;
-    if (trimmed.startsWith('http')) {
-      return NetworkImage(trimmed);
-    }
-    if (trimmed.startsWith('assets/')) {
-      return AssetImage(trimmed);
-    }
-    return FileImage(File(trimmed));
-  }
+  // reply items
+  List<ItemListing> _replies = [];
+  final Map<int, AppUser?> _replyOwners = {};
+
+  int _currentImageIndex = 0;
+
+  bool _isLoadingFollow = false;
+
+  final ChatService _chatService = ChatService();
 
   @override
   void initState() {
     super.initState();
     _item = widget.item;
+
+    // logged in
     if (widget.loginUser != null) {
       loginUser = widget.loginUser;
       _isFavourite = _item.isFavorite;
@@ -73,52 +68,28 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     _fetchOwner();
     _fetchReplies();
     _fetchFavouriteCount();
-    _checkIfFavourite();
   }
 
-  void _showFollowError(String message) {
-    if (!mounted) return;
-    AppSnackBars.error(context, message);
-  }
+  bool get isLogin => loginUser != null;
 
+  // yanthong's function
   Future<void> _loadFollowState() async {
-    if (loginUser!.id == widget.item.ownerId) {
+    if (loginUser!.id == _item.ownerId) {
       return;
     }
+
     final following = await FollowService.isFollowing(
       loginUser!.id,
-      widget.item.ownerId,
+      _item.ownerId,
     );
 
     if (!mounted) return;
     setState(() => _isFollowing = following);
   }
 
-  Future<void> _checkIfFavourite() async {
-    if (widget.loginUser == null) return;
-    try {
-      final isFav = await FavouriteRepository().isFavourited(
-        widget.loginUser!.id,
-        widget.item.id,
-      );
-      if (mounted) {
-        setState(() {
-          _isFavourite = isFav;
-          widget.item.isFavorite = isFav;
-        });
-      }
-    } catch (e) {
-      log('Check favourite error: $e');
-    }
-  }
-
   Future<void> _fetchOwner() async {
-    AppUser? owner;
-    try {
-      owner = await UsersRepository().getById(_item.ownerId);
-    } catch (e) {
-      log('Owner lookup fallback used: $e');
-    }
+    AppUser? owner = await UsersRepository().getById(_item.ownerId);
+
     if (mounted) {
       setState(() {
         _owner = owner;
@@ -130,16 +101,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     try {
       final replies = await ItemsRepository().getReplyList(_item.id);
       for (var r in replies) {
-        final fallbackName = (r.ownerUsername ?? '').trim();
         try {
+          // get reply owner
           final user = await UsersRepository().getById(r.ownerId);
-          final resolved = (user?.username ?? fallbackName).trim();
-          _replyOwnerNames[r.id] = resolved.isEmpty ? 'Unknown' : resolved;
           _replyOwners[r.id] = user;
         } catch (_) {
-          _replyOwnerNames[r.id] = fallbackName.isEmpty
-              ? 'Unknown'
-              : fallbackName;
           _replyOwners[r.id] = null;
         }
       }
@@ -154,113 +120,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _fetchFavouriteCount() async {
-    try {
-      final count = await FavouriteRepository().getFavouriteCount(_item.id);
-      if (mounted) {
-        setState(() {
-          _favCount = count;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _favCount = null;
-        });
-      }
+    final count = await FavouriteRepository().getFavouriteCount(_item.id);
+    if (mounted) {
+      setState(() {
+        _favCount = count;
+      });
     }
-  }
-
-  Future<void> _openPurchaseCheckout() async {
-    if (loginUser == null) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-      return;
-    }
-    if (loginUser!.id == widget.item.ownerId) {
-      if (!mounted) {
-        return;
-      }
-      AppSnackBars.success(
-        context,
-        'This is your own listing, so you cannot buy it.',
-      );
-      return;
-    }
-    if (widget.item.price == null) {
-      if (!mounted) return;
-      AppSnackBars.warning(context, 'This listing has no purchase price.');
-      return;
-    }
-
-    final meetups = MeetupAddressOption.fromSellerItem(widget.item);
-    final sellerName = _owner!.username.trim().isEmpty
-        ? 'Seller'
-        : _owner!.username;
-    final sellerId = widget.item.ownerId;
-    if (sellerId == null || sellerId.isEmpty) {
-      if (!mounted) return;
-      AppSnackBars.error(context, 'Seller account id not found.');
-      return;
-    }
-
-    final completed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CheckoutScreen(
-          flowKind: CheckoutFlowKind.purchase,
-          primaryItem: widget.item,
-          sellerDisplayName: sellerName,
-          sellerId: sellerId,
-          buyerId: loginUser!.id,
-          sellerMeetupOptions: meetups,
-        ),
-      ),
-    );
-
-    if (completed == true) {
-      if (!mounted) {
-        return;
-      }
-      Navigator.pop(context, true);
-    }
-  }
-
-  Widget _buildImage(
-    String url, {
-    double? width,
-    double? height,
-    BoxFit fit = BoxFit.cover,
-  }) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    if (url.startsWith('assets/')) {
-      return Image.asset(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.file(
-      File(url),
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
-    );
   }
 
   Future<void> _toggleFavourite() async {
@@ -307,14 +172,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _refreshItemDetails() async {
-    final refreshedItem = await ItemsRepository().getById(_item.id);
-    final refreshedReplies = await ItemsRepository().getReplyList(_item.id);
-    if (!mounted || refreshedItem == null) return;
-    setState(() {
-      _item = refreshedItem;
-      _isFavourite = refreshedItem.isFavorite;
-      _replies = refreshedReplies;
-    });
+    var refreshedItem = await ItemsRepository().getById(_item.id);
+    if (mounted) {
+      _item = refreshedItem!;
+    }
+    _fetchOwner();
+    _fetchReplies();
+    _fetchFavouriteCount();
   }
 
   Future<void> _dropListing() async {
@@ -338,8 +202,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     );
 
     if (confirm == true) {
-      await ItemsRepository().dropListing(widget.item.id);
+      await ItemsRepository().dropListing(_item.id);
 
+      // reject all reply items if main item dropped
       for (var r in _replies) {
         if (r.status == 'pending') {
           await ItemsRepository().updateStatus('rejected', r.id);
@@ -393,12 +258,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   }
 
   Future<void> _acceptReply(int replyId) async {
-    final actingOwner = widget.loginUser;
-    if (actingOwner == null) {
+    if (loginUser == null) {
       return;
     }
 
     ItemListing? acceptedReply;
+
+    // update status for main item & all replies
     for (var r in _replies) {
       if (r.id == replyId) {
         acceptedReply = r;
@@ -439,8 +305,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         }
       }
 
-      final ownerName = actingOwner.username.trim().isNotEmpty
-          ? actingOwner.username.trim()
+      final ownerName = loginUser!.username.trim().isNotEmpty
+          ? loginUser!.username.trim()
           : (_owner!.username.trim().isNotEmpty
                 ? _owner!.username.trim()
                 : 'Item owner');
@@ -453,7 +319,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
           otherUserId: acceptedReply.ownerId,
           itemId: _item.id,
         );
-        // Send as media message with image (left-aligned bubble with item link)
+        // send as media message
         final caption = StringBuffer()
           ..writeln('I accepted your trade offer for "${_item.name}".')
           ..writeln('Offered item: "${acceptedReply.name}"');
@@ -493,13 +359,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         }
       }
     }
-
-    await _fetchReplies();
-
     await _refreshItemDetails();
   }
 
   Future<void> _rejectReply(int replyId) async {
+    // update status for that reply item
     ItemListing? rejectedReply;
     for (final reply in _replies) {
       if (reply.id == replyId) {
@@ -507,10 +371,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         break;
       }
     }
-
     await ItemsRepository().updateStatus('rejected', replyId);
 
-    if (rejectedReply != null && loginUser != null) {
+    // send notification
+    if (rejectedReply != null && isLogin) {
       final ownerName = loginUser!.username.trim().isNotEmpty
           ? loginUser!.username.trim()
           : (_owner!.username.trim().isNotEmpty
@@ -541,10 +405,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     await _fetchReplies();
   }
 
+  // jeff's function
   Future<void> _composeAndStartItemConversation() async {
-    final currentUser = loginUser;
-
-    if (currentUser == null) {
+    if (loginUser == null) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -552,7 +415,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       return;
     }
 
-    if (currentUser.id == _item.ownerId) {
+    if (loginUser!.id == _item.ownerId) {
       if (!mounted) return;
       AppSnackBars.info(context, 'You cannot start chat on your own item.');
       return;
@@ -614,9 +477,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                 child: SizedBox(
                                   width: 56,
                                   height: 56,
-                                  child: widget.item.imageUrls.isNotEmpty
+                                  child: _item.imageUrls.isNotEmpty
                                       ? _buildImage(
-                                          widget.item.imageUrls.first,
+                                          _item.imageUrls.first,
                                           width: 56,
                                           height: 56,
                                           fit: BoxFit.cover,
@@ -636,7 +499,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      widget.item.name,
+                                      _item.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -657,7 +520,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      widget.item.listingType.toUpperCase(),
+                                      _item.listingType.toUpperCase(),
                                       style: const TextStyle(
                                         fontSize: 11,
                                         color: Color(0xFF9060FF),
@@ -748,8 +611,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     try {
       final chat = await _chatService.createOrGetItemChat(
-        otherUserId: widget.item.ownerId,
-        itemId: widget.item.id,
+        otherUserId: _item.ownerId,
+        itemId: _item.id,
       );
       await _chatService.sendMessage(chatId: chat.id, content: message);
       await NotificationService.instance.sendSystemNotification(
@@ -786,15 +649,103 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     }
   }
 
+  // wailun's function
+  Future<void> _openPurchaseCheckout() async {
+    if (loginUser == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    final meetups = MeetupAddressOption.fromSellerItem(_item);
+    final sellerName = _owner!.username.trim().isEmpty
+        ? 'Seller'
+        : _owner!.username;
+    final sellerId = _item.ownerId;
+    if (sellerId.isEmpty) {
+      if (!mounted) return;
+      AppSnackBars.error(context, 'Seller account id not found.');
+      return;
+    }
+
+    final completed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckoutScreen(
+          flowKind: CheckoutFlowKind.purchase,
+          primaryItem: _item,
+          sellerDisplayName: sellerName,
+          sellerId: sellerId,
+          buyerId: loginUser!.id,
+          sellerMeetupOptions: meetups,
+        ),
+      ),
+    );
+
+    if (completed == true) {
+      if (!mounted) {
+        return;
+      }
+      Navigator.pop(context, true);
+    }
+  }
+
+  ImageProvider? _resolveAvatarImage(String? imagePath) {
+    if (imagePath == null) return null;
+    final trimmed = imagePath.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.startsWith('http')) {
+      return NetworkImage(trimmed);
+    }
+    if (trimmed.startsWith('assets/')) {
+      return AssetImage(trimmed);
+    }
+    return FileImage(File(trimmed));
+  }
+
+  Widget _buildImage(
+    String url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+  }) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.file(
+      File(url),
+      width: width,
+      height: height,
+      fit: fit,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 50),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = _item;
     final loginUser = widget.loginUser;
     final owner = _owner;
-    final fallbackOwnerName = (widget.item.ownerUsername ?? '').trim();
-    final ownerName = (owner?.username ?? fallbackOwnerName).trim().isEmpty
-        ? 'Item owner'
-        : (owner?.username ?? fallbackOwnerName).trim();
     final ownerAvatar = _resolveAvatarImage(owner?.profileImage);
     const accent = Color(0xFF5B21B6);
     const accentSoft = Color(0xFFF3E8FF);
@@ -828,7 +779,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   const SizedBox(width: 8),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(0, 0, 16, 0),
-                    child: Text(ownerName, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      owner != null ? owner.username : 'Loading...',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),
@@ -851,7 +805,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         }
 
                         if (loginUser.id == targetUserId) {
-                          _showFollowError('You cannot follow yourself.');
+                          if (!mounted) return;
+                          AppSnackBars.error(
+                            context,
+                            'You cannot follow yourself.',
+                          );
                           return;
                         }
 
@@ -885,8 +843,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           }
                         } catch (e) {
                           print('Follow error: $e');
+                          if (!mounted) return;
+
                           if (mounted)
-                            _showFollowError(
+                            AppSnackBars.error(
+                              context,
                               'Could not update follow status right now. Please try again.',
                             );
                         } finally {
@@ -1524,7 +1485,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                                     0,
                                                   ),
                                               child: Text(
-                                                _replyOwnerNames[reply.id]!,
+                                                _replyOwners[reply.id]!
+                                                    .username,
                                                 style: const TextStyle(
                                                   fontSize: 16,
                                                   color: Color(0xFF7C3AED),
@@ -1558,8 +1520,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                       ),
                                       const SizedBox(height: 10),
                                       if (item.status != 'dropped')
-                                        if (loginUser != null &&
-                                            loginUser.id == item.ownerId &&
+                                        if (isLogin &&
+                                            loginUser!.id == item.ownerId &&
                                             reply.status == 'pending')
                                           Row(
                                             children: [
@@ -1635,8 +1597,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           right: 8,
                           child: _StatusBadge(status: reply.status),
                         ),
-                        if (loginUser != null &&
-                            loginUser.id == reply.ownerId &&
+                        if (isLogin &&
+                            loginUser!.id == reply.ownerId &&
                             reply.status == 'pending')
                           Positioned(
                             bottom: 8,
@@ -1658,7 +1620,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
               }).toList(),
               const SizedBox(height: 14),
               if (item.status == 'available' || item.status == 'pending') ...[
-                if (loginUser != null && loginUser.id == item.ownerId)
+                if (isLogin && loginUser!.id == item.ownerId)
                   Row(
                     children: [
                       Expanded(
@@ -1895,20 +1857,19 @@ class _StatusBadge extends StatelessWidget {
     Color color;
     switch (status.toLowerCase()) {
       case 'available':
-      case 'accepted':
-      case 'confirmed':
+      case 'pending':
         color = Colors.green;
         break;
-      case 'dropped':
+      case 'cancelled':
       case 'rejected':
         color = Colors.red;
         break;
+      case 'dropped':
+        color = Colors.grey;
+        break;
       case 'reserved':
-        color = Colors.orange;
-        break;
-      case 'pending':
-        color = Colors.grey[400]!;
-        break;
+      case 'accepted':
+      case 'confirmed':
       default:
         color = Colors.blue;
     }

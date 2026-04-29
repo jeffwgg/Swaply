@@ -9,7 +9,6 @@ class ItemListing {
   final String ownerId;
   final String status;
   final String category;
-  final String? ownerUsername;
   final List<String> imageUrls;
   final String? preference;
   final int? repliedTo;
@@ -28,7 +27,6 @@ class ItemListing {
     required this.ownerId,
     required this.status,
     required this.category,
-    this.ownerUsername,
     required this.imageUrls,
     required this.preference,
     this.repliedTo,
@@ -55,12 +53,6 @@ class ItemListing {
       ownerId: parseString(map['owner_id'], fieldName: 'items.owner_id'),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
-      ownerUsername: parseNullableString(
-        (map['users'] is Map<String, dynamic>)
-            ? (map['users'] as Map<String, dynamic>)['username']
-            : null,
-        fieldName: 'users.username',
-      ),
       imageUrls: List<String>.from(map['image_urls'] ?? []),
       preference: parseNullableString(
         map['preference'],
