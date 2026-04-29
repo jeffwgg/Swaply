@@ -40,7 +40,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   // main item
   late ItemListing _item;
   AppUser? _owner;
-  final Map<int, String> _replyOwnerNames = {};
   bool _isFollowing = false;
   bool _isFavourite = false;
   int? _favCount;
