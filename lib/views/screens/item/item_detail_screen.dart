@@ -424,6 +424,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
             totalAmount: 0,
             fulfillmentMethod: 'meetup',
             address: null,
+            cancelledBy: null,
             createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
           ),
         );
@@ -1855,6 +1856,7 @@ class _StatusBadge extends StatelessWidget {
     switch (status.toLowerCase()) {
       case 'available':
       case 'accepted':
+      case 'confirmed':
         color = Colors.green;
         break;
       case 'dropped':
@@ -1862,8 +1864,10 @@ class _StatusBadge extends StatelessWidget {
         color = Colors.red;
         break;
       case 'reserved':
-      case 'pending':
         color = Colors.orange;
+        break;
+      case 'pending':
+        color = Colors.grey[400]!;
         break;
       default:
         color = Colors.blue;

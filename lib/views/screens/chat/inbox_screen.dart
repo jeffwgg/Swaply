@@ -4758,6 +4758,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                           await TransactionsRepository().updateStatus(
                             transactionId: media.transactionId!,
                             transactionStatus: 'cancelled',
+                            cancelledBy: isBuyer ? 'buyer' : 'seller',
                           );
                           if (!mounted) return;
                           AppSnackBars.success(context, 'Offer cancelled.');
@@ -4805,8 +4806,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             final seller = await UsersRepository().getById(
                               media.sellerId!,
                             );
-                            final meetups = MeetupAddressOption.fromSellerItem(
-                              item,
+                            final meetups = MeetupAddressOption.fromTradeItems(
+                              sellerItem: item,
+                              offeredItem: offered,
                             );
 
                             if (!mounted) return;

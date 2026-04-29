@@ -11,10 +11,13 @@ import '../../../repositories/items_repository.dart';
 import '../../../repositories/payments_repository.dart';
 import '../../../repositories/transactions_repository.dart';
 import '../../../repositories/local/local_transactions_repository.dart';
+import '../../../repositories/users_repository.dart';
+import '../../../services/supabase_service.dart';
 import '../profile/profile_screen.dart';
 import 'qr_scan_screen.dart';
 import 'dart:convert';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   const TransactionDetailScreen({
@@ -45,13 +48,89 @@ class TransactionDetailScreen extends StatefulWidget {
 class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   final TransactionsRepository _txRepo = TransactionsRepository();
   final ItemsRepository _itemsRepo = ItemsRepository();
+  final UsersRepository _usersRepo = UsersRepository();
 
   late Future<_TxDetailData> _future;
+  RealtimeChannel? _realtimeChannel;
+  DateTime _lastRealtimeReloadAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _startRealtime();
+  }
+
+  @override
+  void dispose() {
+    _stopRealtime();
+    super.dispose();
+  }
+
+  void _startRealtime() {
+    _stopRealtime();
+
+    final txId = widget.tx.transactionId;
+    final channel = SupabaseService.client.channel('tx_detail:$txId');
+
+    // Reload helper with light throttling (multiple rows may update quickly).
+    void scheduleReload() {
+      final now = DateTime.now();
+      if (now.difference(_lastRealtimeReloadAt).inMilliseconds < 800) return;
+      _lastRealtimeReloadAt = now;
+      if (mounted) _reload();
+    }
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'transactions',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'transaction_id',
+        value: txId,
+      ),
+      callback: (_) => scheduleReload(),
+    );
+
+    // Primary item updates
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'items',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'id',
+        value: widget.tx.itemId,
+      ),
+      callback: (_) => scheduleReload(),
+    );
+
+    // Traded item updates (if any)
+    if (widget.tx.tradedItemId != null) {
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.update,
+        schema: 'public',
+        table: 'items',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'id',
+          value: widget.tx.tradedItemId!,
+        ),
+        callback: (_) => scheduleReload(),
+      );
+    }
+
+    channel.subscribe();
+    _realtimeChannel = channel;
+  }
+
+  void _stopRealtime() {
+    final channel = _realtimeChannel;
+    _realtimeChannel = null;
+    if (channel != null) {
+      SupabaseService.client.removeChannel(channel);
+    }
   }
 
   Future<_TxDetailData> _load() async {
@@ -62,10 +141,12 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
       final traded = latestTx.tradedItemId == null
           ? null
           : await _itemsRepo.getById(latestTx.tradedItemId!);
+      final buyerUser = await _usersRepo.getById(latestTx.buyerId);
       return _TxDetailData(
         tx: latestTx,
         item: item ?? widget.item,
         tradedItem: traded ?? widget.tradedItem,
+        buyerUser: buyerUser,
       );
     } catch (_) {
       final cached = await LocalTransactionsRepository()
@@ -75,6 +156,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
           tx: widget.tx,
           item: widget.item,
           tradedItem: widget.tradedItem,
+          buyerUser: null,
         );
       }
 
@@ -126,6 +208,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
         tx: cached.tx,
         item: offlineItem,
         tradedItem: offlineTraded,
+        buyerUser: null,
       );
     }
   }
@@ -143,8 +226,8 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     required Transaction tx,
   }) async {
     final isTrade = tx.tradedItemId != null;
-    final viewerIsBuyer = widget.viewer.id == tx.buyerId;
-    final viewerIsSeller = widget.viewer.id == tx.sellerId;
+    final viewerIsBuyer = widget.isBuyer;
+    final viewerIsSeller = !viewerIsBuyer;
     final roleLabel = viewerIsBuyer ? 'buyer' : (viewerIsSeller ? 'seller' : 'user');
 
     final ok = await showDialog<bool>(
@@ -219,7 +302,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     required BuildContext context,
     required Transaction tx,
   }) async {
-    final role = widget.viewer.id == tx.buyerId ? 'buyer' : 'seller';
+    final role = widget.isBuyer ? 'buyer' : 'seller';
     final payload = TradeQrPayload(
       transactionId: tx.transactionId,
       role: role,
@@ -313,7 +396,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
       return;
     }
 
-    final myRole = widget.viewer.id == tx.buyerId ? 'buyer' : 'seller';
+    final myRole = widget.isBuyer ? 'buyer' : 'seller';
     if (parsed.role == myRole) {
       if (!context.mounted) return;
       AppSnackBars.error(context, 'You cannot scan your own QR.');
@@ -364,7 +447,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     try {
       await _itemsRepo.updateStatus('available', tx.itemId);
       if (tx.tradedItemId != null) {
-        final viewerIsBuyer = widget.viewer.id == tx.buyerId;
+        final viewerIsBuyer = widget.isBuyer;
         // Offerer (buyer) cancel => drop offered item; seller cancel => available.
         await _itemsRepo.updateStatus(
           viewerIsBuyer ? 'dropped' : 'rejected',
@@ -374,6 +457,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
       await _txRepo.updateStatus(
         transactionId: tx.transactionId,
         transactionStatus: 'cancelled',
+        cancelledBy: widget.isBuyer ? 'buyer' : 'seller',
       );
       if (payment != null) {
         await paymentsRepo.updateStatusForTransaction(
@@ -410,6 +494,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
           final tx = data?.tx ?? widget.tx;
           final item = data?.item ?? widget.item;
           final tradedItem = data?.tradedItem ?? widget.tradedItem;
+          final buyerUser = data?.buyerUser;
 
           final title = item?.name ?? 'Item #${tx.itemId}';
           final image = (item != null && item.imageUrls.isNotEmpty)
@@ -424,19 +509,44 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
           final viewerIsParticipant =
               widget.viewer.id == tx.buyerId || widget.viewer.id == tx.sellerId;
 
+          // Rely on the `isBuyer` flag passed by the caller. This keeps the
+          // button enable/disable behavior aligned with the navigation context.
+          final viewerIsBuyer = widget.isBuyer;
+
           // Trade receipt state:
-          // - buyer click -> completes seller item (tx.itemId)
-          // - seller click -> completes buyer offered item (tx.tradedItemId)
+          // - buyer confirms seller's item => tx.itemId => buyerReceived == true
+          // - seller confirms buyer's offered item => tx.tradedItemId => sellerReceived == true
           final buyerReceived = item?.status == 'completed';
           final sellerReceived = tradedItem?.status == 'completed';
-          final viewerAlreadyReceived = widget.viewer.id == tx.buyerId
-              ? buyerReceived
-              : (widget.viewer.id == tx.sellerId ? sellerReceived : false);
 
-          final canDoReceivedAction = viewerIsParticipant &&
-              !viewerAlreadyReceived &&
-              (isTrade ? status == 'confirmed' : status == 'pending');
+          // Disable rules (trade):
+          // - "Scan QR" should disable when the viewer has already received the counterparty's item.
+          // - "Generate QR Code" should disable when the counterparty has already received the viewer's item.
+          final viewerAlreadyReceivedOtherPartyItem =
+              viewerIsBuyer ? buyerReceived : sellerReceived;
+          final viewerAlreadyReceivedMyItem =
+              viewerIsBuyer ? sellerReceived : buyerReceived;
+
+          // Purchase "Received" action:
+          final canDoPurchaseReceivedAction =
+              viewerIsParticipant && status == 'pending' && item?.status != 'completed';
+          final isMeetupPurchase =
+              !isTrade && (tx.fulfillmentMethod ?? '').toLowerCase() == 'meetup';
           final showCancel = status == 'pending';
+
+          String? cancelledByLabel;
+          if (status == 'cancelled') {
+            final raw = (tx.cancelledBy ?? '').trim().toLowerCase();
+            if (raw == 'buyer' || raw == 'seller') {
+              cancelledByLabel = raw;
+            } else if (isTrade) {
+              // Fallback for older rows: infer from traded item status.
+              // buyer-cancel => offered item dropped; seller-cancel => offered item rejected
+              final offeredStatus = tradedItem?.status?.toLowerCase();
+              if (offeredStatus == 'dropped') cancelledByLabel = 'buyer';
+              if (offeredStatus == 'rejected') cancelledByLabel = 'seller';
+            }
+          }
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -478,6 +588,10 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                           ),
                           const SizedBox(height: 6),
                           Text('Status: $status'),
+                          if (cancelledByLabel != null) ...[
+                            const SizedBox(height: 4),
+                            Text('Cancelled by: $cancelledByLabel'),
+                          ],
                         ],
                       ),
                     ),
@@ -517,6 +631,10 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                           ),
                           const SizedBox(height: 6),
                           Text('Status: $status'),
+                          if (cancelledByLabel != null) ...[
+                            const SizedBox(height: 4),
+                            Text('Cancelled by: $cancelledByLabel'),
+                          ],
                         ],
                       ),
                     ),
@@ -535,9 +653,9 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
             if (isTrade) ...[
               _TradeItemsCard(
                 leftTitle: 'Item you will receive',
-                leftItem: item,
+                leftItem: viewerIsBuyer ? item : tradedItem,
                 rightTitle: 'Item you will give',
-                rightItem: tradedItem,
+                rightItem: viewerIsBuyer ? tradedItem : item,
               ),
               const SizedBox(height: 12),
             ],
@@ -558,9 +676,9 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Seller',
-                    style: TextStyle(fontWeight: FontWeight.w900),
+                  Text(
+                    viewerIsBuyer ? 'Seller' : 'Buyer',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 6),
                   GestureDetector(
@@ -568,12 +686,17 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => ProfileScreen(viewingUserId: tx.sellerId),
+                          builder: (_) => ProfileScreen(
+                            viewingUserId:
+                                viewerIsBuyer ? tx.sellerId : tx.buyerId,
+                          ),
                         ),
                       );
                     },
                     child: Text(
-                      widget.seller?.username ?? tx.sellerId,
+                      viewerIsBuyer
+                          ? (widget.seller?.username ?? tx.sellerId)
+                          : (buyerUser?.username ?? tx.buyerId),
                       style: const TextStyle(
                         color: Color(0xFF7C3AED),
                         fontWeight: FontWeight.w700,
@@ -654,31 +777,39 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            if (canDoReceivedAction)
-              if (isTrade) ...[
-                FilledButton(
-                  onPressed: () => _showMyTradeQr(context: context, tx: tx),
-                  child: const Text('Generate QR Code'),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton(
-                  onPressed: () => _scanTradeQrAndConfirm(context: context, tx: tx),
-                  child: const Text('Scan QR'),
-                ),
-              ] else
-                FilledButton(
-                  onPressed: () => _confirmReceived(context: context, tx: tx),
-                  child: const Text('Received'),
-                )
-            else if (isTrade && viewerIsParticipant && status == 'confirmed') ...[
+            if (isTrade && viewerIsParticipant && status == 'confirmed') ...[
               FilledButton(
-                onPressed: null,
+                onPressed: viewerAlreadyReceivedMyItem
+                    ? null
+                    : () => _showMyTradeQr(context: context, tx: tx),
                 child: const Text('Generate QR Code'),
               ),
               const SizedBox(height: 10),
               OutlinedButton(
-                onPressed: null,
+                onPressed: viewerAlreadyReceivedOtherPartyItem
+                    ? null
+                    : () => _scanTradeQrAndConfirm(context: context, tx: tx),
                 child: const Text('Scan QR'),
+              ),
+            ] else if (!isTrade && isMeetupPurchase && canDoPurchaseReceivedAction) ...[
+              // Purchase meetup QR flow:
+              // - seller: generate QR
+              // - buyer: scan QR (one-way, since there is only one item)
+              if (viewerIsBuyer) ...[
+                FilledButton(
+                  onPressed: () => _scanTradeQrAndConfirm(context: context, tx: tx),
+                  child: const Text('Scan QR'),
+                ),
+              ] else ...[
+                FilledButton(
+                  onPressed: () => _showMyTradeQr(context: context, tx: tx),
+                  child: const Text('Generate QR Code'),
+                ),
+              ],
+            ] else if (!isTrade && canDoPurchaseReceivedAction && !isMeetupPurchase) ...[
+              FilledButton(
+                onPressed: () => _confirmReceived(context: context, tx: tx),
+                child: const Text('Received'),
               ),
             ],
             if (showCancel) ...[
@@ -705,11 +836,13 @@ class _TxDetailData {
   final Transaction tx;
   final ItemListing? item;
   final ItemListing? tradedItem;
+  final AppUser? buyerUser;
 
   const _TxDetailData({
     required this.tx,
     required this.item,
     required this.tradedItem,
+    required this.buyerUser,
   });
 }
 
