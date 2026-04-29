@@ -48,23 +48,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   bool _isLoadingFollow = false;
   final ChatService _chatService = ChatService();
 
-  ImageProvider? _resolveAvatarImage(String? imagePath) {
-    if (imagePath == null) return null;
-    final trimmed = imagePath.trim();
-    if (trimmed.isEmpty) return null;
-    if (trimmed.startsWith('http')) {
-      return NetworkImage(trimmed);
-    }
-    if (trimmed.startsWith('assets/')) {
-      return AssetImage(trimmed);
-    }
-    return FileImage(File(trimmed));
-  }
-
   @override
   void initState() {
     super.initState();
     _item = widget.item;
+
+    // logged in
     if (widget.loginUser != null) {
       loginUser = widget.loginUser;
       _isFavourite = _item.isFavorite;
@@ -73,43 +62,19 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     _fetchOwner();
     _fetchReplies();
     _fetchFavouriteCount();
-    _checkIfFavourite();
-  }
-
-  void _showFollowError(String message) {
-    if (!mounted) return;
-    AppSnackBars.error(context, message);
   }
 
   Future<void> _loadFollowState() async {
-    if (loginUser!.id == widget.item.ownerId) {
+    if (loginUser!.id == _item.ownerId) {
       return;
     }
     final following = await FollowService.isFollowing(
       loginUser!.id,
-      widget.item.ownerId,
+      _item.ownerId,
     );
 
     if (!mounted) return;
     setState(() => _isFollowing = following);
-  }
-
-  Future<void> _checkIfFavourite() async {
-    if (widget.loginUser == null) return;
-    try {
-      final isFav = await FavouriteRepository().isFavourited(
-        widget.loginUser!.id,
-        widget.item.id,
-      );
-      if (mounted) {
-        setState(() {
-          _isFavourite = isFav;
-          widget.item.isFavorite = isFav;
-        });
-      }
-    } catch (e) {
-      log('Check favourite error: $e');
-    }
   }
 
   Future<void> _fetchOwner() async {
@@ -178,7 +143,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       );
       return;
     }
-    if (loginUser!.id == widget.item.ownerId) {
+    if (loginUser!.id == _item.ownerId) {
       if (!mounted) {
         return;
       }
@@ -188,17 +153,17 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       );
       return;
     }
-    if (widget.item.price == null) {
+    if (_item.price == null) {
       if (!mounted) return;
       AppSnackBars.warning(context, 'This listing has no purchase price.');
       return;
     }
 
-    final meetups = MeetupAddressOption.fromSellerItem(widget.item);
+    final meetups = MeetupAddressOption.fromSellerItem(_item);
     final sellerName = _owner!.username.trim().isEmpty
         ? 'Seller'
         : _owner!.username;
-    final sellerId = widget.item.ownerId;
+    final sellerId = _item.ownerId;
     if (sellerId == null || sellerId.isEmpty) {
       if (!mounted) return;
       AppSnackBars.error(context, 'Seller account id not found.');
@@ -210,7 +175,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       MaterialPageRoute(
         builder: (_) => CheckoutScreen(
           flowKind: CheckoutFlowKind.purchase,
-          primaryItem: widget.item,
+          primaryItem: _item,
           sellerDisplayName: sellerName,
           sellerId: sellerId,
           buyerId: loginUser!.id,
@@ -225,6 +190,19 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       }
       Navigator.pop(context, true);
     }
+  }
+
+  ImageProvider? _resolveAvatarImage(String? imagePath) {
+    if (imagePath == null) return null;
+    final trimmed = imagePath.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.startsWith('http')) {
+      return NetworkImage(trimmed);
+    }
+    if (trimmed.startsWith('assets/')) {
+      return AssetImage(trimmed);
+    }
+    return FileImage(File(trimmed));
   }
 
   Widget _buildImage(
@@ -338,7 +316,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     );
 
     if (confirm == true) {
-      await ItemsRepository().dropListing(widget.item.id);
+      await ItemsRepository().dropListing(_item.id);
 
       for (var r in _replies) {
         if (r.status == 'pending') {
@@ -613,9 +591,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                 child: SizedBox(
                                   width: 56,
                                   height: 56,
-                                  child: widget.item.imageUrls.isNotEmpty
+                                  child: _item.imageUrls.isNotEmpty
                                       ? _buildImage(
-                                          widget.item.imageUrls.first,
+                                          _item.imageUrls.first,
                                           width: 56,
                                           height: 56,
                                           fit: BoxFit.cover,
@@ -635,7 +613,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      widget.item.name,
+                                      _item.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -656,7 +634,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      widget.item.listingType.toUpperCase(),
+                                      _item.listingType.toUpperCase(),
                                       style: const TextStyle(
                                         fontSize: 11,
                                         color: Color(0xFF9060FF),
@@ -747,8 +725,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     try {
       final chat = await _chatService.createOrGetItemChat(
-        otherUserId: widget.item.ownerId,
-        itemId: widget.item.id,
+        otherUserId: _item.ownerId,
+        itemId: _item.id,
       );
       await _chatService.sendMessage(chatId: chat.id, content: message);
       await NotificationService.instance.sendSystemNotification(
@@ -790,7 +768,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
     final item = _item;
     final loginUser = widget.loginUser;
     final owner = _owner;
-    final fallbackOwnerName = (widget.item.ownerUsername ?? '').trim();
+    final fallbackOwnerName = (_item.ownerUsername ?? '').trim();
     final ownerName = (owner?.username ?? fallbackOwnerName).trim().isEmpty
         ? 'Item owner'
         : (owner?.username ?? fallbackOwnerName).trim();
@@ -850,7 +828,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         }
 
                         if (loginUser.id == targetUserId) {
-                          _showFollowError('You cannot follow yourself.');
+                          if (!mounted) return;
+                          AppSnackBars.error(context, 'You cannot follow yourself.');
                           return;
                         }
 
@@ -884,10 +863,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           }
                         } catch (e) {
                           print('Follow error: $e');
+                          if (!mounted) return;
+
                           if (mounted)
-                            _showFollowError(
-                              'Could not update follow status right now. Please try again.',
-                            );
+                            AppSnackBars.error(context, 'Could not update follow status right now. Please try again.');
                         } finally {
                           if (mounted) setState(() => _isLoadingFollow = false);
                         }
