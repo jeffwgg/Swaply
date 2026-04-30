@@ -6,6 +6,7 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/constants/app_config.dart';
+import 'supabase_service.dart';
 
 class StripePaymentResult {
   final bool success;
@@ -23,6 +24,34 @@ class StripePaymentResult {
 /// shows a small in-app simulator suitable for coursework demos.
 class StripePaymentService {
   StripePaymentService();
+
+  Map<String, String> _supabaseEdgeHeaders() {
+    // Supabase Edge Functions typically require either:
+    // - Authorization: Bearer <user access token>, or
+    // - Authorization: Bearer <anon key> (when verify_jwt is enabled but no user session)
+    // plus apikey: <anon key>
+    //
+    // If the project was deployed with --no-verify-jwt, these headers are harmless.
+    final anon = AppConfig.supabaseAnonKey.trim();
+    final sessionToken = (() {
+      try {
+        return SupabaseService.client.auth.currentSession?.accessToken;
+      } catch (_) {
+        return null;
+      }
+    })();
+
+    final auth = (sessionToken != null && sessionToken.trim().isNotEmpty)
+        ? sessionToken.trim()
+        : (anon.isNotEmpty ? anon : null);
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (anon.isNotEmpty) 'apikey': anon,
+      if (auth != null) 'Authorization': 'Bearer $auth',
+    };
+    return headers;
+  }
 
   static Future<void> ensureStripeConfigured() async {
     if (!AppConfig.hasStripePublishableKey) {
@@ -113,6 +142,7 @@ class StripePaymentService {
                 'payment_intent_id': paymentIntentId,
               },
             ),
+            headers: _supabaseEdgeHeaders(),
           );
           if (response.statusCode < 200 || response.statusCode >= 300) {
             continue;
@@ -163,17 +193,24 @@ class StripePaymentService {
     final uri = Uri.parse(AppConfig.stripePaymentIntentUrl.trim());
     final response = await http.post(
       uri,
-      headers: const {'Content-Type': 'application/json'},
+      headers: _supabaseEdgeHeaders(),
       body: jsonEncode({
         'amount': amountMinorUnits,
         'currency': currencyCode.toLowerCase(),
       }),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      debugPrint(
+        '[StripePaymentService] create-payment-intent failed '
+        'status=${response.statusCode} body=${response.body}',
+      );
       return null;
     }
     final map = jsonDecode(response.body);
     if (map is! Map<String, dynamic>) {
+      debugPrint(
+        '[StripePaymentService] create-payment-intent invalid json body=${response.body}',
+      );
       return null;
     }
     final secret = map['clientSecret'] ?? map['client_secret'];
