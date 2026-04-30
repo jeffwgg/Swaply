@@ -11,7 +11,7 @@ import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../services/item_service.dart';
 import '../../../services/network_service.dart';
-import '../item/item_detail_screen.dart';
+import 'item_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
   final AppUser? user;
@@ -504,6 +504,10 @@ class _NestedTabBarState extends State<NestedTabBar>
                     child: GridView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 16.0),
                       physics: const AlwaysScrollableScrollPhysics(),
+                      controller: ScrollController()
+                        ..addListener(() {
+                          FocusScope.of(context).unfocus();
+                        }),
                       itemCount: items.length,
                       gridDelegate:
                       const SliverGridDelegateWithFixedCrossAxisCount(

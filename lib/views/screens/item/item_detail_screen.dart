@@ -694,53 +694,76 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
   ImageProvider? _resolveAvatarImage(String? imagePath) {
     if (imagePath == null) return null;
+
     final trimmed = imagePath.trim();
     if (trimmed.isEmpty) return null;
-    if (trimmed.startsWith('http')) {
-      return NetworkImage(trimmed);
+
+    final file = File(trimmed);
+
+    // ✅ 1. Prefer local file
+    if (file.existsSync()) {
+      return FileImage(file);
     }
+
+    // ✅ 2. Asset fallback
     if (trimmed.startsWith('assets/')) {
       return AssetImage(trimmed);
     }
-    return FileImage(File(trimmed));
+
+    // ⚠️ 3. Network fallback (only if no local copy)
+    if (trimmed.startsWith('http')) {
+      return NetworkImage(trimmed);
+    }
+
+    return null;
   }
 
   Widget _buildImage(
-    String url, {
-    double? width,
-    double? height,
-    BoxFit fit = BoxFit.cover,
-  }) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    if (url.startsWith('assets/')) {
-      return Image.asset(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.file(
-      File(url),
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
-    );
-  }
+      String path, {
+        double? width,
+        double? height,
+        BoxFit fit = BoxFit.cover,
+      }) {
+    final file = File(path);
 
+    // ✅ 1. Always try local file FIRST
+    if (file.existsSync()) {
+      return Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    // ✅ 2. Asset fallback
+    if (path.startsWith('assets/')) {
+      return Image.asset(
+        path,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    // ⚠️ 3. Network fallback (only if not cached yet)
+    if (path.startsWith('http')) {
+      return Image.network(
+        path,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    return const Icon(Icons.broken_image, size: 50);
+  }
   @override
   Widget build(BuildContext context) {
     final item = _item;
@@ -778,10 +801,11 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   ),
                   const SizedBox(width: 8),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 0, 16, 0),
+                    padding: const EdgeInsets.fromLTRB(0, 0, 10, 0),
                     child: Text(
-                      owner != null ? owner.username : 'Loading...',
+                      item.ownerUsername ?? (owner != null ? owner.username : 'Loading...'),
                       overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 20)
                     ),
                   ),
                 ],
@@ -856,8 +880,8 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                       },
                 style: TextButton.styleFrom(
                   backgroundColor: _isFollowing
-                      ? const Color(0xFF5B21B6)
-                      : Colors.transparent,
+                      ? Colors.transparent
+                      : const Color(0xFF5B21B6),
                   side: BorderSide(
                     color: const Color(0xFF5B21B6),
                     width: _isFollowing ? 0 : 1.5,
@@ -876,10 +900,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                   _isFollowing ? 'Following' : 'Follow',
                   style: TextStyle(
                     color: _isFollowing
-                        ? Colors.white
-                        : const Color(0xFF5B21B6),
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                        ? const Color(0xFF5B21B6)
+                        : Colors.white,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -888,10 +911,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
         actions: [
           if (item.repliedTo == null)
             IconButton(
-              icon: const Icon(Icons.chat, color: Color(0xFF5B21B6)),
+              icon: const Icon(Icons.chat, color: Color(0xFF5B21B6), size: 22,),
               onPressed: _composeAndStartItemConversation,
               tooltip: 'Start Conversation',
-              padding: EdgeInsets.symmetric(horizontal: 5),
             ),
         ],
       ),

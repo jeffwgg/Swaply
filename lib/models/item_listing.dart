@@ -7,6 +7,7 @@ class ItemListing {
   final double? price;
   final String listingType;
   final String ownerId;
+  String? ownerUsername;
   final String status;
   final String category;
   final List<String> imageUrls;
@@ -25,6 +26,7 @@ class ItemListing {
     required this.price,
     required this.listingType,
     required this.ownerId,
+    this.ownerUsername,
     required this.status,
     required this.category,
     required this.imageUrls,
@@ -51,6 +53,12 @@ class ItemListing {
         fieldName: 'items.listing_type',
       ),
       ownerId: parseString(map['owner_id'], fieldName: 'items.owner_id'),
+      ownerUsername: parseNullableString(
+        (map['users'] is Map<String, dynamic>)
+            ? (map['users'] as Map<String, dynamic>)['username']
+            : null,
+        fieldName: 'users.username',
+      ),
       status: parseString(map['status'], fieldName: 'items.status'),
       category: parseString(map['category'], fieldName: 'items.category'),
       imageUrls: List<String>.from(map['image_urls'] ?? []),

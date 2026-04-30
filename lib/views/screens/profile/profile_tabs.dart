@@ -31,7 +31,11 @@ class ProfileTabs extends StatefulWidget {
   final String userId;
   final bool isOwnProfile;
 
-  const ProfileTabs({super.key, required this.userId,this.isOwnProfile = false,});
+  const ProfileTabs({
+    super.key,
+    required this.userId,
+    this.isOwnProfile = false,
+  });
 
   @override
   State<ProfileTabs> createState() => _ProfileTabsState();
@@ -83,9 +87,7 @@ class _ProfileTabsState extends State<ProfileTabs> {
               indicatorColor: Color(0xFF5B21B6),
               indicatorSize: TabBarIndicatorSize.tab,
               indicatorWeight: 3,
-              tabs: [
-                Tab(text: "Listing"),
-              ],
+              tabs: [Tab(text: "Listing")],
             ),
             Expanded(
               child: TabBarView(
@@ -208,7 +210,9 @@ class _TransactionTabState extends State<TransactionTab> {
                       ownerId: c.tx.sellerId,
                       status: c.itemStatus ?? 'unknown',
                       category: c.itemCategory ?? '',
-                      imageUrls: c.itemImageUrl == null ? [] : [c.itemImageUrl!],
+                      imageUrls: c.itemImageUrl == null
+                          ? []
+                          : [c.itemImageUrl!],
                       preference: null,
                       repliedTo: null,
                       createdAt: c.tx.createdAt,
@@ -216,7 +220,8 @@ class _TransactionTabState extends State<TransactionTab> {
                       latitude: null,
                       longitude: null,
                     ),
-              tradedItem: c.tradedItemImageUrl == null && c.tx.tradedItemId == null
+              tradedItem:
+                  c.tradedItemImageUrl == null && c.tx.tradedItemId == null
                   ? null
                   : ItemListing(
                       id: c.tx.tradedItemId ?? 0,
@@ -245,7 +250,10 @@ class _TransactionTabState extends State<TransactionTab> {
                       username: c.sellerUsername!,
                       email: '',
                       profileImage: null,
-                      createdAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+                      createdAt: DateTime.fromMillisecondsSinceEpoch(
+                        0,
+                        isUtc: true,
+                      ),
                     ),
             ),
           )
@@ -276,12 +284,14 @@ class _TransactionTabState extends State<TransactionTab> {
         tx: tx,
         sellerUsername: seller?.username,
         itemName: item?.name,
-        itemImageUrl:
-            (item != null && item.imageUrls.isNotEmpty) ? item.imageUrls.first : null,
+        itemImageUrl: (item != null && item.imageUrls.isNotEmpty)
+            ? item.imageUrls.first
+            : null,
         itemCategory: item?.category,
         itemStatus: item?.status,
         tradedItemName: tradedItem?.name,
-        tradedItemImageUrl: (tradedItem != null && tradedItem.imageUrls.isNotEmpty)
+        tradedItemImageUrl:
+            (tradedItem != null && tradedItem.imageUrls.isNotEmpty)
             ? tradedItem.imageUrls.first
             : null,
         tradedItemCategory: tradedItem?.category,
@@ -318,7 +328,10 @@ class _TransactionTabState extends State<TransactionTab> {
 
         final rows = snapshot.data ?? [];
         if (rows.isEmpty) {
-          return _buildEmptyState(Icons.receipt_long_outlined, "No transactions yet");
+          return _buildEmptyState(
+            Icons.receipt_long_outlined,
+            "No transactions yet",
+          );
         }
 
         return SafeArea(
@@ -330,411 +343,458 @@ class _TransactionTabState extends State<TransactionTab> {
               itemCount: rows.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
-            final row = rows[i];
-            final tx = row.tx;
-            final item = row.item;
-            final title = item?.name ?? 'Item #${tx.itemId}';
-            final sellerName = row.seller?.username ?? 'Seller';
-            final isBuyer = tx.buyerId == widget.user.id;
+                final row = rows[i];
+                final tx = row.tx;
+                final item = row.item;
+                final title = item?.name ?? 'Item #${tx.itemId}';
+                final sellerName = row.seller?.username ?? 'Seller';
+                final isBuyer = tx.buyerId == widget.user.id;
 
-            final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
-            final amountLabel = amount > 0 ? 'RM ${amount.toStringAsFixed(2)}' : 'RM 0.00';
+                final amount = tx.totalAmount ?? tx.itemPrice ?? 0;
+                final amountLabel = amount > 0
+                    ? 'RM ${amount.toStringAsFixed(2)}'
+                    : 'RM 0.00';
 
-            final status = tx.transactionStatus ?? 'unknown';
-            final dateLabel = DateFormat('MMM d, yyyy • hh:mm a').format(tx.createdAt.toLocal());
-            final isTrade = tx.tradedItemId != null;
-            final isMeetupPurchase =
-                !isTrade && (tx.fulfillmentMethod ?? '').toLowerCase() == 'meetup';
+                final status = tx.transactionStatus ?? 'unknown';
+                final dateLabel = DateFormat(
+                  'MMM d, yyyy • hh:mm a',
+                ).format(tx.createdAt.toLocal());
+                final isTrade = tx.tradedItemId != null;
+                final isMeetupPurchase =
+                    !isTrade &&
+                    (tx.fulfillmentMethod ?? '').toLowerCase() == 'meetup';
 
-            Future<void> onScanMeetupPurchaseQr() async {
-              final raw = await Navigator.of(context).push<String>(
-                MaterialPageRoute(
-                  builder: (_) => const QrScanScreen(title: 'Scan meet-up QR'),
-                ),
-              );
-              if (!context.mounted || raw == null || raw.trim().isEmpty) return;
+                Future<void> onScanMeetupPurchaseQr() async {
+                  final raw = await Navigator.of(context).push<String>(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const QrScanScreen(title: 'Scan meet-up QR'),
+                    ),
+                  );
+                  if (!context.mounted || raw == null || raw.trim().isEmpty)
+                    return;
 
-              final parsed = TradeQrPayload.tryParse(raw.trim());
-              if (parsed == null) {
-                AppSnackBars.error(context, 'Invalid QR code.');
-                return;
-              }
+                  final parsed = TradeQrPayload.tryParse(raw.trim());
+                  if (parsed == null) {
+                    AppSnackBars.error(context, 'Invalid QR code.');
+                    return;
+                  }
 
-              // Purchase meetup: only buyer scans seller QR.
-              if (parsed.transactionId != tx.transactionId ||
-                  parsed.role != 'seller' ||
-                  parsed.uid != tx.sellerId) {
-                AppSnackBars.error(context, 'This QR does not match the seller.');
-                return;
-              }
+                  // Purchase meetup: only buyer scans seller QR.
+                  if (parsed.transactionId != tx.transactionId ||
+                      parsed.role != 'seller' ||
+                      parsed.uid != tx.sellerId) {
+                    AppSnackBars.error(
+                      context,
+                      'This QR does not match the seller.',
+                    );
+                    return;
+                  }
 
-              try {
-                await ItemsRepository().updateStatus('completed', tx.itemId);
-                await TransactionsRepository().updateStatus(
-                  transactionId: tx.transactionId,
-                  transactionStatus: 'completed',
-                );
-                AppSnackBars.success(context, 'Marked as received.');
-                await _reload();
-              } catch (e) {
-                AppSnackBars.error(context, 'Failed to mark received: $e');
-              }
-            }
+                  try {
+                    await ItemsRepository().updateStatus(
+                      'completed',
+                      tx.itemId,
+                    );
+                    await TransactionsRepository().updateStatus(
+                      transactionId: tx.transactionId,
+                      transactionStatus: 'completed',
+                    );
+                    AppSnackBars.success(context, 'Marked as received.');
+                    await _reload();
+                  } catch (e) {
+                    AppSnackBars.error(context, 'Failed to mark received: $e');
+                  }
+                }
 
-            Future<void> onGenerateMeetupPurchaseQr() async {
-              final payload = TradeQrPayload(
-                transactionId: tx.transactionId,
-                role: 'seller',
-                uid: widget.user.id,
-              );
-              final raw = jsonEncode(payload.toJson());
+                Future<void> onGenerateMeetupPurchaseQr() async {
+                  final payload = TradeQrPayload(
+                    transactionId: tx.transactionId,
+                    role: 'seller',
+                    uid: widget.user.id,
+                  );
+                  final raw = jsonEncode(payload.toJson());
 
-              await showModalBottomSheet<void>(
-                context: context,
-                isScrollControlled: true,
-                showDragHandle: true,
-                backgroundColor: Colors.white,
-                builder: (ctx) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Your meet-up QR',
-                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xFFE9D5FF)),
-                            color: const Color(0xFFF8F5FF),
-                          ),
-                          child: QrImageView(
-                            data: raw,
-                            size: 240,
-                            backgroundColor: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Let the buyer scan this QR.',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
+                  await showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    showDragHandle: true,
+                    backgroundColor: Colors.white,
+                    builder: (ctx) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text('Close'),
+                            const Text(
+                              'Your meet-up QR',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16,
                               ),
                             ),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: const Color(0xFFE9D5FF),
+                                ),
+                                color: const Color(0xFFF8F5FF),
+                              ),
+                              child: QrImageView(
+                                data: raw,
+                                size: 240,
+                                backgroundColor: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Let the buyer scan this QR.',
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text('Close'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
+                        ),
+                      );
+                    },
+                  );
+                }
+
+                Future<void> onReceived() async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Confirm received'),
+                      content: const Text(
+                        'Confirm you have received the product? This will complete the transaction.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Back'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Confirm'),
                         ),
                       ],
                     ),
                   );
-                },
-              );
-            }
-
-            Future<void> onReceived() async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Confirm received'),
-                  content: const Text(
-                    'Confirm you have received the product? This will complete the transaction.',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Back'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Confirm'),
-                    ),
-                  ],
-                ),
-              );
-              if (ok != true) return;
-              try {
-                await ItemsRepository().updateStatus('completed', tx.itemId);
-                await TransactionsRepository().updateStatus(
-                  transactionId: tx.transactionId,
-                  transactionStatus: 'completed',
-                );
-                if (!context.mounted) return;
-                AppSnackBars.success(context, 'Marked as received.');
-                _reload();
-              } catch (e) {
-                if (!context.mounted) return;
-                AppSnackBars.error(context, 'Failed to mark received: $e');
-              }
-            }
-
-            Future<void> onProceed() async {
-              try {
-                final latestPrimary =
-                    item ?? await ItemsRepository().getById(tx.itemId);
-                if (latestPrimary == null) {
-                  throw StateError('Item not found.');
+                  if (ok != true) return;
+                  try {
+                    await ItemsRepository().updateStatus(
+                      'completed',
+                      tx.itemId,
+                    );
+                    await TransactionsRepository().updateStatus(
+                      transactionId: tx.transactionId,
+                      transactionStatus: 'completed',
+                    );
+                    if (!context.mounted) return;
+                    AppSnackBars.success(context, 'Marked as received.');
+                    _reload();
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    AppSnackBars.error(context, 'Failed to mark received: $e');
+                  }
                 }
-                final latestOffered = row.tradedItem ??
-                    (tx.tradedItemId == null
-                        ? null
-                        : await ItemsRepository().getById(tx.tradedItemId!));
-                if (latestOffered == null) {
-                  throw StateError('Offered item not found.');
-                }
-                final seller =
-                    row.seller ?? await UsersRepository().getById(tx.sellerId);
-                final meetups = MeetupAddressOption.fromTradeItems(
-                  sellerItem: latestPrimary,
-                  offeredItem: latestOffered,
-                );
 
-                if (!context.mounted) return;
-                await Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CheckoutScreen(
-                      flowKind: CheckoutFlowKind.swap,
-                      primaryItem: latestPrimary,
-                      swapItem: latestOffered,
-                      sellerDisplayName: seller?.username ?? 'Seller',
-                      sellerId: tx.sellerId,
-                      buyerId: tx.buyerId,
-                      sellerMeetupOptions: meetups,
-                      // trade: meet-up only, no payment
-                      tradeTransactionId: tx.transactionId,
-                      meetUpOnly: true,
-                      hidePaymentSection: true,
-                    ),
-                  ),
-                );
-                if (!context.mounted) return;
-                await _reload();
-              } catch (e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Proceed failed: $e')),
-                );
-              }
-            }
+                Future<void> onProceed() async {
+                  try {
+                    final latestPrimary =
+                        item ?? await ItemsRepository().getById(tx.itemId);
+                    if (latestPrimary == null) {
+                      throw StateError('Item not found.');
+                    }
+                    final latestOffered =
+                        row.tradedItem ??
+                        (tx.tradedItemId == null
+                            ? null
+                            : await ItemsRepository().getById(
+                                tx.tradedItemId!,
+                              ));
+                    if (latestOffered == null) {
+                      throw StateError('Offered item not found.');
+                    }
+                    final seller =
+                        row.seller ??
+                        await UsersRepository().getById(tx.sellerId);
+                    final meetups = MeetupAddressOption.fromTradeItems(
+                      sellerItem: latestPrimary,
+                      offeredItem: latestOffered,
+                    );
 
-            Future<void> onCancel() async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Cancel transaction'),
-                  content: const Text('Cancel this transaction?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Back'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Cancel transaction'),
-                    ),
-                  ],
-                ),
-              );
-              if (ok != true) return;
-              try {
-                await ItemsRepository().updateStatus('available', tx.itemId);
-                if (tx.tradedItemId != null) {
-                  // Offerer (buyer) cancel => drop offered item.
-                  // Seller cancel => make offered item available again.
-                  await ItemsRepository().updateStatus(
-                    isBuyer ? 'dropped' : 'rejected',
-                    tx.tradedItemId!,
-                  );
-                }
-                await TransactionsRepository().updateStatus(
-                  transactionId: tx.transactionId,
-                  transactionStatus: 'cancelled',
-                  cancelledBy: isBuyer ? 'buyer' : 'seller',
-                );
-                // Only attempt refund when there is a payment record (non-trade purchase).
-                // And only the buyer should trigger the refund (RLS usually restricts this).
-                if (!isTrade && row.payment != null && isBuyer) {
-                  await PaymentsRepository().updateStatusForTransaction(
-                    transactionId: tx.transactionId,
-                    paymentStatus: 'refunded',
-                  );
-                }
-                if (!context.mounted) return;
-                AppSnackBars.info(
-                  context,
-                  (!isTrade && row.payment != null && isBuyer)
-                      ? 'Cancelled. Refund will be issued in 3 working days.'
-                      : 'Cancelled.',
-                );
-                await _reload();
-              } catch (e) {
-                debugPrint('[TransactionTab onCancel] Failed for tx=${tx.transactionId}: $e');
-                if (!context.mounted) return;
-                AppSnackBars.error(context, 'Failed to cancel: $e');
-              }
-            }
-
-            return Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE9D5FF)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () async {
-                  await Navigator.push<void>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => TransactionDetailScreen(
-                        viewer: widget.user,
-                        tx: tx,
-                        item: item,
-                        tradedItem: row.tradedItem,
-                        seller: row.seller,
-                        payment: row.payment,
-                        isBuyer: isBuyer,
-                        onChanged: _triggerReload,
-                      ),
-                    ),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: _TxnThumb(url: item?.imageUrls.isNotEmpty == true ? item!.imageUrls.first : null),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.w900),
-                                ),
-                                const SizedBox(height: 6),
-                                GestureDetector(
-                                  onTap: () {
-                                    if (row.seller == null) return;
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ProfileScreen(
-                                          viewingUserId: row.seller!.id,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    sellerName,
-                                    style: const TextStyle(
-                                      color: Color(0xFF7C3AED),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(dateLabel, style: const TextStyle(color: Colors.grey)),
-                              ],
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                amountLabel,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFF5B21B6),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              _StatusBadge(status: status, mini: true),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      if (status == 'pending')
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: onCancel,
-                                child: const Text('Cancel'),
-                              ),
-                            ),
-                            if (!isBuyer && !isTrade && isMeetupPurchase) ...[
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: onGenerateMeetupPurchaseQr,
-                                  child: const Text('Generate QR Code'),
-                                ),
-                              ),
-                            ],
-                            if (isBuyer && !isTrade && isMeetupPurchase) ...[
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: onScanMeetupPurchaseQr,
-                                  child: const Text('Scan QR'),
-                                ),
-                              ),
-                            ],
-                            if (isBuyer && !isTrade && !isMeetupPurchase) ...[
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: onReceived,
-                                  child: const Text('Received'),
-                                ),
-                              ),
-                            ],
-                            if (isBuyer && isTrade) ...[
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: onProceed,
-                                  child: const Text('Proceed'),
-                                ),
-                              ),
-                            ],
-                          ],
+                    if (!context.mounted) return;
+                    await Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CheckoutScreen(
+                          flowKind: CheckoutFlowKind.swap,
+                          primaryItem: latestPrimary,
+                          swapItem: latestOffered,
+                          sellerDisplayName: seller?.username ?? 'Seller',
+                          sellerId: tx.sellerId,
+                          buyerId: tx.buyerId,
+                          sellerMeetupOptions: meetups,
+                          // trade: meet-up only, no payment
+                          tradeTransactionId: tx.transactionId,
+                          meetUpOnly: true,
+                          hidePaymentSection: true,
                         ),
+                      ),
+                    );
+                    if (!context.mounted) return;
+                    await _reload();
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Proceed failed: $e')),
+                    );
+                  }
+                }
+
+                Future<void> onCancel() async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Cancel transaction'),
+                      content: const Text('Cancel this transaction?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Back'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Cancel transaction'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok != true) return;
+                  try {
+                    await ItemsRepository().updateStatus(
+                      'available',
+                      tx.itemId,
+                    );
+                    if (tx.tradedItemId != null) {
+                      // Offerer (buyer) cancel => drop offered item.
+                      // Seller cancel => make offered item available again.
+                      await ItemsRepository().updateStatus(
+                        isBuyer ? 'dropped' : 'rejected',
+                        tx.tradedItemId!,
+                      );
+                    }
+                    await TransactionsRepository().updateStatus(
+                      transactionId: tx.transactionId,
+                      transactionStatus: 'cancelled',
+                      cancelledBy: isBuyer ? 'buyer' : 'seller',
+                    );
+                    // Only attempt refund when there is a payment record (non-trade purchase).
+                    // And only the buyer should trigger the refund (RLS usually restricts this).
+                    if (!isTrade && row.payment != null && isBuyer) {
+                      await PaymentsRepository().updateStatusForTransaction(
+                        transactionId: tx.transactionId,
+                        paymentStatus: 'refunded',
+                      );
+                    }
+                    if (!context.mounted) return;
+                    AppSnackBars.info(
+                      context,
+                      (!isTrade && row.payment != null && isBuyer)
+                          ? 'Cancelled. Refund will be issued in 3 working days.'
+                          : 'Cancelled.',
+                    );
+                    await _reload();
+                  } catch (e) {
+                    debugPrint(
+                      '[TransactionTab onCancel] Failed for tx=${tx.transactionId}: $e',
+                    );
+                    if (!context.mounted) return;
+                    AppSnackBars.error(context, 'Failed to cancel: $e');
+                  }
+                }
+
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE9D5FF)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
                     ],
                   ),
-                ),
-              ),
-            );
-          },
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () async {
+                      await Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => TransactionDetailScreen(
+                            viewer: widget.user,
+                            tx: tx,
+                            item: item,
+                            tradedItem: row.tradedItem,
+                            seller: row.seller,
+                            payment: row.payment,
+                            isBuyer: isBuyer,
+                            onChanged: _triggerReload,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: _TxnThumb(
+                                  url: item?.imageUrls.isNotEmpty == true
+                                      ? item!.imageUrls.first
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    GestureDetector(
+                                      onTap: () {
+                                        if (row.seller == null) return;
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => ProfileScreen(
+                                              viewingUserId: row.seller!.id,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      child: Text(
+                                        sellerName,
+                                        style: const TextStyle(
+                                          color: Color(0xFF7C3AED),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      dateLabel,
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    amountLabel,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF5B21B6),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _StatusBadge(status: status, mini: true),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (status == 'pending')
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: onCancel,
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                if (!isBuyer &&
+                                    !isTrade &&
+                                    isMeetupPurchase) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton(
+                                      onPressed: onGenerateMeetupPurchaseQr,
+                                      child: const Text('Generate QR Code'),
+                                    ),
+                                  ),
+                                ],
+                                if (isBuyer &&
+                                    !isTrade &&
+                                    isMeetupPurchase) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton(
+                                      onPressed: onScanMeetupPurchaseQr,
+                                      child: const Text('Scan QR'),
+                                    ),
+                                  ),
+                                ],
+                                if (isBuyer &&
+                                    !isTrade &&
+                                    !isMeetupPurchase) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton(
+                                      onPressed: onReceived,
+                                      child: const Text('Received'),
+                                    ),
+                                  ),
+                                ],
+                                if (isBuyer && isTrade) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton(
+                                      onPressed: onProceed,
+                                      child: const Text('Proceed'),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         );
@@ -806,7 +866,6 @@ class _TxnThumb extends StatelessWidget {
   }
 }
 
-
 class FavouriteTab extends StatefulWidget {
   final AppUser user;
   const FavouriteTab({super.key, required this.user});
@@ -815,7 +874,7 @@ class FavouriteTab extends StatefulWidget {
   State<FavouriteTab> createState() => _FavouriteTabState();
 }
 
-class  _FavouriteTabState extends State<FavouriteTab>{
+class _FavouriteTabState extends State<FavouriteTab> {
   static const _cacheKey = 'favourite';
   final LocalProfileItemsRepository _cacheRepo = LocalProfileItemsRepository();
   late Future<List<ItemListing>> _futureItems;
@@ -826,10 +885,8 @@ class  _FavouriteTabState extends State<FavouriteTab>{
     _futureItems = _loadCachedItems();
     _refreshRemoteItems();
 
-    _streamSub = FavouriteRepository()
-        .watchFavouriteIds(widget.user.id)
-        .listen(
-          (_) {
+    _streamSub = FavouriteRepository().watchFavouriteIds(widget.user.id).listen(
+      (_) {
         print('🔥 Favourite stream triggered!');
         _refreshRemoteItems();
       },
@@ -842,13 +899,20 @@ class  _FavouriteTabState extends State<FavouriteTab>{
     _streamSub?.cancel();
     super.dispose();
   }
+
   Future<List<ItemListing>> _loadCachedItems() async {
     return _cacheRepo.listItems(userId: widget.user.id, tabKey: _cacheKey);
   }
 
   Future<void> _refreshRemoteItems() async {
     try {
-      final remoteItems = await ItemsRepository().getFavouriteItems(widget.user.id);
+      final remoteItems = await ItemsRepository().getFavouriteItems(
+        widget.user.id,
+      );
+      for (var r in remoteItems) {
+        final user = await UsersRepository().getById(r.ownerId);
+        r.ownerUsername = user?.username;
+      }
       await _cacheRepo.replaceItems(
         userId: widget.user.id,
         tabKey: _cacheKey,
@@ -866,7 +930,9 @@ class  _FavouriteTabState extends State<FavouriteTab>{
   void _showNetworkError() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Network error. Please check your connection.')),
+      const SnackBar(
+        content: Text('Network error. Please check your connection.'),
+      ),
     );
   }
 
@@ -903,7 +969,8 @@ class  _FavouriteTabState extends State<FavouriteTab>{
                 }
                 navigator.push(
                   MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(loginUser: widget.user, item: item),
+                    builder: (_) =>
+                        ItemDetailsScreen(loginUser: widget.user, item: item),
                   ),
                 );
               },
@@ -984,7 +1051,12 @@ class ItemTab extends StatefulWidget {
   final AppUser profileUser;
   final bool isOwnProfile;
 
-  const ItemTab({super.key, required this.loginUser, required this.profileUser, this.isOwnProfile = false,});
+  const ItemTab({
+    super.key,
+    required this.loginUser,
+    required this.profileUser,
+    this.isOwnProfile = false,
+  });
 
   @override
   State<ItemTab> createState() => _ItemTabState();
@@ -1003,12 +1075,20 @@ class _ItemTabState extends State<ItemTab> {
   }
 
   Future<List<ItemListing>> _loadCachedItems() async {
-    return _cacheRepo.listItems(userId: widget.profileUser.id, tabKey: _cacheKey);
+    return _cacheRepo.listItems(
+      userId: widget.profileUser.id,
+      tabKey: _cacheKey,
+    );
   }
 
   Future<void> _refreshRemoteItems() async {
     try {
-      final remoteItems = await ItemsRepository().getUserItems(widget.profileUser.id);
+      final remoteItems = await ItemsRepository().getUserItems(
+        widget.profileUser.id,
+      );
+      for (var r in remoteItems) {
+        r.ownerUsername = widget.profileUser.username;
+      }
       await _cacheRepo.replaceItems(
         userId: widget.profileUser.id,
         tabKey: _cacheKey,
@@ -1026,7 +1106,9 @@ class _ItemTabState extends State<ItemTab> {
   void _showNetworkError() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Network error. Please check your connection.')),
+      const SnackBar(
+        content: Text('Network error. Please check your connection.'),
+      ),
     );
   }
 
@@ -1058,22 +1140,25 @@ class _ItemTabState extends State<ItemTab> {
                 if (navigator == null) {
                   return;
                 }
-                navigator.push(
-                  MaterialPageRoute(
-                    builder: (_) => ItemDetailsScreen(
-                      loginUser: widget.loginUser, //widget.user = profile user ！= login user
-                      item: item,
-                    ),
-                  ),
-                ).then((result) {
-                  if (!mounted) return;
-                  if (result == true) {
-                    setState(() {
-                      _futureItems = _loadCachedItems();
+                navigator
+                    .push(
+                      MaterialPageRoute(
+                        builder: (_) => ItemDetailsScreen(
+                          loginUser: widget
+                              .loginUser, //widget.user = profile user ！= login user
+                          item: item,
+                        ),
+                      ),
+                    )
+                    .then((result) {
+                      if (!mounted) return;
+                      if (result == true) {
+                        setState(() {
+                          _futureItems = _loadCachedItems();
+                        });
+                      }
+                      _refreshRemoteItems();
                     });
-                  }
-                  _refreshRemoteItems();
-                });
               },
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),

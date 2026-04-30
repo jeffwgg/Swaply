@@ -210,7 +210,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  void _loadItemIfEditing() {
+  Future<void> _loadItemIfEditing() async {
 
     _nameCtrl.text = item!.name;
     _descCtrl.text = item!.description;
@@ -226,7 +226,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       selectedAddress = item!.address;
     }
 
-    _existingImageUrls = List.from(item!.imageUrls);
+    final cachedImages = await Future.wait(
+      item!.imageUrls.map((url) async {
+        if (url.startsWith('http')) {
+          return await ItemService.cacheImage(url);
+        }
+        return url;
+      }),
+    );
+
+    _existingImageUrls = cachedImages;
+
     _selectedCategory = item!.category;
 
     _enableSelling = item!.listingType == 'sell' || item!.listingType == 'both';
@@ -1382,28 +1392,35 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Widget _buildPreviewImage(
-    String url, {
-    double? width,
-    double? height,
-    BoxFit fit = BoxFit.cover,
-  }) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
+      String path, {
+        double? width,
+        double? height,
+        BoxFit fit = BoxFit.cover,
+      }) {
+    final file = File(path);
+    if (file.existsSync()) {
+      return Image.file(
+        file,
         width: width,
         height: height,
         fit: fit,
-        errorBuilder: (context, error, stackTrace) =>
-            const Icon(Icons.broken_image, size: 50),
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
       );
     }
-    return Image.file(
-      File(url),
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 50),
-    );
+
+    // fallback (rare)
+    if (path.startsWith('http')) {
+      return Image.network(
+        path,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    return const Icon(Icons.broken_image, size: 50);
   }
 }

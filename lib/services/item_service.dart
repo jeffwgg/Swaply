@@ -1,3 +1,8 @@
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
 import '../models/item_draft.dart';
 import '../models/item_listing.dart';
 import '../repositories/favourite_repository.dart';
@@ -93,4 +98,34 @@ class ItemService {
     return await _remoteFav.toggleFavourite(userId, itemId);
   }
 
+  static Future<String> cacheImage(String url) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = '${url.hashCode}.jpg';
+      final filePath = '${dir.path}/cached_images/$fileName';
+
+      final file = File(filePath);
+
+      // ✅ If already cached → reuse
+      if (await file.exists()) {
+        return filePath;
+      }
+
+      // Ensure directory exists
+      await Directory('${dir.path}/cached_images')
+          .create(recursive: true);
+
+      // Download
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        await file.writeAsBytes(response.bodyBytes);
+        return filePath;
+      } else {
+        throw Exception('Failed to download image');
+      }
+    } catch (e) {
+      return url; // fallback to original URL if anything fails
+    }
+  }
 }
