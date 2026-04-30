@@ -211,7 +211,6 @@ class ProfileService {
     if (phoneTaken) return "PHONE_TAKEN";
 
     try {
-      // 💾 insert
       await _repo.insertUser({
         'id': userId,
         'email': email,

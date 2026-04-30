@@ -35,7 +35,7 @@ class ItemDetailsScreen extends StatefulWidget {
 }
 
 class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
-  late final AppUser? loginUser;
+  AppUser? loginUser;
 
   // main item
   late ItemListing _item;
@@ -58,10 +58,10 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   void initState() {
     super.initState();
     _item = widget.item;
-
+    loginUser = widget.loginUser;
     // logged in
     if (widget.loginUser != null) {
-      loginUser = widget.loginUser;
+
       _isFavourite = _item.isFavorite;
       _loadFollowState();
     }

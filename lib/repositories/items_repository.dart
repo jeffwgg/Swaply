@@ -230,17 +230,15 @@ class ItemsRepository {
           .filter('replied_to', 'is', null);
 
       if (userId != null) {
-        // Condition 1: 不显示自己的物品
+
         queryBuilder = queryBuilder.neq('owner_id', userId);
 
-        // Condition 2: 不显示已经点赞过的物品
         final favIds = await FavouriteRepository().getUserFavouriteItemIds(userId);
         if (favIds.isNotEmpty) {
           queryBuilder = queryBuilder.not('id', 'in', favIds.toList());
         }
       }
 
-      // 3. 执行查询并限制数量
       final response = await queryBuilder
           .order('created_at', ascending: false)
           .limit(20);

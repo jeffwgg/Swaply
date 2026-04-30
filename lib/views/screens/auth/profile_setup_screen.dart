@@ -1,8 +1,7 @@
-// ignore_for_file: unused_element
-
 import 'package:flutter/material.dart';
 import '/services/supabase_service.dart';
 import '../main_shell.dart';
+import 'dart:io';
 import '../../../services/profile_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -24,6 +23,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   DateTime? selectedDate;
   bool isSaving = false;
 
+  File? _profileImage;
   @override
   void dispose() {
     usernameController.dispose();
@@ -34,7 +34,65 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     super.dispose();
   }
 
-  // 📅 选择日期
+  void _showImagePickerBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Choose Profile Picture',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.purple),
+                title: const Text('Take a Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickProfileImage(isCamera: true);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.purple),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickProfileImage(isCamera: false);
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // 🖼️ 获取图片
+  Future<void> _pickProfileImage({required bool isCamera}) async {
+    try {
+      final File? imageFile = isCamera
+          ? await ProfileService.pickImageFromCamera()
+          : await ProfileService.pickImageFromGallery();
+
+      if (imageFile == null) return;
+
+      if (imageFile.lengthSync() > 2 * 1024 * 1024) {
+        _showError('Image must be less than 2MB');
+        return;
+      }
+
+      setState(() {
+        _profileImage = imageFile;
+      });
+    } catch (e) {
+      _showError('Error picking image: $e');
+    }
+  }
   void _pickDate(BuildContext context) async {
     DateTime? picked = await showDatePicker(
       context: context,
@@ -104,6 +162,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         return;
       }
 
+      if (_profileImage != null) {
+        await ProfileService.uploadProfilePicture(_profileImage!, user.id);
+      }
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -131,7 +193,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
   }
 
-  // ✅ 验证输入
   Future<void> _validateAndContinue() async {
     String fullName = fullNameController.text.trim();
     String username = usernameController.text.trim();
@@ -198,7 +259,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             children: [
               const SizedBox(height: 10),
 
-              // 🔙 Back
               Align(
                 alignment: Alignment.centerLeft,
                 child: GestureDetector(
@@ -223,17 +283,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
               const SizedBox(height: 30),
 
-              // 👤 PROFILE IMAGE
               GestureDetector(
-                onTap: () {
-                  // Step 2 (later)
-                },
+                onTap:_showImagePickerBottomSheet,
                 child: Stack(
                   children: [
                     CircleAvatar(
                       radius: 50,
                       backgroundColor: Colors.grey[300],
-                      child: const Icon(Icons.person, size: 50),
+                      backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
+                      child: _profileImage == null
+                          ? const Icon(Icons.person, size: 50, color: Colors.grey)
+                          : null,
                     ),
                     Positioned(
                       bottom: 0,
@@ -297,11 +357,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // 生日选择
                     _buildDatePicker(),
                     const SizedBox(height: 16),
 
-                    // 性别选择
                     _buildGenderPicker(),
                   ],
                 ),
@@ -352,7 +410,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
-  // 📅 STEP 3 — DATE PICKER
   Widget _buildAvatarSection() {
     return Stack(
       children: [
