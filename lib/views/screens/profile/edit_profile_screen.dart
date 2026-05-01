@@ -45,7 +45,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-  /// 📋 Load current user profile
   Future<void> _loadUserProfile() async {
   setState(() {
     isLoading = true;
@@ -63,8 +62,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (profile == null) {
       throw Exception("Profile not found");
     }
-
-    print("📝 Loading profile for User ID: ${user.id}");
 
     final metadata = user.userMetadata ?? <String, dynamic>{};
     final usernameChangedFlag =
@@ -92,7 +89,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       isLoading = false;
     });
   } catch (e) {
-    print("❌ Error loading profile: $e");
     if (mounted) {
       setState(() {
         loadError = "Error: $e";
@@ -112,7 +108,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     AppSnackBars.success(context, message);
   }
 
-  /// 📅 Pick date
   void _pickDate(BuildContext context) async {
     if (isBirthdateLocked) {
       _showError('Birthdate cannot be changed after initial setup.');
@@ -139,7 +134,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  /// ✅ Validate input before saving
   bool _validateInput() {
     String fullName = fullNameController.text.trim();
     String username = usernameController.text.trim();
@@ -155,7 +149,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    // ✅ NEW: Full name must not contain numbers
     if (!ProfileService.isValidFullName(fullName)) {
       _showError("Full name must contain only letters and spaces (no numbers)");
       return false;
@@ -171,7 +164,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    // ✅ UPDATED: Username max 10 characters (was 20)
     if (username.length > 10) {
       _showError("Username must be at most 10 characters");
       return false;
@@ -192,7 +184,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return false;
     }
 
-    // ✅ UPDATED: Phone validation 10-12 digits (was 11-12)
     if (!ProfileService.isValidPhoneNumber(phone)) {
       _showError("Phone number must be 10-12 digits and contain only numbers (e.g. 0123456789 or 012345678901)");
       return false;
@@ -224,7 +215,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       final currentUsername = usernameController.text.trim();
 
-      // ✅ Phone duplicate still here (you already moved to service)
       final currentPhone = phoneController.text.trim();
       if (originalPhone != null && currentPhone != originalPhone) {
         final isPhoneDuplicated = await ProfileService.isPhoneDuplicate(
@@ -248,7 +238,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      // 🔥 CALL SERVICE HERE
       final error = await ProfileService.updateProfile(
         userId: user.id,
         updates: updates,
@@ -268,12 +257,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       if (!mounted) return;
 
-      _showSuccess("✅ Profile updated successfully!");
+      _showSuccess("Profile updated successfully!");
 
       await Future.delayed(const Duration(milliseconds: 500));
 
       if (mounted) {
-        // ✅ Return true to indicate successful update
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -302,7 +290,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
     }
 
-    // ❌ Error state
     if (loadError != null) {
       return Scaffold(
         backgroundColor: const Color(0xFFF4F3F8),
@@ -330,7 +317,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
     }
 
-    // ✅ Form state
     return Scaffold(
       backgroundColor: const Color(0xFFF4F3F8),
       appBar: AppBar(
@@ -378,7 +364,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               const SizedBox(height: 20),
 
-              // 📧 Email (Read-only)
               _buildSectionTitle("Email Address"),
               _InputField(
                 controller: emailController,
@@ -393,7 +378,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               const SizedBox(height: 20),
 
-              // 📱 Phone
               _buildSectionTitle("Phone Number"),
               _InputField(
                 controller: phoneController,
@@ -447,7 +431,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
               const SizedBox(height: 20),
 
-              // 🧑‍🤝‍🧑 Gender
               _buildSectionTitle("Gender"),
               Row(
                 children: [
@@ -478,7 +461,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
               const SizedBox(height: 20),
 
-              // 💬 Bio
               _buildSectionTitle("Bio"),
               TextField(
                 controller: bioController,
@@ -495,7 +477,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               const SizedBox(height: 40),
 
-              // 💾 Save Button
               GestureDetector(
                 onTap: isSaving ? null : _saveProfile,
                 child: Container(
@@ -533,7 +514,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
               const SizedBox(height: 16),
 
-              // ✖️ Cancel Button
               GestureDetector(
                 onTap: isSaving ? null : () => Navigator.pop(context),
                 child: Container(

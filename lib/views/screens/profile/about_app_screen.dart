@@ -37,7 +37,6 @@ class AboutAppScreen extends StatelessWidget {
 
               const SizedBox(height: 24),
 
-              // App Name
               const Text(
                 "Swaply",
                 style: TextStyle(
@@ -154,7 +153,6 @@ class AboutAppScreen extends StatelessWidget {
 
               const SizedBox(height: 24),
 
-              // Development Team
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -195,7 +193,6 @@ class AboutAppScreen extends StatelessWidget {
 
               const SizedBox(height: 24),
 
-              // Links Section
               Column(
                 children: [
                   _buildLinkButton("🔐 Privacy Policy", () {}),
@@ -208,7 +205,6 @@ class AboutAppScreen extends StatelessWidget {
 
               const SizedBox(height: 24),
 
-              // Footer
               Text(
                 "Made with ❤️ for our community",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(

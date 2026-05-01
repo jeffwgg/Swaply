@@ -32,11 +32,8 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // Listen for auth state changes to handle navigation for specific events
     _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen((data) {
       if (data.event == AuthChangeEvent.passwordRecovery) {
-        print("🔄 Password recovery event detected - clearing navigation stack");
-        // Clear navigation stack to ensure ResetPasswordScreen (shown by AuthGate) is visible
         _navigatorKey.currentState?.popUntil((route) => route.isFirst);
       }
     });
@@ -82,33 +79,18 @@ class AuthGate extends StatelessWidget {
         final user = session?.user ?? SupabaseService.client.auth.currentUser;
         final event = snapshot.data?.event;
 
-        // ✅ Password Recovery Flow - Show ResetPasswordScreen
-        // Only show if user is not fully authenticated (no active session with proper auth level)
         if (event == AuthChangeEvent.passwordRecovery && session != null) {
-          print("🔑 Password recovery flow detected");
           return const ResetPasswordScreen();
         }
 
-        // ✅ If password was just reset, session might be updated - check if we should show home
-        if (event == AuthChangeEvent.userUpdated && user != null && user.emailConfirmedAt != null) {
-          print("✅ User was updated - likely password reset successful");
-          // Continue to normal flow below
-        }
-
-        // ✅ No user - Show MainShell (guest mode)
         if (user == null) {
-          print("👤 User is null - Guest mode");
           return const MainShell();
         }
 
-        // ✅ Email not verified - Show MainShell with unverified UI
         if (user.emailConfirmedAt == null) {
-          print("⏳ Email not confirmed yet for ${user.email}");
           return const MainShell();
         }
 
-        // ✅ Email verified - Check profile
-        print("✅ Email confirmed for ${user.email}. Checking profile...");
         return FutureBuilder(
           future: SupabaseService.client
               .from('users')
@@ -123,14 +105,12 @@ class AuthGate extends StatelessWidget {
             }
 
             if (profileSnapshot.hasError) {
-              print("❌ Profile query error: ${profileSnapshot.error}");
               return const MainShell();
             }
 
             final profile = profileSnapshot.data;
 
             if (profile == null) {
-              print("📝 No profile found for user. Showing ProfileSetupScreen.");
               return const ProfileSetupScreen();
             }
 

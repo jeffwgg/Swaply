@@ -7,7 +7,6 @@ class FavouriteRepository {
 
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  /// Add to favourites
   Future<void> addFavourite(String userId, int itemId) async {
     try {
       await _supabase.from('favourites').upsert({

@@ -76,7 +76,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     return true;
   }
 
-  /// 🔒 Update password using Supabase
   Future<void> _updatePassword() async {
     if (!_validateInputs()) return;
 
@@ -89,9 +88,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       final currentPassword = currentPasswordController.text.trim();
       final newPassword = newPasswordController.text.trim();
 
-      print("🔐 Updating password for user: ${user.email}");
-
-      // Update password using Supabase auth
       await SupabaseService.client.auth.signInWithPassword(
         email: user.email!,
         password: currentPassword,
@@ -104,7 +100,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       );
       if (!mounted) return;
 
-      _showSuccess("✅ Password updated successfully!");
+      _showSuccess("Password updated successfully!");
 
       currentPasswordController.clear();
       newPasswordController.clear();
@@ -115,7 +111,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         Navigator.pop(context);
       }
     } catch (e) {
-      print("❌ PASSWORD UPDATE ERROR: $e");
       String errorMsg = "Error: ${e.toString()}";
 
       if (e.toString().contains("Invalid login credentials")) {
@@ -174,7 +169,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
               const SizedBox(height: 32),
 
-              // 🔒 Current Password
               _buildSectionTitle("Current Password"),
               _PasswordField(
                 controller: currentPasswordController,
@@ -187,7 +181,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
               const SizedBox(height: 24),
 
-              // 🔐 New Password
               _buildSectionTitle("New Password"),
               _PasswordField(
                 controller: newPasswordController,
@@ -200,7 +193,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
               const SizedBox(height: 24),
 
-              // ✔️ Confirm Password
               _buildSectionTitle("Confirm New Password"),
               _PasswordField(
                 controller: confirmPasswordController,

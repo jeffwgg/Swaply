@@ -57,11 +57,9 @@ class _FollowersScreenState extends State<FollowersScreen> {
               createdAt: createdAt,
             );
 
-            // Only add if ID is not empty
             if (user.id.isNotEmpty) {
               users.add(user);
 
-              // Check if current user is following this person
               final currentUser = SupabaseService.client.auth.currentUser;
               if (currentUser != null) {
                 final isFollowing = await FollowService.isFollowing(currentUser.id, user.id);

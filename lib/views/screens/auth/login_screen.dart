@@ -55,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 20),
 
-              // 🖼 Image (placeholder)
+              //Image
               SvgPicture.asset(
                 'assets/Swaplylogin.svg',
                 height: 250,
@@ -64,7 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 24),
 
-              // 👋 Title
+              // Title
               Center(
                 child: Column(
                   children: const [
@@ -84,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 24),
 
-              // 📧 EMAIL
+              // EMAIL
               const Text("Email"),
               const SizedBox(height: 6),
 
