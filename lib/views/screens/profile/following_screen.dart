@@ -57,11 +57,9 @@ class _FollowingScreenState extends State<FollowingScreen> {
               createdAt: createdAt,
             );
 
-            // Only add if ID is not empty
             if (user.id.isNotEmpty) {
               users.add(user);
 
-              // Check if current user is following this person
               final currentUser = SupabaseService.client.auth.currentUser;
               if (currentUser != null) {
                 final isFollowing = await FollowService.isFollowing(currentUser.id, user.id);
@@ -100,7 +98,6 @@ class _FollowingScreenState extends State<FollowingScreen> {
         setState(() => _followingState[user.id] = true);
       }
     } catch (e) {
-      print('Error toggling follow: $e');
       if (mounted) {
         AppSnackBars.error(context, 'Error: ${e.toString()}');
       }

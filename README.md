@@ -1,47 +1,80 @@
 # Swaply
 
-Hybrid marketplace Flutter app with Supabase backend.
+A Flutter marketplace app for listing items, discovering products, chatting with other users, and completing swap or purchase transactions.
 
-## Supabase Setup
+## Features
 
-1. Create a Supabase project.
-2. Open Supabase SQL Editor and run [`docs/supabase_schema.sql`](docs/supabase_schema.sql).
-3. Update Supabase credentials in [lib/core/constants/app_config.dart](lib/core/constants/app_config.dart) with your Project URL and anon key.
-4. Run the app:
+### User Management Module
+- Authentication (Login, Sign Up, Forgot Password)
+- Profile management with camera capture
+- Home screen with swipe card interface
+
+### Item & Post Management Module
+- Item CRUD with camera capture
+- Item drafts and search history
+- Favorite items and your listings (Supabase & SQLite)
+- OpenStreetMap integration with current location detection
+- Location search using Nominatim
+
+### Messaging & Chat Module
+- Real-time messaging with chat history
+- RAG-based AI chatbot assistant
+
+### Inbox & Notification Module
+- Push notifications and inbox
+
+### Payment & Transaction Module
+- Stripe payment integration
+- Transaction history
+- QR code functionality
+
+### Configuration Module
+- Help Center
+- About App
+
+## Tech Stack
+
+- **Flutter** - Cross-platform mobile app
+- **Supabase** - Backend, authentication, and database
+- **Stripe** - Payment processing
+- **Google Maps** - Location features
+
+## Getting Started
+
+### Prerequisites
+
+- Flutter SDK (Dart `^3.10.7`)
+- Android Studio or Xcode
+
+### Installation
+
+1. Install dependencies:
+
+```bash
+flutter pub get
+```
+
+2. Configure Supabase in `lib/core/constants/app_config.dart`:
+
+```dart
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+```
+
+3. Run the app:
 
 ```bash
 flutter run
 ```
 
-Important:
-- The anon key is safe to commit (it's public by design).
-- Security is enforced through Row Level Security (RLS) policies in your database.
-- Never put `service_role` key in Flutter/mobile code.
+### Optional: Stripe Configuration
 
-## Schema via CLI
-
-Migration file is prepared at:
-- `supabase/migrations/20260324131912_init_schema.sql`
-- Full command guideline: [`docs/supabase-cli-guide.md`](docs/supabase-cli-guide.md)
-
-Run this to apply with Supabase CLI:
+For payment testing, pass Stripe keys when running:
 
 ```bash
-# one-time
-supabase login
-
-# from project root
-cd /Users/jeffwg/Documents/Project/Swaply
-
-# one-time (if not linked yet)
-supabase link --project-ref YOUR_PROJECT_REF
-
-# push all local migrations to remote database
-supabase db push
+flutter run \
+  --dart-define=STRIPE_PUBLISHABLE_KEY=pk_test_... \
+  --dart-define=STRIPE_PAYMENT_INTENT_URL=https://YOUR_HOST/create-payment-intent
 ```
 
-## Notes
-
-- Supabase initialization happens in [main.dart](lib/main.dart).
-- Supabase client access is centralized in [lib/services/supabase_service.dart](lib/services/supabase_service.dart).
-- Starter repositories are available in `lib/repositories` and map directly to your schema tables.
+Without Stripe configuration, the app uses a demo payment simulator.

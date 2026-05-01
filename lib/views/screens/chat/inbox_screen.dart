@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as path_util;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +32,7 @@ import '../../../models/meetup_address_option.dart';
 import '../../../views/screens/transaction/checkout_screen.dart';
 import '../../../views/screens/notifications/notifications_screen.dart';
 import '../../../views/screens/item/item_detail_screen.dart';
+import '../../../views/screens/profile/profile_screen.dart';
 import '../transaction/map_location_picker.dart';
 import '../transaction/transaction_detail_screen.dart';
 import '../../../viewmodels/chat/inbox_viewmodel.dart';
@@ -581,6 +583,21 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         const SnackBar(content: Text('Unable to open item details.')),
       );
     }
+  }
+
+  Future<void> _openConversationProfile(_Conversation conversation) async {
+    final currentUserId = _currentUserId;
+    final chatThread = conversation.chatThread;
+    if (currentUserId == null || chatThread == null) {
+      return;
+    }
+
+    final viewingUserId = chatThread.otherUserId(currentUserId);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(viewingUserId: viewingUserId),
+      ),
+    );
   }
 
   Future<void> _refreshUnreadNotificationCount() async {
@@ -2723,6 +2740,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                                   _showConversationActions(selected),
                               onOpenItemDetails: () =>
                                   _openConversationItemDetails(selected),
+                              onOpenUserProfile: selected.chatThread == null
+                                  ? null
+                                  : () => _openConversationProfile(selected),
                               jumpToMessageId: _pendingJumpMessageId,
                               onJumpToMessageHandled: () {
                                 if (!mounted || _pendingJumpMessageId == null) {
@@ -2781,6 +2801,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                       _showConversationActions(selected),
                   onOpenItemDetails: () =>
                       _openConversationItemDetails(selected),
+                  onOpenUserProfile: selected.chatThread == null
+                      ? null
+                      : () => _openConversationProfile(selected),
                   jumpToMessageId: _pendingJumpMessageId,
                   onJumpToMessageHandled: () {
                     if (!mounted || _pendingJumpMessageId == null) {
@@ -3244,6 +3267,7 @@ class _ChatPanel extends StatefulWidget {
   final bool isConversationPinned;
   final VoidCallback onOpenConversationMenu;
   final VoidCallback onOpenItemDetails;
+  final VoidCallback? onOpenUserProfile;
   final int? jumpToMessageId;
   final VoidCallback onJumpToMessageHandled;
 
@@ -3272,6 +3296,7 @@ class _ChatPanel extends StatefulWidget {
     required this.isConversationPinned,
     required this.onOpenConversationMenu,
     required this.onOpenItemDetails,
+    required this.onOpenUserProfile,
     required this.jumpToMessageId,
     required this.onJumpToMessageHandled,
   });
@@ -3652,40 +3677,58 @@ class _ChatPanelState extends State<_ChatPanel> {
                   ),
                   const SizedBox(width: 6),
                 ],
-                _AvatarBubble(
-                  name: widget.conversation.name,
-                  imageUrl: widget.conversation.avatarUrl,
-                  colors: widget.conversation.avatarColors,
-                  size: 54,
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.conversation.name,
-                        style: const TextStyle(
-                          color: Color(0xFF1A2340),
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
+                  child: InkWell(
+                    onTap: widget.onOpenUserProfile,
+                    borderRadius: BorderRadius.circular(18),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
                       ),
-                      const SizedBox(height: 2),
-                      if (widget.conversation.item != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Item: ${widget.conversation.item!.title}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF66509D),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                      child: Row(
+                        children: [
+                          _AvatarBubble(
+                            name: widget.conversation.name,
+                            imageUrl: widget.conversation.avatarUrl,
+                            colors: widget.conversation.avatarColors,
+                            size: 54,
                           ),
-                        ),
-                      ],
-                    ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.conversation.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xFF1A2340),
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                if (widget.conversation.item != null) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Item: ${widget.conversation.item!.title}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF66509D),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 if (widget.conversation.item != null)
@@ -4212,8 +4255,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Future<void> _openDocumentAttachment(_MessageMedia media) async {
     final name = _resolveDocumentFileName(media);
 
-    Future<bool> openUri(Uri uri) async {
-      return launchUrl(uri, mode: LaunchMode.externalApplication);
+    Future<bool> openLocalFile(String path) async {
+      final result = await OpenFilex.open(path);
+      return result.type == ResultType.done;
     }
 
     try {
@@ -4224,7 +4268,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
             cachedPath,
           );
           if (cached != null) {
-            final opened = await openUri(Uri.file(cached.path));
+            final opened = await openLocalFile(cached.path);
             if (!opened && mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Unable to open cached file.')),
@@ -4260,9 +4304,12 @@ class _MessageBubbleState extends State<_MessageBubble> {
         );
       }
 
-      final opened = await openUri(Uri.file(downloadedPath));
+      final opened = await openLocalFile(downloadedPath);
       if (!opened) {
-        await openUri(Uri.parse(media.url));
+        await launchUrl(
+          Uri.parse(media.url),
+          mode: LaunchMode.externalApplication,
+        );
       }
 
       if (mounted) {

@@ -53,7 +53,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final online = await _isOnline();
     if (!online) {
-      print('📴 Offline - skipping follow streams');
       _refreshStats();
       return;
     }
@@ -135,20 +134,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
 
     final user = SupabaseService.client.auth.currentUser;
-    print("🔥 NEW PROFILE SCREEN RUNNING");
-  
     if (user == null) {
       return _buildGuestView(context);
     }
-
     if (user.emailConfirmedAt == null) {
       return _buildUnverifiedEmailView(context, user);
     }
-
     return _buildFullProfileView(context);
   }
 
-  // --- 1. (Guest View) ---
   Widget _buildGuestView(BuildContext context) {
     return Scaffold(
       body: Center(
@@ -209,7 +203,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- 1.5. (Unverified Email View) ---
   Widget _buildUnverifiedEmailView(BuildContext context, User user) {
     return Scaffold(
       body: Center(
@@ -280,7 +273,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- 2. Verified User View (Full Profile) ---
   Widget _buildFullProfileView(BuildContext context) {
     final user = SupabaseService.client.auth.currentUser;
     final profileUserId = widget.viewingUserId ?? user!.id;
@@ -408,7 +400,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 8),
 
-                      // 👤 PROFILE SECTION
                       Column(
                         children: [
                           Stack(
@@ -499,7 +490,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 20),
 
-                      // 📊 STATISTICS ROW (Following, Followers, Saved Items)
                       FutureBuilder<Map<String, int>>(
                         future: _statsFuture,
                         builder: (context, statsSnapshot) {
@@ -578,7 +568,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 16),
 
-                      // ➕ FOLLOW/UNFOLLOW BUTTON (if viewing another user's profile)
                       if (!isOwnProfile)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -750,7 +739,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final url = await ProfileService.uploadProfilePicture(imageFile, user.id);
-      print('IMAGE URL: $url');
       if (url != null && mounted) {
         AppSnackBars.success(context, 'Profile picture updated!');
         setState(() {});
@@ -758,7 +746,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         AppSnackBars.error(context, 'Failed to upload profile picture');
       }
     } catch (e) {
-      print('Error uploading profile picture: $e');
       if (mounted) {
         AppSnackBars.error(context, 'Error uploading profile picture');
       }
@@ -788,7 +775,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
     } catch (e) {
-      print('Error toggling follow: $e');
       if (mounted) {
         AppSnackBars.error(context, 'Error updating follow status');
       }

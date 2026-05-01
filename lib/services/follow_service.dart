@@ -5,7 +5,6 @@ import '../services/supabase_service.dart';
 class FollowService {
   static final _repo = FollowRepository();
 
-  /// Follow a user
   static Future<bool> followUser(String followerId, String followeeId) async {
     if (followerId == followeeId) {
       return false;
@@ -45,7 +44,6 @@ class FollowService {
         data: {'action': 'open_profile', 'user_id': followerId},
       );
     } catch (_) {
-      // Do not fail follow action if notification insertion fails.
     }
 
     return result;
@@ -55,9 +53,9 @@ class FollowService {
   static Future<bool> unfollowUser(String followerId, String followeeId) async {
     final result = await _repo.unfollow(followerId, followeeId);
     if (result) {
-      print("✅ Unfollowed successfully");
+      print("Unfollowed successfully");
     } else {
-      print("⚠️ Unfollow failed");
+      print("Unfollow failed");
     }
     return result;
   }
