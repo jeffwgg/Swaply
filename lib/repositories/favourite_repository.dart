@@ -7,7 +7,6 @@ class FavouriteRepository {
 
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  /// Add to favourites
   Future<void> addFavourite(String userId, int itemId) async {
     try {
       await _supabase.from('favourites').upsert({
@@ -19,7 +18,6 @@ class FavouriteRepository {
     }
   }
 
-  /// Remove from favourites
   Future<void> removeFavourite(String userId, int itemId) async {
     try {
       await _supabase
@@ -29,6 +27,27 @@ class FavouriteRepository {
           .eq('item_id', itemId);
     } catch (e) {
       throw Exception('Failed to remove favourite: $e');
+    }
+  }
+
+  Future<bool> toggleFavourite(String userId, int itemId) async {
+    try {
+      final existing = await _supabase
+          .from('favourites')
+          .select()
+          .eq('user_id', userId)
+          .eq('item_id', itemId)
+          .maybeSingle();
+
+      if (existing != null) {
+        await removeFavourite(userId, itemId);
+        return false;
+      } else {
+        await addFavourite(userId, itemId);
+        return true;
+      }
+    } catch (e) {
+      throw Exception('Failed to toggle favourite: $e');
     }
   }
 
@@ -45,16 +64,6 @@ class FavouriteRepository {
     } catch (e) {
       throw Exception('Failed to check favourite: $e');
     }
-  }
-
-  Future<int> getUserFavouriteCount(String userId) async {
-    final response = await _supabase
-        .from('favourites')
-        .select('item_id')
-        .eq('user_id', userId)
-        .count(CountOption.exact);
-
-    return response.count;
   }
 
   Future<Set<int>> getUserFavouriteItemIds(String userId) async {
@@ -77,27 +86,6 @@ class FavouriteRepository {
       return response.count;
     } catch (e) {
       throw Exception('Failed to get favourite count: $e');
-    }
-  }
-
-  Future<bool> toggleFavourite(String userId, int itemId) async {
-    try {
-      final existing = await _supabase
-          .from('favourites')
-          .select()
-          .eq('user_id', userId)
-          .eq('item_id', itemId)
-          .maybeSingle();
-
-      if (existing != null) {
-        await removeFavourite(userId, itemId);
-        return false;
-      } else {
-        await addFavourite(userId, itemId);
-        return true;
-      }
-    } catch (e) {
-      throw Exception('Failed to toggle favourite: $e');
     }
   }
 
@@ -130,9 +118,4 @@ class FavouriteRepository {
         .stream(primaryKey: ['id'])
         .eq('user_id', userId);
   }
-}
-
-// Added debugPrint helper
-void debugPrint(String message) {
-  print(message);
 }

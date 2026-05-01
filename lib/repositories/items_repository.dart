@@ -110,7 +110,6 @@ class ItemsRepository {
           .map<ItemListing>(ItemListing.fromMap)
           .toList();
 
-      // Step 5: Handle favorites
       if (userId != null) {
         final favIds = await FavouriteRepository().getUserFavouriteItemIds(
           userId,
@@ -220,7 +219,6 @@ class ItemsRepository {
   }
 
   Future<List<ItemListing>> getSwipeList({String? userId}) async {
-    print('🔥 [DEBUG] getSwipeList 运行, currentUserId: $userId');
     try {
 
       var queryBuilder = SupabaseService.client

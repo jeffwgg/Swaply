@@ -48,15 +48,6 @@ class LocalDraftRepository {
     await prefs.remove(_storageKey);
   }
 
-  Future<void> markAsPendingUpload() async {
-    final draft = await getDraft();
-    if (draft == null) {
-      return;
-    }
-    draft.isPendingSubmit = true;
-    await upsertDraft(draft);
-  }
-
   Future<List<String>> _sanitizeImageUrls(List<String> imageUrls) async {
     final tempDir = await getTemporaryDirectory();
     final appDir = await getApplicationDocumentsDirectory();

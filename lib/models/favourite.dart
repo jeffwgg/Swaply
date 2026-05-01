@@ -11,7 +11,6 @@ class Favourite {
     this.createdAt,
   });
 
-  // Convert JSON → Object
   factory Favourite.fromJson(Map<String, dynamic> json) {
     return Favourite(
       id: json['id'],
@@ -23,7 +22,6 @@ class Favourite {
     );
   }
 
-  // Convert Object → JSON
   Map<String, dynamic> toJson() {
     return {
       'id': id,

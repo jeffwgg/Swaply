@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -16,7 +15,6 @@ import 'package:swaply/repositories/payments_repository.dart';
 import 'package:swaply/repositories/transactions_repository.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/repositories/local/local_profile_items_repository.dart';
-import 'package:swaply/services/network_service.dart';
 import 'package:swaply/models/checkout_flow_kind.dart';
 import 'package:swaply/models/meetup_address_option.dart';
 import 'package:swaply/views/screens/item/item_detail_screen.dart';
@@ -25,7 +23,7 @@ import 'package:swaply/views/screens/transaction/transaction_detail_screen.dart'
 import 'package:swaply/views/screens/transaction/checkout_screen.dart';
 import 'package:swaply/views/screens/transaction/qr_scan_screen.dart';
 import 'package:swaply/services/supabase_service.dart';
-import 'package:swaply/repositories/favourite_repository.dart' hide debugPrint;
+import 'package:swaply/repositories/favourite_repository.dart';
 
 class ProfileTabs extends StatefulWidget {
   final String userId;
@@ -61,7 +59,7 @@ class _ProfileTabsState extends State<ProfileTabs> {
     if (mounted) {
       setState(() {
         this.user = user;
-        this.currentUser = cu;
+        currentUser = cu;
       });
     }
   }
@@ -95,7 +93,7 @@ class _ProfileTabsState extends State<ProfileTabs> {
                   ItemTab(
                     loginUser: currentUser!,
                     profileUser: user!,
-                    isOwnProfile: widget.isOwnProfile, // ← 加这行
+                    isOwnProfile: widget.isOwnProfile,
                   ),
                 ],
               ),
@@ -260,7 +258,6 @@ class _TransactionTabState extends State<TransactionTab> {
           .toList();
     }
 
-    // Deduplicate by transactionId (in case policies allow seeing both views).
     final byId = <int, Transaction>{};
     for (final t in all) {
       byId[t.transactionId] = t;
@@ -371,8 +368,9 @@ class _TransactionTabState extends State<TransactionTab> {
                           const QrScanScreen(title: 'Scan meet-up QR'),
                     ),
                   );
-                  if (!context.mounted || raw == null || raw.trim().isEmpty)
+                  if (!context.mounted || raw == null || raw.trim().isEmpty){
                     return;
+                  }
 
                   final parsed = TradeQrPayload.tryParse(raw.trim());
                   if (parsed == null) {
@@ -880,6 +878,7 @@ class _FavouriteTabState extends State<FavouriteTab> {
   late Future<List<ItemListing>> _futureItems;
   StreamSubscription? _streamSub;
 
+  @override
   void initState() {
     super.initState();
     _futureItems = _loadCachedItems();
@@ -925,15 +924,6 @@ class _FavouriteTabState extends State<FavouriteTab> {
     } catch (_) {
       // Keep cached list when refresh fails.
     }
-  }
-
-  void _showNetworkError() {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Network error. Please check your connection.'),
-      ),
-    );
   }
 
   @override
@@ -1103,15 +1093,6 @@ class _ItemTabState extends State<ItemTab> {
     }
   }
 
-  void _showNetworkError() {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Network error. Please check your connection.'),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ItemListing>>(
@@ -1145,7 +1126,7 @@ class _ItemTabState extends State<ItemTab> {
                       MaterialPageRoute(
                         builder: (_) => ItemDetailsScreen(
                           loginUser: widget
-                              .loginUser, //widget.user = profile user ！= login user
+                              .loginUser,
                           item: item,
                         ),
                       ),

@@ -700,17 +700,14 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     final file = File(trimmed);
 
-    // ✅ 1. Prefer local file
     if (file.existsSync()) {
       return FileImage(file);
     }
 
-    // ✅ 2. Asset fallback
     if (trimmed.startsWith('assets/')) {
       return AssetImage(trimmed);
     }
 
-    // ⚠️ 3. Network fallback (only if no local copy)
     if (trimmed.startsWith('http')) {
       return NetworkImage(trimmed);
     }
@@ -726,7 +723,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       }) {
     final file = File(path);
 
-    // ✅ 1. Always try local file FIRST
     if (file.existsSync()) {
       return Image.file(
         file,
@@ -738,7 +734,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       );
     }
 
-    // ✅ 2. Asset fallback
     if (path.startsWith('assets/')) {
       return Image.asset(
         path,
@@ -750,7 +745,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
       );
     }
 
-    // ⚠️ 3. Network fallback (only if not cached yet)
     if (path.startsWith('http')) {
       return Image.network(
         path,
@@ -764,6 +758,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
 
     return const Icon(Icons.broken_image, size: 50);
   }
+
   @override
   Widget build(BuildContext context) {
     final item = _item;
@@ -866,7 +861,6 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                                   );
                           }
                         } catch (e) {
-                          print('Follow error: $e');
                           if (!mounted) return;
 
                           if (mounted)
@@ -1639,7 +1633,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                     ),
                   ),
                 );
-              }).toList(),
+              }),
               const SizedBox(height: 14),
               if (item.status == 'available' || item.status == 'pending') ...[
                 if (isLogin && loginUser!.id == item.ownerId)

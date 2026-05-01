@@ -121,11 +121,55 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     if (!mounted) return;
 
-    // Only show draft dialog if not editing existing item
     if (draft != null && (!isReplyItem || repliedTo == draft.repliedTo)) {
       _showDraftDialog(draft);
     }
   }
+
+  // if edit
+
+  Future<void> _loadItemIfEditing() async {
+
+    _nameCtrl.text = item!.name;
+    _descCtrl.text = item!.description;
+    _priceCtrl.text = item!.price?.toStringAsFixed(0) ?? '';
+    _prefCtrl.text = item!.preference ?? '';
+    _addressCtrl.text = item!.address ?? '';
+
+    _latitude = item!.latitude;
+    _longitude = item!.longitude;
+
+    if (_latitude != null && _longitude != null) {
+      selectedLocation = LatLng(_latitude!, _longitude!);
+      selectedAddress = item!.address;
+    }
+
+    final cachedImages = await Future.wait(
+      item!.imageUrls.map((url) async {
+        if (url.startsWith('http')) {
+          return await ItemService.cacheImage(url);
+        }
+        return url;
+      }),
+    );
+
+    _existingImageUrls = cachedImages;
+
+    _selectedCategory = item!.category;
+
+    _enableSelling = item!.listingType == 'sell' || item!.listingType == 'both';
+    _enableTrading =
+        item!.listingType == 'trade' || item!.listingType == 'both';
+
+    if (isReplyItem) {
+      _enableSelling = false;
+      _enableTrading = false;
+    }
+
+    setState(() {});
+  }
+
+  // draft
 
   Future<void> _showDraftDialog(ItemDraft draft) async {
     String message = "You have an unsaved draft.";
@@ -191,8 +235,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       } else {
         if (File(imageRef).existsSync()) {
           _images.add(XFile(imageRef));
-        } else {
-          debugPrint("Skipped missing draft image: $imageRef");
         }
       }
     }
@@ -210,48 +252,92 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  Future<void> _loadItemIfEditing() async {
-
-    _nameCtrl.text = item!.name;
-    _descCtrl.text = item!.description;
-    _priceCtrl.text = item!.price?.toStringAsFixed(0) ?? '';
-    _prefCtrl.text = item!.preference ?? '';
-    _addressCtrl.text = item!.address ?? '';
-
-    _latitude = item!.latitude;
-    _longitude = item!.longitude;
-
-    if (_latitude != null && _longitude != null) {
-      selectedLocation = LatLng(_latitude!, _longitude!);
-      selectedAddress = item!.address;
+  void _onDraftChanged() {
+    if (_skipDraftAutosave) return;
+    if (_draftDebounce?.isActive ?? false) {
+      _draftDebounce!.cancel();
     }
 
-    final cachedImages = await Future.wait(
-      item!.imageUrls.map((url) async {
-        if (url.startsWith('http')) {
-          return await ItemService.cacheImage(url);
-        }
-        return url;
-      }),
+    _draftDebounce = Timer(const Duration(milliseconds: 800), () {
+      _saveDraft();
+    });
+  }
+
+  Future<void> _saveDraft() async {
+    if (_skipDraftAutosave) return;
+
+    final hasContent =
+        _nameCtrl.text.trim().isNotEmpty ||
+            _descCtrl.text.trim().isNotEmpty ||
+            _priceCtrl.text.trim().isNotEmpty ||
+            _prefCtrl.text.trim().isNotEmpty ||
+            _addressCtrl.text.trim().isNotEmpty ||
+            _selectedCategory != null ||
+            _existingImageUrls.isNotEmpty ||
+            _images.isNotEmpty ||
+            _latitude != null ||
+            _longitude != null;
+
+    if (!hasContent) {
+      await ItemService().clearDraft();
+      return;
+    }
+
+    final draft = ItemDraft(
+      id: 1,
+      name: _nameCtrl.text.trim(),
+      description: _descCtrl.text.trim(),
+      price: double.tryParse(_priceCtrl.text.trim()),
+      listingType: _enableSelling && _enableTrading
+          ? 'both'
+          : _enableSelling
+          ? 'sell'
+          : 'trade',
+      ownerId: user!.id,
+      category: _selectedCategory,
+      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
+      preference: _prefCtrl.text.trim(),
+      repliedTo: repliedTo,
+      address: _addressCtrl.text.trim(),
+      latitude: _latitude,
+      longitude: _longitude,
+      createdAt: DateTime.now(),
+      isPendingSubmit: false,
     );
 
-    _existingImageUrls = cachedImages;
+    await ItemService().saveDraft(draft);
+  }
 
-    _selectedCategory = item!.category;
+  Future<void> _savePendingSubmitDraft() async {
+    if (isReplyItem) return;
 
-    _enableSelling = item!.listingType == 'sell' || item!.listingType == 'both';
-    _enableTrading =
-        item!.listingType == 'trade' || item!.listingType == 'both';
+    final draft = ItemDraft(
+      id: 1,
+      name: _nameCtrl.text.trim(),
+      description: _descCtrl.text.trim(),
+      price: double.tryParse(_priceCtrl.text.trim()),
+      listingType: _enableSelling && _enableTrading
+          ? 'both'
+          : _enableSelling
+          ? 'sell'
+          : 'trade',
+      ownerId: user!.id,
+      category: _selectedCategory,
+      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
+      preference: _prefCtrl.text.trim(),
+      repliedTo: repliedTo,
+      address: _addressCtrl.text.trim(),
+      latitude: _latitude,
+      longitude: _longitude,
+      createdAt: DateTime.now(),
+      isPendingSubmit: true,
+    );
 
-    if (isReplyItem) {
-      _enableSelling = false;
-      _enableTrading = false;
-    }
-
-    setState(() {});
+    await ItemService().saveDraft(draft);
   }
 
   // image
+
   Future<XFile?> _persistPickedImage(XFile imageFile) async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
@@ -266,7 +352,6 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       await File(imageFile.path).copy(savedPath);
       return XFile(savedPath);
     } catch (e) {
-      debugPrint("Persist image error: $e");
       return null;
     }
   }
@@ -275,29 +360,24 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     try {
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 85, // optional compression
+        imageQuality: 85,
       );
 
       if (photo != null) {
         final persisted = await _persistPickedImage(photo);
         if (persisted == null) return;
-        debugPrint("Captured image: ${persisted.path}");
         setState(() {
           _images.add(persisted);
         });
-      } else {
-        debugPrint("Camera cancelled");
       }
     } catch (e) {
-      debugPrint("Camera error: $e");
+      log("Camera error: $e");
     }
   }
 
   Future<void> _pickImage() async {
     try {
       final List<XFile> selectedImages = await _picker.pickMultiImage();
-
-      debugPrint("Gallery images: ${selectedImages.length}");
 
       if (selectedImages.isNotEmpty) {
         final persistedImages = <XFile>[];
@@ -312,7 +392,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Gallery error: $e");
+      log("Gallery error: $e");
     }
   }
 
@@ -367,12 +447,54 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           .from('items')
           .getPublicUrl(fileName);
     } catch (e) {
-      debugPrint('Upload error: $e');
+      log('Upload error: $e');
       return null;
     }
   }
 
+  Widget _buildPreviewImage(
+      String path, {
+        double? width,
+        double? height,
+        BoxFit fit = BoxFit.cover,
+      }) {
+    final file = File(path);
+    if (file.existsSync()) {
+      return Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    if (path.startsWith('http')) {
+      return Image.network(
+        path,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, __, ___) =>
+        const Icon(Icons.broken_image, size: 50),
+      );
+    }
+
+    return const Icon(Icons.broken_image, size: 50);
+  }
+
   // location
+
+  void checkStatus() async {
+    bool permissionGranted = await isPermissionGranted();
+    bool gpsEnabled = await isGpsEnabled();
+    setState(() {
+      _permissionGranted = permissionGranted;
+      _gpsEnabled = gpsEnabled;
+    });
+  }
+
   Future<List<dynamic>> _searchPlaces(String query) async {
     try {
       final url = Uri.https("nominatim.openstreetmap.org", "/search", {
@@ -392,14 +514,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       if (response.statusCode == 200) {
         return json.decode(response.body);
-      } else {
-        debugPrint(
-          "Nominatim search error: ${response.statusCode} ${response.body}",
-        );
-        return [];
       }
+      return [];
     } catch (e) {
-      debugPrint("Search error: $e");
+      log("Search error: $e");
       return [];
     }
   }
@@ -447,7 +565,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         return data["display_name"] ?? "Unknown location";
       }
     } catch (e) {
-      debugPrint("Reverse geocode error: $e");
+      log("Reverse geocode error: $e");
     }
     return "Unknown location";
   }
@@ -510,100 +628,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
-  void checkStatus() async {
-    bool permissionGranted = await isPermissionGranted();
-    bool gpsEnabled = await isGpsEnabled();
-    setState(() {
-      _permissionGranted = permissionGranted;
-      _gpsEnabled = gpsEnabled;
-    });
-  }
-
-  // draft
-
-  void _onDraftChanged() {
-    if (_skipDraftAutosave) return;
-    if (_draftDebounce?.isActive ?? false) {
-      _draftDebounce!.cancel();
-    }
-
-    _draftDebounce = Timer(const Duration(milliseconds: 800), () {
-      _saveDraft();
-    });
-  }
-
-  Future<void> _saveDraft() async {
-    if (_skipDraftAutosave) return;
-
-    final hasContent =
-        _nameCtrl.text.trim().isNotEmpty ||
-        _descCtrl.text.trim().isNotEmpty ||
-        _priceCtrl.text.trim().isNotEmpty ||
-        _prefCtrl.text.trim().isNotEmpty ||
-        _addressCtrl.text.trim().isNotEmpty ||
-        _selectedCategory != null ||
-        _existingImageUrls.isNotEmpty ||
-        _images.isNotEmpty ||
-        _latitude != null ||
-        _longitude != null;
-
-    if (!hasContent) {
-      await ItemService().clearDraft();
-      return;
-    }
-
-    final draft = ItemDraft(
-      id: 1,
-      name: _nameCtrl.text.trim(),
-      description: _descCtrl.text.trim(),
-      price: double.tryParse(_priceCtrl.text.trim()),
-      listingType: _enableSelling && _enableTrading
-          ? 'both'
-          : _enableSelling
-          ? 'sell'
-          : 'trade',
-      ownerId: user!.id,
-      category: _selectedCategory,
-      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
-      preference: _prefCtrl.text.trim(),
-      repliedTo: repliedTo,
-      address: _addressCtrl.text.trim(),
-      latitude: _latitude,
-      longitude: _longitude,
-      createdAt: DateTime.now(),
-      isPendingSubmit: false,
-    );
-
-    await ItemService().saveDraft(draft);
-  }
-
-  Future<void> _savePendingSubmitDraft() async {
-    if (isReplyItem) return;
-
-    final draft = ItemDraft(
-      id: 1,
-      name: _nameCtrl.text.trim(),
-      description: _descCtrl.text.trim(),
-      price: double.tryParse(_priceCtrl.text.trim()),
-      listingType: _enableSelling && _enableTrading
-          ? 'both'
-          : _enableSelling
-          ? 'sell'
-          : 'trade',
-      ownerId: user!.id,
-      category: _selectedCategory,
-      imageUrls: [..._existingImageUrls, ..._images.map((image) => image.path)],
-      preference: _prefCtrl.text.trim(),
-      repliedTo: repliedTo,
-      address: _addressCtrl.text.trim(),
-      latitude: _latitude,
-      longitude: _longitude,
-      createdAt: DateTime.now(),
-      isPendingSubmit: true,
-    );
-
-    await ItemService().saveDraft(draft);
-  }
+  // save
 
   Future<void> _saveItem() async {
     final isValid = _formKey.currentState?.validate() ?? false;
@@ -636,7 +661,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         if (await File(img.path).exists()) {
           validLocalImages.add(img);
         } else {
-          debugPrint('Missing local draft image: ${img.path}');
+          log('Missing local draft image: ${img.path}');
         }
       }
 
@@ -650,9 +675,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         final url = await _uploadImage(img);
         if (url != null) {
           finalImageUrls.add(url);
-          debugPrint('Upload success: $url');
+          log('Upload success: $url');
         } else {
-          debugPrint('Upload failed for image at path: ${img.path}');
+          log('Upload failed for image at path: ${img.path}');
           failedImagePaths.add(img.path);
         }
       }
@@ -773,7 +798,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       for (var img in _images) {
         final file = File(img.path);
         if (await file.exists()) {
-          await file.delete(); // Clean up permanent storage
+          await file.delete();
         }
       }
       _images.clear();
@@ -1391,36 +1416,4 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     );
   }
 
-  Widget _buildPreviewImage(
-      String path, {
-        double? width,
-        double? height,
-        BoxFit fit = BoxFit.cover,
-      }) {
-    final file = File(path);
-    if (file.existsSync()) {
-      return Image.file(
-        file,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (_, __, ___) =>
-        const Icon(Icons.broken_image, size: 50),
-      );
-    }
-
-    // fallback (rare)
-    if (path.startsWith('http')) {
-      return Image.network(
-        path,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (_, __, ___) =>
-        const Icon(Icons.broken_image, size: 50),
-      );
-    }
-
-    return const Icon(Icons.broken_image, size: 50);
-  }
 }

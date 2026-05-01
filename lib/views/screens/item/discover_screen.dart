@@ -7,10 +7,8 @@ import 'package:bubble_tab_indicator/bubble_tab_indicator.dart';
 import 'package:swaply/models/item_listing.dart';
 import 'package:swaply/repositories/users_repository.dart';
 import 'package:swaply/views/screens/auth/login_screen.dart';
-import '../../../core/utils/app_snack_bars.dart';
 import '../../../models/app_user.dart';
 import '../../../services/item_service.dart';
-import '../../../services/network_service.dart';
 import 'item_detail_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
@@ -558,10 +556,64 @@ class _ItemCardState extends State<ItemCard> {
     super.initState();
     _ownerFuture = UsersRepository().getById(widget.item.ownerId);
   }
+  Widget _buildImage(String url) {
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        height: 150,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        height: 120,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+      );
+    }
+    return Image.file(
+      File(url),
+      height: 120,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
+    );
+  }
 
-  void _showNetworkError() {
-    if (!mounted) return;
-    AppSnackBars.error(context, 'You seem to be offline. Please check your internet and try again.');
+  Future<void> _toggleFavourite() async {
+    if (widget.user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    final previousState = widget.item.isFavorite;
+    setState(() {
+      widget.item.isFavorite = !previousState;
+    });
+
+    try {
+      final newState = await ItemService().toggleFavourite(
+        widget.item.id,
+        widget.user!.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        widget.item.isFavorite = newState;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        widget.item.isFavorite = previousState;
+      });
+      log("Favourite error: $e");
+    }
   }
 
   @override
@@ -581,8 +633,6 @@ class _ItemCardState extends State<ItemCard> {
         );
         if (!mounted) return;
 
-        // Refresh the card UI when returning from details screen
-        // widget.item is updated inside ItemDetailsScreen
         setState(() {});
 
         if (widget.onRefresh != null) {
@@ -620,7 +670,6 @@ class _ItemCardState extends State<ItemCard> {
                         ),
                 ),
 
-                /// PRICE & TRADE TAGS
                 Positioned(
                   top: 10,
                   left: 10,
@@ -747,63 +796,4 @@ class _ItemCardState extends State<ItemCard> {
     );
   }
 
-  Widget _buildImage(String url) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        height: 150,
-        width: double.infinity,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    if (url.startsWith('assets/')) {
-      return Image.asset(
-        url,
-        height: 120,
-        width: double.infinity,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
-      );
-    }
-    return Image.file(
-      File(url),
-      height: 120,
-      width: double.infinity,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 50),
-    );
-  }
-
-  Future<void> _toggleFavourite() async {
-    if (widget.user == null) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-      return;
-    }
-
-    final previousState = widget.item.isFavorite;
-    setState(() {
-      widget.item.isFavorite = !previousState;
-    });
-
-    try {
-      final newState = await ItemService().toggleFavourite(
-        widget.item.id,
-        widget.user!.id,
-      );
-      if (!mounted) return;
-      setState(() {
-        widget.item.isFavorite = newState;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        widget.item.isFavorite = previousState;
-      });
-      log("Favourite error: $e");
-    }
-  }
 }

@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-
 import '../models/item_draft.dart';
 import '../models/item_listing.dart';
 import '../repositories/favourite_repository.dart';
@@ -106,16 +105,14 @@ class ItemService {
 
       final file = File(filePath);
 
-      // ✅ If already cached → reuse
       if (await file.exists()) {
         return filePath;
       }
 
-      // Ensure directory exists
       await Directory('${dir.path}/cached_images')
           .create(recursive: true);
 
-      // Download
+      // download image
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
@@ -125,7 +122,7 @@ class ItemService {
         throw Exception('Failed to download image');
       }
     } catch (e) {
-      return url; // fallback to original URL if anything fails
+      return url;
     }
   }
 }
