@@ -10,7 +10,6 @@ class ProfileService {
   static const String _storageBucket = 'profile';
   static final ImagePicker _imagePicker = ImagePicker();
 
-  /// Pick an image from camera
   static Future<File?> pickImageFromCamera() async {
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
@@ -24,7 +23,6 @@ class ProfileService {
     }
   }
 
-  /// Pick an image from gallery
   static Future<File?> pickImageFromGallery() async {
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
@@ -38,7 +36,6 @@ class ProfileService {
     }
   }
 
-  /// Upload image to Supabase Storage and update user profile
   static Future<String?> uploadProfilePicture(
     File imageFile,
     String userId,
@@ -47,7 +44,6 @@ class ProfileService {
       final filePath = '$userId/profile.jpg';
       final fileBytes = await imageFile.readAsBytes();
 
-      // Upload to storage
       await SupabaseService.client.storage
           .from(_storageBucket)
           .uploadBinary(
@@ -56,12 +52,10 @@ class ProfileService {
             fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
           );
 
-      // Get public URL
       final publicUrl = SupabaseService.client.storage
           .from(_storageBucket)
           .getPublicUrl(filePath);
 
-      // Update user profile in database
       await SupabaseService.client
           .from('users')
           .update({'profile_image': publicUrl})

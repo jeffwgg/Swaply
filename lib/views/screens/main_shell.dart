@@ -6,7 +6,6 @@ import '../../repositories/users_repository.dart';
 import '../../repositories/items_repository.dart';
 import '../widgets/common/bottom_nav_bar.dart';
 import '../screens/home/home_screen.dart';
-
 import 'item/discover_screen.dart';
 import '../screens/chat/inbox_screen.dart';
 import '../screens/profile/profile_screen.dart';
@@ -179,7 +178,6 @@ class _MainShellState extends State<MainShell> {
       return;
     }
 
-    // ⏳ Email not verified (maybe can be deleted later)
     if (user.emailConfirmedAt == null) {
       showDialog(
         context: context,

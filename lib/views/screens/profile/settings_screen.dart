@@ -6,7 +6,6 @@ import 'change_password_screen.dart';
 import 'help_center_screen.dart';
 import 'about_app_screen.dart';
 
-// logout put where
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -32,16 +31,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(20),
         children: [
 
-          // 👤 ACCOUNT
           _SectionTitle("Account"),
           _Tile(Icons.person, "Edit Profile", onTap: () async {
-            // Listen for profile update and pop with result
             final result = await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const EditProfileScreen()),
             );
-            
-            // If profile was updated, pass the result back to ProfileScreen
+
             if (result == true && mounted) {
               Navigator.pop(context, true);
             }
@@ -55,7 +51,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // ❓ SUPPORT
           _SectionTitle("Support"),
           _Tile(Icons.help_outline, "Help Center", onTap: () {
             Navigator.push(
@@ -72,13 +67,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 30),
 
-          // 🔴 LOGOUT
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text("Logout", style: TextStyle(color: Colors.red)),
             onTap: () async {
-              print("🔴 Logout clicked");
-
               bool? confirm = await showDialog(
                 context: context,
                 builder: (_) => AlertDialog(
@@ -99,13 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               if (confirm == true && mounted) {
                 try {
-                  // Perform logout immediately
-                  print("🔐 Signing out from Supabase...");
                   await SupabaseService.logout();
-
-                  print("✅ Logout successful!");
-
-                  // Clear all routes and navigate to login
                   if (mounted) {
                     Navigator.of(context).pushNamedAndRemoveUntil(
                       '/',
@@ -113,11 +99,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   }
                 } catch (e) {
-                  print("❌ Logout error: $e");
-
                   // Show error message
                   if (mounted) {
-                    AppSnackBars.error(context, '❌ Logout failed: $e');
+                    AppSnackBars.error(context, 'Logout failed: $e');
                   }
                 }
               }
@@ -129,7 +113,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-// 🔹 SECTION TITLE
 class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
@@ -149,7 +132,6 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-// 🔹 TILE
 class _Tile extends StatelessWidget {
   final IconData icon;
   final String title;

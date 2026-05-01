@@ -27,7 +27,6 @@ class SwipeCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Image Section ─────────────────────────────────────
           Expanded(
             flex: 3,
             child: ClipRRect(
@@ -36,7 +35,6 @@ class SwipeCard extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   _buildImage(),
-                  // Gradient overlay at bottom
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -72,7 +70,6 @@ class SwipeCard extends StatelessWidget {
             ),
           ),
 
-          // ── Info Section ──────────────────────────────────────
           Expanded(
             flex: 2,
             child: Padding(
